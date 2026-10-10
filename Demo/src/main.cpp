@@ -2,6 +2,8 @@
 
 int main()
 {
+  const Jade::Log::Logger cameraLog{"Camera"};
+  const Jade::Log::Logger rendererLog{"Renderer"};
   constexpr float moveSpeed = 3.0f;
   constexpr float fastMoveSpeed = 6.0f;
   constexpr float slowMoveSpeed = 1.0f;
@@ -105,18 +107,19 @@ int main()
     Jade::Motion::zoom(lens, mouse.dy * zoomSensitivity);
   });
 
-  app.on<Jade::KeyPressed<"o">>([&lens] {
+  app.on<Jade::KeyPressed<"o">>([&lens, &cameraLog] {
     const auto projection = lens.projection == Jade::Projection::Perspective
       ? Jade::Projection::Orthographic : Jade::Projection::Perspective;
     lens.projection = projection;
-    Jade::Log::Info(projection == Jade::Projection::Perspective
-      ? "Camera: Perspective" : "Camera: Orthographic");
+    cameraLog << Jade::Log::info("Projection: {}",
+      projection == Jade::Projection::Perspective ? "Perspective" : "Orthographic");
   });
 
   // Press F once to toggle wireframe; Escape closes the window by default.
-  app.on<Jade::KeyPressed<"f">>([&app, &wireframe] {
+  app.on<Jade::KeyPressed<"f">>([&app, &wireframe, &rendererLog] {
     wireframe = !wireframe;
     app.setWireframe(wireframe);
+    rendererLog << Jade::Log::info("Wireframe: {}", wireframe ? "on" : "off");
   });
 
   app.Run();

@@ -42,6 +42,78 @@ Headers work independently. No folder aggregation header or legacy Object compat
 
 Each maintained .cpp includes its corresponding private .hpp first; CMake lists every source explicitly. Data-only headers need no empty .cpp. Core/World.hpp includes no graphics or platform dependency. Public template operations use type-erased bridges implemented in Core and Assets.
 
+## Logging
+
+The public `Jade/Log.hpp` exposes one `Jade::Log` API: Logger, Entry, Level, Config,
+Record, Configure, SetLevel, Enabled, lowercase severity factories and Flush.
+Each Logger owns a category name and shares output configuration; const insertion
+reads that name without modifying the Logger.
+`logger << info(...)` consumes an owning, move-only Entry; chaining is supported.
+Move construction/assignment transfers the entry's ability to emit, and insertion
+consumes it even if the current threshold filters it. Entries never emit from a
+destructor. The previous Info/Error helpers and public Write API are removed
+without compatibility wrappers or implicit default categories. C++20 format
+templates bridge to `src/Core/Log.cpp`; backend state, locking and I/O stay private.
+
+Logging uses process-wide configuration rather than Application ownership so GLFW
+initialization errors, multiple windows and repeated Runs share the same policy.
+Defaults enable terminal output from Debug upward in both build configurations; an append-only file and one
+structured callback are optional. Application controls use category Application,
+backend diagnostics use OpenGL/GLFW, and file loads/errors use Assets. Application
+logs readiness and Run lifecycle at Info, with an Error record on exception abort.
+Its constructor does not overwrite an explicit process-wide logging configuration.
+
+EventDispatcher uses Events for Debug subscription/cancellation records and
+key/button edges. Trace covers Held, cursor, scroll and FrameUpdate. One shared
+dispatch implementation preserves snapshots, exact matching and ordered
+propagation while counting invoked handlers and identifying consumption by a
+dispatcher-local subscription ID. Callback failures emit Error with binding and
+exception reason before rethrowing the original exception. Cancellation records
+are emitted after the next prune removes inactive slots; handles stay immediate
+and noexcept. Logging never holds a live container iterator across a sink call.
+Events diagnostics obey the global threshold independently of logPerformance.
+
+ApplicationConfig.logPerformance replaces logFrames, defaults to true and controls
+performance diagnostics. The allocation-free internal FrameDiagnostics aggregates
+one-second windows and reports Debug summaries under Performance. It keeps frame
+intervals (including pacing) separate from work wall time (held/update callbacks
+through present, excluding the explicit pacing wait). GPU timing is not inferred.
+Trace emits individual frames under Frame only when explicitly enabled. Hitches
+exceeding max(100 ms, three target periods) emit at Warn at most once per second.
+Each Run resets measurements; minimizing drops the previous interval and summary
+window, excluding suspension and first-frame warmup. Scheduler counters remain
+internal and tested rather than being printed on each frame.
+
+Assets emits Debug load records only after successful cache publication. Errors
+carry the path and exception message and are rethrown; path conversion for a log
+cannot invalidate a successfully loaded asset or mask its original failure.
+
+Output follows `HH:MM:SS.ffffff LEVEL [Logger] - message` using local time and
+six-digit microseconds; severity is right-aligned to five columns. Console colors
+are enabled only for native terminal streams, using GetConsoleMode/SetConsoleMode
+on Windows and isatty on POSIX. Replaced C++ stream buffers, redirected files/pipes,
+nonempty NO_COLOR and TERM=dumb disable color. Timestamps are gray and severity
+colors reset before the category/message. File output always uses the plain format.
+
+An atomic threshold avoids formatting disabled entries at creation. Entries format
+and own their payload immediately; insertion rechecks the threshold, then captures
+the record timestamp and Logger name. Filtered entries cannot be revived by a later
+threshold change. A mutex serializes the
+built-in outputs and configuration changes. A callback snapshot runs outside the
+mutex; concurrent callbacks may overlap and arrive in a different order from file
+lines. Per-thread recursion suppression permits callback logging without invoking
+it again. Records own strings so consumers can copy them into a future editor
+console. Sink/format/output exceptions are contained by the logging boundary;
+configuration errors propagate before replacing state. Flush applies to built-in
+outputs, and Error/Fatal flush the file immediately. Fatal does not abort.
+
+The imported `.temp/log` implementation is reference material only. Its two APIs,
+SDK bridge, destructor-driven emission, asynchronous queue, route tables, scope
+propagation, subscription registries, queue metrics and runtime config parser are
+not part of Jade. The synchronous design is sufficient for the current frame and
+startup diagnostics; buffering can be added privately if measured I/O costs justify
+it, with explicit queue capacity, overflow and shutdown policies at that time.
+
 ## World ownership and query semantics
 
 World owns one private Registry with generation-bearing slots, free indices and type-indexed component pools. Entity contains a weak Registry reference plus slot index/generation. Its 64-bit id packs generation above index, unique within its World. Equality includes the owner. Reuse increments generation; exhausted generations retire the slot. Default, destroyed and expired handles cannot access data. Foreign World destruction is rejected.

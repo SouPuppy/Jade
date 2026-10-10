@@ -7,8 +7,11 @@
 #include <Jade/Events/MouseMoved.hpp>
 #include <Jade/Events/MouseScrolled.hpp>
 
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Jade::Detail {
@@ -34,6 +37,8 @@ public:
 
 private:
   struct Slot {
+    std::size_t id = 0;
+    std::string binding;
     std::shared_ptr<bool> active = std::make_shared<bool>(true);
     KeyAction action = KeyAction::Pressed;
     KeyChord chord;
@@ -46,8 +51,18 @@ private:
     ScrollHandler scrollHandler;
   };
 
+  struct DispatchResult {
+    EventFlow flow = EventFlow::Continue;
+    std::size_t handlers = 0;
+    std::size_t consumedBy = 0;
+  };
+
+  std::shared_ptr<bool> Add(std::shared_ptr<Slot> slot);
+  template<typename Matches, typename Invoke>
+  DispatchResult DispatchTo(std::string_view event, Matches matches, Invoke invoke);
   void Prune();
   std::vector<std::shared_ptr<Slot>> m_Slots;
+  std::size_t m_NextId = 1;
 };
 
 } // namespace Jade::Detail

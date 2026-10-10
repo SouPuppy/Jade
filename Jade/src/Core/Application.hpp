@@ -15,7 +15,7 @@ namespace Jade {
 struct Application::Impl {
   Color clearColor;
   std::uint32_t frameLimits;
-  bool logFrames;
+  bool logPerformance;
   bool axisGizmo;
   bool running = false;
   bool stopRequested = false;
@@ -29,7 +29,7 @@ struct Application::Impl {
   explicit Impl(const ApplicationConfig& config)
     : clearColor(config.clearColor),
       frameLimits(config.frameLimits),
-      logFrames(config.logFrames),
+      logPerformance(config.logPerformance),
       axisGizmo(config.axisGizmo),
       window(config.window),
       renderer(window, config.vsync)

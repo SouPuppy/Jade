@@ -139,6 +139,44 @@ Dispatch snapshots shared slots. A callback registered during dispatch starts wi
 
 User callback exceptions propagate from Run; its running-state guard restores the ability to run again. Calling Run recursively from a callback throws logic_error. Backend callback failures are captured and rethrown after GLFW polling/waiting, keeping exceptions inside Jade's C++ control flow.
 
+## Diagnostics
+
+The dispatcher uses the named `Events` Logger and the process-wide minimum level.
+Default Debug output records subscriptions, explicit cancellations observed during
+pruning, and KeyPressed/KeyReleased/MousePressed/MouseReleased dispatches. Each
+subscription receives a monotonically increasing ID within its dispatcher and a
+canonical binding such as `KeyPressed<C-S-W>` or `MouseReleased<Left>`.
+
+```text
+15:27:07.591522 DEBUG [Events] - Subscribed: id=1 binding=KeyPressed<C-S-W>
+15:27:08.591522 DEBUG [Events] - KeyPressed: binding=C-S-W handlers=1 consumed_by=1
+15:27:09.591522 DEBUG [Events] - Disconnected: id=1 binding=KeyPressed<C-S-W>
+```
+
+`handlers` counts callbacks actually invoked, excluding nonmatching, disconnected
+and skipped subscribers. `consumed_by` identifies the subscription returning
+EventFlow::Stop; zero means propagation continued. This uses the same level as
+the event, so a consumed FrameUpdate does not generate a per-frame Debug message.
+Dispatch records are emitted after successful callbacks, including unhandled input
+with zero handlers. Application default Escape/F3 actions run afterward.
+
+KeyHeld, MouseHeld, MouseMoved, MouseScrolled and FrameUpdate use Trace, including
+their relevant dt, position/deltas or frame index. Enable them explicitly with
+`Jade::Log::SetLevel(Jade::Log::Level::Trace)`; set Info to hide routine Events
+diagnostics. `ApplicationConfig::logPerformance` controls performance measurements,
+independently of Events logging.
+
+Callback failures emit Error with event, subscription ID, binding and exception
+message; non-standard exceptions are identified explicitly. The original exception
+is rethrown unchanged. If logging is Off, callbacks and exception propagation still
+run normally. Logging sinks run after container mutation or against shared snapshots,
+allowing connection/dispatch reentry under the same main-thread contract.
+
+disconnect() remains immediate and noexcept; its diagnostic is emitted when the
+next connection or dispatch prunes that slot. Repeated cancellation produces one
+record. Dropping a handle or destroying Application does not emit a disconnection
+record. Subscription IDs restart with each dispatcher and persist across Runs.
+
 ## Files and extension boundary
 
 Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Application.hpp adapts typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.

@@ -1,5 +1,7 @@
 #include "GlfwRuntime.hpp"
 
+#include <Jade/Log.hpp>
+
 #if defined(_WIN32) && JADE_USE_SOFTWARE_RENDERING
 #include <windows.h>
 #include <system_error>
@@ -7,13 +9,13 @@
 
 #include <GLFW/glfw3.h>
 
-#include <cstdio>
 #include <stdexcept>
 
 namespace Jade::Detail {
 namespace {
 
 unsigned int runtimeUsers = 0;
+const Log::Logger logger{"GLFW"};
 
 void ConfigureRenderingDriver()
 {
@@ -30,7 +32,7 @@ void ConfigureRenderingDriver()
 
 void OnGlfwError(int code, const char* message) noexcept
 {
-  std::fprintf(stderr, "[Jade] GLFW %d: %s\n", code,
+  logger << Log::error("Error {}: {}", code,
     message ? message : "Unknown error");
 }
 

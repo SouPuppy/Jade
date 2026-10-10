@@ -56,6 +56,7 @@ add_library(Jade STATIC
   src/Graphics/Mesh.hpp
   src/Graphics/Motion.hpp
   src/internal/Core/FrameClock.hpp
+  src/internal/Core/FrameDiagnostics.hpp
   src/internal/Core/Registry.hpp
   src/internal/Events/EventDispatcher.hpp
   src/internal/Input/InputState.hpp

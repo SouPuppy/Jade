@@ -7,3 +7,5 @@
 *.vcxproj.user
 *.suo
 *.user
+
+.temp/

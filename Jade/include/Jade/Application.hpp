@@ -25,7 +25,9 @@ struct ApplicationConfig {
   Color clearColor;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
-  bool logFrames = true;
+  // Debug summaries once per second, rate-limited hitch warnings and optional
+  // per-frame Trace. Work time excludes the explicit frame-pacing wait.
+  bool logPerformance = true;
   // Unit XYZ axes at the world origin, visible over objects. F3 toggles them.
   bool axisGizmo = true;
 };

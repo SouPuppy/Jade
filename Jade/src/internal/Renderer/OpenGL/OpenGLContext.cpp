@@ -5,9 +5,13 @@
 #include <GLFW/glfw3.h>
 
 #include <stdexcept>
-#include <string>
 
 namespace Jade::Detail {
+namespace {
+
+const Log::Logger logger{"OpenGL"};
+
+} // namespace
 
 OpenGLContext::OpenGLContext(GLFWwindow* window, bool vsync)
   try
@@ -23,10 +27,10 @@ OpenGLContext::OpenGLContext(GLFWwindow* window, bool vsync)
   }
 
   glfwSwapInterval(vsync ? 1 : 0);
-  Log::Info("OpenGL: " + std::string(
-    reinterpret_cast<const char*>(glGetString(GL_VERSION))));
-  Log::Info("Renderer: " + std::string(
-    reinterpret_cast<const char*>(glGetString(GL_RENDERER))));
+  const auto* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+  const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+  logger << Log::info("Version: {}", version ? version : "Unknown");
+  logger << Log::info("Renderer: {}", renderer ? renderer : "Unknown");
 }
 catch (...) {
   // A throwing constructor has no destructor. Release the binding even if

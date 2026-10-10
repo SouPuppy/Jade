@@ -53,7 +53,7 @@ TEST(Components, DataIsValidatedWhenConsumed)
 TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
 {
   Jade::ApplicationConfig config;
-  config.window.visible = false; config.logFrames = false;
+  config.window.visible = false; config.logPerformance = false;
   config.window.width = 160; config.window.height = 120;
   Jade::Application app(config);
   const auto initial = app.camera();

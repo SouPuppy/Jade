@@ -158,6 +158,14 @@ Keys are case-insensitive, including Space, arrows, letters, digits, F1-F12 and 
 
 Motion translation/rotation takes Transform; zoom takes Camera. Movement defaults to 0.1 units per call. Forward/right follow local axes; up/down follow world Y. Positive wheel offsets magnify the active lens parameter, keeping pose and clipping planes intact. O changes `lens.projection`, retaining both modes' zoom values.
 
+The `Events` Logger records subscription/cancellation and key/button edges at Debug.
+Dispatch records include canonical bindings, the number of handlers actually called
+and the consuming subscription ID (`consumed_by=0` means continued propagation).
+Held, cursor, scroll and FrameUpdate details use Trace. Callback failures use Error
+with the subscription and original exception message, then rethrow unchanged.
+Explicit cancellation is logged when the next connection/dispatch prunes it.
+Events follows the global logging threshold independently of `logPerformance`.
+
 ## Public headers
 
 Public interfaces are split by purpose, with one optional includes-only entry point, Jade.hpp:
@@ -178,10 +186,103 @@ There are no folder aggregation headers. Source `.cpp` files include their match
 `config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. VSync defaults to false and may further constrain the achieved rate. `app.setWireframe(bool)` changes triangle rasterization; unit world axes default on and draw over meshes without writing depth.
 
 ```text
-[Jade] elapsed=1.044s second=2 frame=26 frame_in_second=2 fps=24.0 frame_limits=24
+15:27:07.591522  INFO [Application] - Ready: window=960x640 target_fps=24 vsync=off
+15:27:07.592123 DEBUG [Assets] - Loaded mesh: path=assets/bunny.obj vertices=453 triangles=948 duration=1.20ms
+15:27:07.593456  INFO [Application] - Run started
+15:27:08.635123 DEBUG [Performance] - fps=24.0 interval_avg=41.67ms interval_max=44.31ms work_avg=2.10ms work_max=5.30ms
 ```
 
-Logs show elapsed time, one-based second bucket, total frame index, frame index within that second, measured FPS and configured rate. First-frame measured FPS is 0. Set `config.logFrames = false` to disable logs. Minimized windows skip submitted frames and reset dt on restoration. Each Run resets timing and retains World, Assets and subscriptions. `RunOptions::frameLimit` limits total submitted frames independently of FPS; `validateRendering` checks the clear before drawing.
+Application records readiness, Run start/stop and exception aborts; Assets records
+successful file loads at Debug and failures at Error while preserving exceptions.
+Cache hits do not repeat successful load messages. Axis Gizmo, camera projection
+and Demo wireframe changes are event logs. Each Run resets timing and retains World,
+Assets and subscriptions. `RunOptions::frameLimit` limits total submitted frames
+independently of FPS; `validateRendering` checks the clear before drawing.
+
+`ApplicationConfig::logPerformance` defaults to true. A completed one-second
+measurement window emits one Debug summary with FPS, average/maximum frame interval
+and average/maximum work time. Interval includes frame pacing; work measures wall
+time from held/update callbacks through presentation, excluding the explicit
+frame-pacing wait. Work can include blocking presentation and is not a GPU timer.
+The first frame warms up measurement; no zero-FPS or partial final summary is emitted.
+Minimized windows reset the measurement window so suspended time is not a hitch.
+
+A frame interval exceeding both 100 ms and three target frame periods emits a Warn
+hitch message, limited to one per second. Small scheduling variations near the cap
+are not warnings. Trace verbosity additionally enables per-frame index/interval/work
+messages. Set `config.logPerformance = false` to disable all performance diagnostics;
+use `Log::SetLevel(Log::Level::Info)` to keep lifecycle/resource errors and hide
+Debug summaries, or `Level::Trace` to explicitly inspect individual frames.
+The old `logFrames` field and per-frame Info counters are removed.
+
+This follows the event-oriented output described in the
+[Unity Console documentation](https://docs.unity3d.com/6000.0/Documentation/Manual/Console.html)
+and the optional once-per-second FPS output in
+[Godot's logging documentation](https://docs.godotengine.org/en/stable/tutorials/scripting/logging.html).
+
+`Jade::Log` defaults to synchronous terminal output at Debug and above. Trace, Debug,
+Info, Warn, Error and Fatal share process-wide output configuration, independent of Application
+lifetime. Error/Fatal go to stderr; other levels go to stdout. Every line includes
+local time with six fractional digits (microseconds), a right-aligned five-character
+severity and the Logger category. Fatal logs without terminating the process.
+Supported terminals receive a gray timestamp and severity colors (dim Trace,
+cyan Debug, green Info, yellow Warn, red Error, bold red Fatal). Windows console
+ANSI processing is enabled when supported. Redirected streams and log files stay
+plain text; a nonempty `NO_COLOR` or `TERM=dumb` also disables console colors.
+
+```cpp
+#include <Jade/Log.hpp>
+
+Jade::Log::Config logging;
+logging.minimumLevel = Jade::Log::Level::Debug;
+logging.file = "jade.log"; // Append; parent directories must already exist.
+Jade::Log::Configure(logging);
+
+const Jade::Log::Logger logger{"Assets"};
+logger << Jade::Log::info("Loaded {} vertices", 453);
+logger << Jade::Log::warn("Missing mesh: {}", "bunny.obj");
+Jade::Log::SetLevel(Jade::Log::Level::Warn);
+Jade::Log::Flush();
+```
+
+Each Logger owns its category name. The lowercase `trace`, `debug`, `info`, `warn`,
+`error` and `fatal` functions create owning, move-only Entries; `logger << entry`
+consumes and writes one entry. Chaining is supported. Creation and destruction
+never write logs, and moved-from or consumed entries cannot emit again. There is
+no default main logger, standalone automatic output, public Write function or
+compatibility API.
+
+Messages with arguments use C++20 `std::format` syntax and compile-time format
+checks. `info(message)` and the other single-message helpers accept runtime
+strings and preserve literal braces. Entries format immediately when created,
+skipping disabled levels; insertion checks the current threshold again. A filtered
+entry cannot become active later. C++ still evaluates arguments before the helper
+call; use `Enabled` before computing expensive arguments. `Level::Off` disables
+logging. Performance summaries use Debug, hitch warnings use Warn, and individual
+frames use Trace; all obey `logPerformance` and the logger's minimum level.
+
+```cpp
+const Jade::Log::Logger renderer{"Renderer"};
+renderer << Jade::Log::debug("FPS: {:.1f}", 60.0)
+         << Jade::Log::info("Ready");
+
+auto entry = Jade::Log::warn("Delayed message");
+renderer << std::move(entry); // Explicitly emit a stored entry once.
+```
+
+`Config::console`, `file` and `sink` independently control the destinations. A sink
+receives a `const Record&` containing an owning category/message and timestamp; copy
+it to retain it. Callbacks run synchronously outside the output lock, can run
+concurrently, and must synchronize shared state. Nested logging writes to the
+console/file without invoking the sink again. Replacing a sink allows callbacks
+already in progress to finish; stop producers before destroying their captured
+state. File/console writes are serialized, while callback order across threads is
+unspecified. `Flush` flushes built-in outputs; Error/Fatal also flush the file.
+
+`Configure()` restores defaults and closes the previous file. A failed file open
+throws and preserves the existing configuration. Formatting, output and sink
+failures during logging are reported to stderr without escaping into engine code.
+There are no logging dependencies, worker threads or automatic configuration files.
 
 ## Dependencies and runtime
 

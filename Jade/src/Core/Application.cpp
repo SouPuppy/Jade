@@ -1,20 +1,26 @@
 #include "Application.hpp"
 
 #include "../internal/Core/FrameClock.hpp"
+#include "../internal/Core/FrameDiagnostics.hpp"
 #include "../internal/Math/Validation.hpp"
 #include "../internal/Renderer/RenderSystem.hpp"
 
 #include <Jade/Log.hpp>
 
 #include <cmath>
-#include <iomanip>
-#include <locale>
+#include <exception>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <variant>
 
 namespace Jade {
+namespace {
+
+const Log::Logger applicationLog{"Application"};
+const Log::Logger frameLog{"Frame"};
+const Log::Logger performanceLog{"Performance"};
+
+} // namespace
 
 Application::Application(const ApplicationConfig& config)
 {
@@ -23,6 +29,8 @@ Application::Application(const ApplicationConfig& config)
   }
   Detail::Validate(config.clearColor);
   m_Impl = std::make_unique<Impl>(config);
+  applicationLog << Log::info("Ready: window={}x{} target_fps={} vsync={}",
+    config.window.width, config.window.height, config.frameLimits, config.vsync ? "on" : "off");
 }
 
 Application::~Application() = default;
@@ -93,16 +101,31 @@ void Application::Run(const RunOptions& options)
   }
   m_Impl->running = true;
   m_Impl->stopRequested = false;
-  struct RunGuard {
-    bool& running;
-    ~RunGuard() { running = false; }
-  } guard{m_Impl->running};
-
   using Clock = Detail::FrameClock::Clock;
   const auto start = Clock::now();
-  Detail::FrameClock frameClock(m_Impl->frameLimits, start);
-  std::optional<Clock::time_point> previousFrame;
   std::uint64_t frames = 0;
+  struct RunGuard {
+    bool& running;
+    const std::uint64_t& frames;
+    Clock::time_point start;
+    std::string_view reason = "window_closed";
+    int exceptions = std::uncaught_exceptions();
+    ~RunGuard()
+    {
+      running = false;
+      const double elapsed = std::chrono::duration<double>(Clock::now() - start).count();
+      if (std::uncaught_exceptions() > exceptions) {
+        applicationLog << Log::error("Run aborted by exception: frames={} elapsed={:.2f}s", frames, elapsed);
+      } else {
+        applicationLog << Log::info("Run stopped: frames={} elapsed={:.2f}s reason={}", frames, elapsed, reason);
+      }
+    }
+  } guard{m_Impl->running, frames, start};
+
+  applicationLog << Log::info("Run started");
+  Detail::FrameClock frameClock(m_Impl->frameLimits, start);
+  Detail::FrameDiagnostics diagnostics(m_Impl->frameLimits);
+  std::optional<Clock::time_point> previousFrame;
 
   while (!m_Impl->window.ShouldClose() && !m_Impl->stopRequested) {
     m_Impl->window.PollEvents();
@@ -117,7 +140,7 @@ void Application::Run(const RunOptions& options)
             && key->event.modifiers == Modifiers::None
             && flow == EventFlow::Continue && !m_Impl->stopRequested) {
           setAxisGizmo(!axisGizmoEnabled());
-          Log::Info(axisGizmoEnabled() ? "Axis Gizmo: on" : "Axis Gizmo: off");
+          applicationLog << Log::info("Axis Gizmo: {}", axisGizmoEnabled() ? "on" : "off");
         }
       } else if (const auto* mouse = std::get_if<Detail::MouseTransition>(&transition)) {
         m_Impl->events.Dispatch(mouse->action, mouse->event);
@@ -139,6 +162,7 @@ void Application::Run(const RunOptions& options)
       m_Impl->window.WaitEvents(0.05);
       frameClock.Resume(Clock::now());
       previousFrame.reset();
+      diagnostics.Resume();
       continue;
     }
 
@@ -193,17 +217,24 @@ void Application::Run(const RunOptions& options)
     Detail::RenderSystem::Render(m_Impl->world, m_Impl->assets, m_Impl->activeCamera,
       m_Impl->renderer, size, m_Impl->axisGizmo);
     m_Impl->renderer.Present();
-    const auto stats = frameClock.FinishFrame(Clock::now());
+    const auto completed = Clock::now();
+    const auto stats = frameClock.FinishFrame(completed);
     frames = stats.frame;
-    if (m_Impl->logFrames) {
-      std::ostringstream message;
-      message.imbue(std::locale::classic());
-      message << std::fixed << std::setprecision(3)
-        << "elapsed=" << stats.elapsed << "s second=" << stats.second
-        << " frame=" << stats.frame << " frame_in_second=" << stats.frameInSecond
-        << std::setprecision(1) << " fps=" << stats.fps
-        << " frame_limits=" << m_Impl->frameLimits;
-      Log::Info(message.str());
+    if (m_Impl->logPerformance) {
+      const auto sample = diagnostics.FinishFrame(now, completed);
+      frameLog << Log::trace("frame={} interval={:.2f}ms work={:.2f}ms",
+        frames, sample.intervalMs, sample.workMs);
+      if (sample.hitch) {
+        performanceLog << Log::warn("Frame hitch: frame={} interval={:.2f}ms budget={:.2f}ms",
+          frames, sample.intervalMs, 1000.0 / m_Impl->frameLimits);
+      }
+      if (sample.summary) {
+        const auto& summary = *sample.summary;
+        performanceLog << Log::debug(
+          "fps={:.1f} interval_avg={:.2f}ms interval_max={:.2f}ms work_avg={:.2f}ms work_max={:.2f}ms",
+          summary.fps, summary.intervalAvgMs, summary.intervalMaxMs,
+          summary.workAvgMs, summary.workMaxMs);
+      }
     }
     if (options.frameLimit != 0 && frames >= options.frameLimit) {
       break;
@@ -212,6 +243,11 @@ void Application::Run(const RunOptions& options)
 
   if (options.frameLimit != 0 && frames != options.frameLimit && !m_Impl->stopRequested) {
     throw std::runtime_error("Application closed before the frame limit.");
+  }
+  if (m_Impl->stopRequested) {
+    guard.reason = "requested";
+  } else if (options.frameLimit != 0 && frames >= options.frameLimit) {
+    guard.reason = "frame_limit";
   }
 }
 

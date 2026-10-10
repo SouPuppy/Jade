@@ -1,5 +1,64 @@
 # Windows x64 Validation
 
+## Logger refactor
+
+Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja and C++20:
+
+| Configuration | Engine and Demo build | GoogleTest |
+| --- | --- | --- |
+| windows-debug | Passed without compiler warnings | 100/100 passed |
+| windows-release | Passed without compiler warnings | 100/100 passed |
+
+Twelve LogTests verify default stdout/stderr routing, raw braces and standard
+format specifiers, filtering before formatter invocation, Off, owning Logger names/records,
+append/flush behavior and ordered file replacement, failed file-open rollback,
+callback logging/Flush/Configure reentry, throwing callbacks/formatters and 400
+complete unique messages from four concurrent writers. The exception test
+intentionally emits four fallback error diagnostics. Default configuration exposes
+Debug and higher levels in both builds, with Trace suppressed.
+All maintained callers use named Logger objects with `logger << info/warn/error(...)`.
+The previous public Write API and uppercase Info/Error helpers are removed without
+compatibility wrappers. Entry tests verify that creation/destruction never emits,
+move construction/assignment transfers an owning payload, moved-from/consumed
+entries cannot emit twice, const Logger insertion supports chaining, and threshold
+changes do not revive filtered entries. Existing Logger objects observe output
+reconfiguration, and four threads write through the same named Logger.
+
+The format test fixes a local timestamp at `15:27:07.591522`, verifies six-digit
+microseconds including leading zeros, right-aligned levels and ANSI reset boundaries.
+Console-capture and file tests use the new
+`HH:MM:SS.ffffff LEVEL [Logger] - message` format and reject ANSI in plain outputs.
+A separately compiled LoggerTerminalProbe verified native Windows terminal
+handles and colors for all six levels through a PTY; redirected streams and the
+simultaneously written log file contained no ANSI escapes. The session initially
+sets NO_COLOR=1 and TERM=dumb, which correctly suppress colors; enabling terminal
+colors was tested by changing those variables only in the probe's launching shell.
+
+Four deterministic FrameDiagnostics tests check one-second summaries, separate
+frame intervals and work time, fresh windows, startup warm-up, scheduling jitter,
+hitch thresholds and cooldown, minimized-window reset and coincident completion
+times. Application integration checks paced repeated Runs, summary fields and
+frequency, explicit per-frame Trace, disabled diagnostics, lifecycle records,
+exception propagation/recovery, requested stop and preservation of an explicitly
+configured Info threshold. Asset logging checks one successful cache publication,
+quiet cache hits, load failures and preservation of the original exception/cache.
+The old logFrames option is removed; logPerformance enables these diagnostics.
+
+Five EventLogTests verify Debug binding/subscription/edge records, exact matching,
+handler counts and consuming subscription IDs; Trace-only high-frequency events;
+Info/Off filtering without suppressing callbacks or exception propagation;
+standard/non-standard callback errors and recovery; cancellation/registration
+snapshot semantics and once-only pruning records; and sink reentry during both
+registration and pruning. Existing InputTests still cover actual GLFW adapters,
+propagation, input queue order, Held timing and Application stop/resume behavior.
+
+Full-suite reports are `build/validation/windows-debug-logger-refactor.xml` and
+`build/validation/windows-release-logger-refactor.xml`. Debug/Release stdout/stderr
+is saved to `build/validation/windows-debug-logger-refactor.log` and
+`build/validation/windows-release-logger-refactor.log`. Demo was rebuilt
+in both configurations; manual Demo interaction was not repeated for this change.
+The following Entity/Assets section records the preceding 75-test baseline.
+
 ## Current Entity/Assets implementation
 
 Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja, C++20 and Mesa 26.2.4 llvmpipe:

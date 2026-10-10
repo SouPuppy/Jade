@@ -24,7 +24,7 @@ Jade::ApplicationConfig HiddenInputApplication()
   config.window.visible = false;
   config.window.width = 160;
   config.window.height = 120;
-  config.logFrames = false;
+  config.logPerformance = false;
   return config;
 }
 

@@ -2,6 +2,7 @@
 #include <Jade/Color.hpp>
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Math/Vector.hpp>
+#include <Jade/Log.hpp>
 
 #include "internal/Core/FrameClock.hpp"
 #include "internal/Platform/Window.hpp"
@@ -16,10 +17,8 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <iostream>
 #include <limits>
 #include <regex>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -28,31 +27,45 @@ namespace {
 
 class LogCapture final {
 public:
-  LogCapture() : m_Previous(std::cout.rdbuf(m_Output.rdbuf())) {}
-  ~LogCapture() { std::cout.rdbuf(m_Previous); }
+  explicit LogCapture(Jade::Log::Level level = Jade::Log::Level::Debug)
+  {
+    Jade::Log::Config config;
+    config.minimumLevel = level;
+    config.console = false;
+    config.sink = [this](const auto& record) { m_Records.push_back(record); };
+    Jade::Log::Configure(std::move(config));
+  }
+  ~LogCapture() { Jade::Log::Configure(); }
 
   LogCapture(const LogCapture&) = delete;
   LogCapture& operator=(const LogCapture&) = delete;
 
-  std::string Text() const { return m_Output.str(); }
-  void Reset() { m_Output.str(""); m_Output.clear(); }
+  std::vector<Jade::Log::Record> Records(std::string_view category,
+    Jade::Log::Level level) const
+  {
+    std::vector<Jade::Log::Record> result;
+    for (const auto& record : m_Records) {
+      if (record.category == category && record.level == level) result.push_back(record);
+    }
+    return result;
+  }
+  void Reset() { m_Records.clear(); }
 
 private:
-  std::ostringstream m_Output;
-  std::streambuf* m_Previous;
+  std::vector<Jade::Log::Record> m_Records;
 };
 
-std::vector<Jade::Detail::FrameStats> ParseFrames(const std::string& output)
+void CheckSummary(const Jade::Log::Record& record)
 {
   const std::regex pattern(
-    R"(\[Jade\] elapsed=([0-9.]+)s second=([0-9]+) frame=([0-9]+) frame_in_second=([0-9]+) fps=([0-9.]+) frame_limits=24)");
-  std::vector<Jade::Detail::FrameStats> frames;
-  for (auto it = std::sregex_iterator(output.begin(), output.end(), pattern);
-      it != std::sregex_iterator(); ++it) {
-    frames.push_back({std::stod((*it)[1]), std::stoull((*it)[2]),
-      std::stoull((*it)[3]), std::stoull((*it)[4]), std::stod((*it)[5])});
-  }
-  return frames;
+    R"(fps=([0-9.]+) interval_avg=([0-9.]+)ms interval_max=([0-9.]+)ms work_avg=([0-9.]+)ms work_max=([0-9.]+)ms)");
+  std::smatch values;
+  ASSERT_TRUE(std::regex_match(record.message, values, pattern));
+  EXPECT_GT(std::stod(values[1]), 0.0);
+  EXPECT_GT(std::stod(values[2]), 0.0);
+  EXPECT_GE(std::stod(values[3]), std::stod(values[2]));
+  EXPECT_GE(std::stod(values[4]), 0.0);
+  EXPECT_GE(std::stod(values[5]), std::stod(values[4]));
 }
 
 Jade::ApplicationConfig HiddenApplication()
@@ -68,10 +81,13 @@ Jade::ApplicationConfig HiddenApplication()
 
 TEST(Application, ThreeClearFrames)
 {
+  LogCapture capture(Jade::Log::Level::Trace);
   auto config = HiddenApplication();
-  config.logFrames = false;
+  config.logPerformance = false;
   Jade::Application app(config);
   EXPECT_NO_THROW(app.Run({ 3, true }));
+  EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
+  EXPECT_TRUE(capture.Records("Frame", Jade::Log::Level::Trace).empty());
 }
 
 TEST(Application, RejectsInvalidConfigurationBeforeCreatingAWindow)
@@ -138,6 +154,7 @@ TEST(FrameClock, MeasuresActualFPSAndResetsSecondCounters)
 
 TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
 {
+  LogCapture capture;
   auto config = HiddenApplication();
   Jade::Application app(config);
   auto entity = app.world().create();
@@ -148,36 +165,113 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   }
   EXPECT_EQ(&entity.get<Jade::Transform>(), address);
 
-  LogCapture capture;
+  const auto ready = capture.Records("Application", Jade::Log::Level::Info);
+  ASSERT_EQ(ready.size(), 1u);
+  EXPECT_NE(ready[0].message.find("target_fps=24 vsync=off"), std::string::npos);
+  capture.Reset();
+  std::vector<std::uint64_t> frames;
+  app.on<Jade::FrameUpdate>([&frames](const auto& event) { frames.push_back(event.frame); });
   const auto start = std::chrono::steady_clock::now();
   ASSERT_NO_THROW(app.Run({35, true}));
   const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   EXPECT_GE(elapsed, (34.0 / 24.0) * 0.85);
-  const auto frames = ParseFrames(capture.Text());
   ASSERT_EQ(frames.size(), 35u);
-  EXPECT_EQ(frames.front().frame, 1u);
-  EXPECT_DOUBLE_EQ(frames.front().fps, 0.0);
-  EXPECT_GE(frames.back().second, 2u);
   for (std::size_t index = 0; index < frames.size(); ++index) {
-    EXPECT_EQ(frames[index].frame, index + 1);
-    EXPECT_TRUE(std::isfinite(frames[index].fps));
-    EXPECT_GE(frames[index].fps, 0.0);
+    EXPECT_EQ(frames[index], index + 1);
+  }
+  const auto summaries = capture.Records("Performance", Jade::Log::Level::Debug);
+  ASSERT_FALSE(summaries.empty());
+  EXPECT_LT(summaries.size(), frames.size());
+  for (std::size_t index = 0; index < summaries.size(); ++index) {
+    CheckSummary(summaries[index]);
     if (index > 0) {
-      EXPECT_GE(frames[index].elapsed, frames[index - 1].elapsed);
-      const auto expected = frames[index].second == frames[index - 1].second
-        ? frames[index - 1].frameInSecond + 1 : 1;
-      EXPECT_EQ(frames[index].frameInSecond, expected);
+      EXPECT_GE(std::chrono::duration<double>(summaries[index].timestamp
+        - summaries[index - 1].timestamp).count(), 0.9);
     }
   }
+  EXPECT_TRUE(capture.Records("Frame", Jade::Log::Level::Trace).empty());
+  const auto lifecycle = capture.Records("Application", Jade::Log::Level::Info);
+  ASSERT_EQ(lifecycle.size(), 2u);
+  EXPECT_EQ(lifecycle[0].message, "Run started");
+  EXPECT_TRUE(lifecycle[1].message.starts_with("Run stopped: frames=35 "));
+  EXPECT_TRUE(lifecycle[1].message.ends_with("reason=frame_limit"));
 
   capture.Reset();
+  frames.clear();
   pose.position = {2, 2, 0};
   ASSERT_NO_THROW(app.Run({2, true}));
-  const auto restarted = ParseFrames(capture.Text());
+  EXPECT_EQ(frames, (std::vector<std::uint64_t>{1, 2}));
+  EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
+  const auto restarted = capture.Records("Application", Jade::Log::Level::Info);
   ASSERT_EQ(restarted.size(), 2u);
-  EXPECT_EQ(restarted.front().frame, 1u);
-  EXPECT_EQ(restarted.front().second, 1u);
-  EXPECT_EQ(restarted.front().frameInSecond, 1u);
-  EXPECT_DOUBLE_EQ(restarted.front().fps, 0.0);
+  EXPECT_TRUE(restarted.back().message.starts_with("Run stopped: frames=2 "));
   EXPECT_EQ(pose.position, (Jade::Vec3{2, 2, 0}));
+}
+
+TEST(Application, PerFrameTraceRequiresExplicitVerbosity)
+{
+  LogCapture capture(Jade::Log::Level::Trace);
+  Jade::Application app(HiddenApplication());
+  app.Run({3, true});
+  const auto records = capture.Records("Frame", Jade::Log::Level::Trace);
+  ASSERT_EQ(records.size(), 3u);
+  for (std::size_t index = 0; index < records.size(); ++index) {
+    EXPECT_TRUE(records[index].message.starts_with(std::format("frame={} interval=", index + 1)));
+    EXPECT_NE(records[index].message.find(" work="), std::string::npos);
+  }
+  EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
+}
+
+TEST(Application, RecordsFailureAndCanRunAgainAfterACallbackException)
+{
+  LogCapture capture;
+  Jade::Application app(HiddenApplication());
+  bool fail = true;
+  app.on<Jade::FrameUpdate>([&fail] {
+    if (fail) throw std::runtime_error("callback failed");
+  });
+  EXPECT_THROW(app.Run({1, true}), std::runtime_error);
+  const auto errors = capture.Records("Application", Jade::Log::Level::Error);
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_TRUE(errors[0].message.starts_with("Run aborted by exception: frames=0 "));
+  fail = false;
+  EXPECT_NO_THROW(app.Run({1, true}));
+  const auto lifecycle = capture.Records("Application", Jade::Log::Level::Info);
+  ASSERT_EQ(lifecycle.size(), 4u);
+  EXPECT_TRUE(lifecycle.back().message.ends_with("reason=frame_limit"));
+}
+
+TEST(Application, PreservesExplicitLogThresholdAndRecordsRequestedStop)
+{
+  LogCapture capture(Jade::Log::Level::Info);
+  Jade::Application app(HiddenApplication());
+  EXPECT_FALSE(Jade::Log::Enabled(Jade::Log::Level::Debug));
+  app.on<Jade::FrameUpdate>([&app] { app.stop(); });
+  EXPECT_NO_THROW(app.Run({3, true}));
+  const auto lifecycle = capture.Records("Application", Jade::Log::Level::Info);
+  ASSERT_EQ(lifecycle.size(), 3u);
+  EXPECT_EQ(lifecycle[1].message, "Run started");
+  EXPECT_TRUE(lifecycle.back().message.starts_with("Run stopped: frames=0 "));
+  EXPECT_TRUE(lifecycle.back().message.ends_with("reason=requested"));
+  EXPECT_TRUE(capture.Records("Frame", Jade::Log::Level::Trace).empty());
+  EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
+}
+
+TEST(Assets, LogsLoadsOnceAndReportsErrorsWhilePreservingExceptions)
+{
+  LogCapture capture;
+  Jade::Assets assets;
+  const auto directory = std::filesystem::path(JADE_TEST_ASSET_DIR);
+  const auto mesh = assets.load<Jade::Mesh>(directory / "bunny.obj");
+  EXPECT_EQ(assets.load<Jade::Mesh>(directory / "." / "bunny.obj"), mesh);
+  const auto loads = capture.Records("Assets", Jade::Log::Level::Debug);
+  ASSERT_EQ(loads.size(), 1u);
+  EXPECT_TRUE(loads[0].message.starts_with("Loaded mesh: path="));
+  EXPECT_NE(loads[0].message.find("vertices=453 triangles=948 duration="), std::string::npos);
+  EXPECT_THROW(assets.load<Jade::Mesh>(directory / "missing.obj"), std::runtime_error);
+  const auto errors = capture.Records("Assets", Jade::Log::Level::Error);
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_NE(errors[0].message.find("missing.obj"), std::string::npos);
+  EXPECT_NE(errors[0].message.find("reason="), std::string::npos);
+  EXPECT_EQ(assets.load<Jade::Mesh>(directory / "bunny.obj"), mesh);
 }

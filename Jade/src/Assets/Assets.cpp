@@ -3,12 +3,20 @@
 #include "../internal/Mesh/MeshValidation.hpp"
 #include "../internal/Mesh/ObjLoader.hpp"
 
+#include <Jade/Log.hpp>
+
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
 namespace Jade {
+namespace {
+
+const Log::Logger logger{"Assets"};
+
+} // namespace
 namespace Detail {
 
 class AssetStore final {
@@ -54,13 +62,17 @@ const void* Assets::Get(const std::weak_ptr<Detail::AssetStore>& owner, std::uin
 }
 
 MeshHandle Assets::LoadMesh(const std::filesystem::path& path)
+try
 {
   const auto canonical = std::filesystem::weakly_canonical(std::filesystem::absolute(path));
   const auto cached = m_Store->meshes.find(canonical);
   if (cached != m_Store->meshes.end()) {
     return cached->second;
   }
+  const auto started = std::chrono::steady_clock::now();
   auto mesh = Detail::LoadObj(canonical);
+  const auto vertices = mesh.vertices.size();
+  const auto triangles = mesh.indices.size() / 3;
   // Reserve the cache entry before registering the asset so a failed operation
   // cannot strand a published resource without its path mapping.
   const auto [entry, inserted] = m_Store->meshes.emplace(canonical, MeshHandle{});
@@ -71,7 +83,23 @@ MeshHandle Assets::LoadMesh(const std::filesystem::path& path)
     m_Store->meshes.erase(entry);
     throw;
   }
-  return entry->second;
+  const auto handle = entry->second;
+  try {
+    logger << Log::debug("Loaded mesh: path={} vertices={} triangles={} duration={:.2f}ms",
+      path.generic_string(), vertices, triangles,
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+  } catch (...) {
+    // Converting a path for diagnostics must not turn a successful load into failure.
+  }
+  return handle;
+}
+catch (const std::exception& error) {
+  try {
+    logger << Log::error("Failed to load mesh: path={} reason={}", path.generic_string(), error.what());
+  } catch (...) {
+    // Preserve the original load exception even if path conversion fails.
+  }
+  throw;
 }
 
 } // namespace Jade
