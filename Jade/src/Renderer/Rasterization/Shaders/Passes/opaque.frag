@@ -1,5 +1,5 @@
 #version 330 core
-#include "shared.glsl"
+#include "../Common/Lighting.glsl"
 in vec3 worldPosition, worldNormal;
 layout(location = 0) out vec4 radiance;
 layout(location = 1) out vec4 position;

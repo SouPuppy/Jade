@@ -1,8 +1,12 @@
 add_library(Jade STATIC
   include/Jade/Graphics/MeshData.hpp
-  include/Jade/Graphics/Materials.hpp
-  src/Graphics/Materials.cpp
-  src/Graphics/Materials.hpp
+  include/Jade/Materials/Presets.hpp
+  src/Materials/Presets.cpp
+  src/Materials/Presets.hpp
+  src/Materials/Material.cpp
+  src/Materials/Material.hpp
+  src/Renderer/Rasterization/MaterialCompiler.cpp
+  src/Renderer/Rasterization/MaterialCompiler.hpp
   src/internal/Acceleration/BVH.cpp
   src/internal/Acceleration/BVH.hpp
   src/internal/Mesh/MeshAccess.hpp
@@ -84,7 +88,7 @@ add_library(Jade STATIC
   src/Math/Quaternion.hpp
   src/Module/CameraControl.hpp
   include/Jade/Graphics/Geometry.hpp
-  include/Jade/Graphics/Material.hpp
+  include/Jade/Materials/Material.hpp
   include/Jade/Renderer/RayTracing/BSDF.hpp
   include/Jade/Renderer/Common/Backend.hpp
   include/Jade/Renderer/Common/CameraFrame.hpp
@@ -130,17 +134,28 @@ add_library(Jade STATIC
   src/internal/Renderer/Presentation/Shaders/hdr.frag
   src/internal/Renderer/Debug/Shaders/lines.vert
   src/internal/Renderer/Debug/Shaders/lines.frag
-  src/Renderer/Rasterization/Shaders/brdf.frag
-  src/Renderer/Rasterization/Shaders/final.frag
-  src/Renderer/Rasterization/Shaders/forward.frag
-  src/Renderer/Rasterization/Shaders/full.vert
-  src/Renderer/Rasterization/Shaders/glass-shadow.frag
-  src/Renderer/Rasterization/Shaders/glass.frag
-  src/Renderer/Rasterization/Shaders/mesh.vert
-  src/Renderer/Rasterization/Shaders/normal.frag
-  src/Renderer/Rasterization/Shaders/prefilter.frag
-  src/Renderer/Rasterization/Shaders/shadow.frag
-  src/Renderer/Rasterization/Shaders/shared.glsl
+  src/Renderer/Rasterization/Shaders/Passes/brdf-lut.frag
+  src/Renderer/Rasterization/Shaders/Passes/reflection.frag
+  src/Renderer/Rasterization/Shaders/Passes/opaque.frag
+  src/Renderer/Rasterization/Shaders/Geometry/fullscreen.vert
+  src/Renderer/Rasterization/Shaders/Passes/transmission-shadow.frag
+  src/Renderer/Rasterization/Shaders/Passes/transmission.frag
+  src/Renderer/Rasterization/Shaders/Geometry/mesh.vert
+  src/Renderer/Rasterization/Shaders/Passes/back-surface.frag
+  src/Renderer/Rasterization/Shaders/Passes/probe-prefilter.frag
+  src/Renderer/Rasterization/Shaders/Passes/shadow.frag
+  src/Renderer/Rasterization/Shaders/Common/Constants.glsl
+  src/Renderer/Rasterization/Shaders/Common/Frame.glsl
+  src/Renderer/Rasterization/Shaders/Common/Lighting.glsl
+  src/Renderer/Rasterization/Shaders/Common/ScreenTrace.glsl
+  src/Renderer/Rasterization/Shaders/Common/Reflection.glsl
+  src/Renderer/Rasterization/Shaders/Common/Sampling.glsl
+  src/Renderer/Rasterization/Shaders/Materials/Parameters.glsl
+  src/Renderer/Rasterization/Shaders/Materials/Diffuse.glsl
+  src/Renderer/Rasterization/Shaders/Materials/Metal.glsl
+  src/Renderer/Rasterization/Shaders/Materials/Dielectric.glsl
+  src/Renderer/Rasterization/Shaders/Materials/GGX.glsl
+  src/Renderer/Rasterization/Shaders/Materials/BSDF.glsl
   src/Renderer/RayTracing/Ray.cpp
   src/Renderer/RayTracing/Ray.hpp
   src/internal/Renderer/Debug/DebugDraw.cpp
@@ -166,23 +181,36 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${jade_sources})
 
 set(jade_shader_root "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(jade_shader_files
-  Renderer/Rasterization/Shaders/mesh.vert
-  Renderer/Rasterization/Shaders/full.vert
-  Renderer/Rasterization/Shaders/forward.frag
-  Renderer/Rasterization/Shaders/shadow.frag
-  Renderer/Rasterization/Shaders/glass-shadow.frag
-  Renderer/Rasterization/Shaders/normal.frag
-  Renderer/Rasterization/Shaders/final.frag
-  Renderer/Rasterization/Shaders/glass.frag
-  Renderer/Rasterization/Shaders/prefilter.frag
-  Renderer/Rasterization/Shaders/brdf.frag
+  Renderer/Rasterization/Shaders/Geometry/mesh.vert
+  Renderer/Rasterization/Shaders/Geometry/fullscreen.vert
+  Renderer/Rasterization/Shaders/Passes/opaque.frag
+  Renderer/Rasterization/Shaders/Passes/shadow.frag
+  Renderer/Rasterization/Shaders/Passes/transmission-shadow.frag
+  Renderer/Rasterization/Shaders/Passes/back-surface.frag
+  Renderer/Rasterization/Shaders/Passes/reflection.frag
+  Renderer/Rasterization/Shaders/Passes/transmission.frag
+  Renderer/Rasterization/Shaders/Passes/probe-prefilter.frag
+  Renderer/Rasterization/Shaders/Passes/brdf-lut.frag
   internal/Renderer/Presentation/Shaders/display.vert
   internal/Renderer/Presentation/Shaders/image.frag
   internal/Renderer/Presentation/Shaders/hdr.frag
   internal/Renderer/Debug/Shaders/lines.vert
   internal/Renderer/Debug/Shaders/lines.frag
 )
-set(jade_shader_dependencies "${jade_shader_root}/Renderer/Rasterization/Shaders/shared.glsl")
+set(jade_shader_dependencies
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Common/Constants.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Common/Frame.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Common/Lighting.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Common/ScreenTrace.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Common/Reflection.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Common/Sampling.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Materials/Parameters.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Materials/Diffuse.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Materials/Metal.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Materials/Dielectric.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Materials/GGX.glsl"
+  "${jade_shader_root}/Renderer/Rasterization/Shaders/Materials/BSDF.glsl"
+)
 foreach(shader IN LISTS jade_shader_files)
   list(APPEND jade_shader_dependencies "${jade_shader_root}/${shader}")
 endforeach()

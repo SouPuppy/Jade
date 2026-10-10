@@ -1,5 +1,5 @@
 #pragma once
-#include <Jade/Graphics/Material.hpp>
+#include <Jade/Materials/Material.hpp>
 namespace Jade::Materials {
 Material Diffuse(Renderer::LinearRGB color = {0.8f, 0.8f, 0.8f});
 Material Metal(Renderer::LinearRGB reflectance, float roughness = 0.18f);

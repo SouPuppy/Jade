@@ -1,5 +1,6 @@
 #pragma once
 #include <Jade/Renderer/Rasterization/Rasterization.hpp>
+#include "MaterialCompiler.hpp"
 #include "../Common/Emitters.hpp"
 #include "../../internal/Renderer/Device/OpenGL/OpenGLDevice.hpp"
 #include "../../internal/Renderer/Device/OpenGL/OpenGLProgram.hpp"
@@ -36,8 +37,8 @@ private:
   void probes(const Renderer::SceneSnapshot &);
   void core(const Renderer::SceneSnapshot &, const Renderer::CameraFrame &, OpenGLFrameTarget &, bool capture,
             std::size_t excluded);
-  void geometry(const Renderer::RenderInstance &, const Renderer::CameraFrame &, Renderer::ImageSize,
-                OpenGLProgram &);
+  void geometry(const Renderer::RenderInstance &, const RasterMaterial &, const Renderer::CameraFrame &,
+                Renderer::ImageSize, OpenGLProgram &);
   void uniforms(OpenGLProgram &, const Renderer::CameraFrame &, Renderer::ImageSize);
   GLuint nearestProbe(Vec3) const;
   void resize(Renderer::ImageSize);
@@ -47,11 +48,12 @@ private:
   bool m_Prepared = false;
   Bounds m_Bounds;
   std::vector<Vec3> m_Centers;
+  std::vector<RasterMaterial> m_Materials;
   std::vector<Light> m_Lights;
   std::shared_ptr<const EmitterDistribution> m_Emitters;
   std::vector<std::unique_ptr<Probe>> m_Probes;
-  std::unique_ptr<OpenGLProgram> m_Forward, m_Shadow, m_GlassShadow, m_Normal, m_Final, m_Glass, m_Prefilter,
-      m_BrdfProgram;
+  std::unique_ptr<OpenGLProgram> m_OpaquePass, m_ShadowPass, m_TransmissionShadowPass, m_BackSurfacePass,
+      m_ReflectionPass, m_TransmissionPass, m_ProbePrefilterPass, m_BrdfLutPass;
   OpenGLFrameTarget m_Capture;
   Renderer::ImageSize m_Size;
   GLuint m_Gbuffer = 0, m_Source = 0, m_Positions = 0, m_Normals = 0, m_Depth = 0, m_Transmission = 0;

@@ -139,6 +139,10 @@ Available presets are `Materials::Diffuse(color)`, `Metal(reflectance, roughness
 
 Materials default to diffuse, baseColor `{0.8, 0.8, 0.8}`, roughness `0.5`, IOR `1.5`, and zero emission. BaseColor/roughness must be finite in [0, 1], IOR in [1, 10], and emission finite/nonnegative. Enabled Geometry requires Material. An empty mesh handle disables that instance; absent Transform supplies identity local pose while retaining ancestor transforms.
 
+Include `<Jade/Materials/Material.hpp>` for the physical description and `<Jade/Materials/Presets.hpp>` for preset factories. Material stores values only. RayTracing builds a CPU BSDF from those values; Rasterization compiles its own closure encoding and pass selection in its private MaterialCompiler. Camera-only changes reuse compiled raster materials; changed material values are compiled on the next frame. The public material owns no shader, program or pipeline identifier.
+
+Raster shader sources belong to the renderer. `Shaders/Materials/` contains parameter bindings, Lambert, conductor/dielectric Fresnel and GGX evaluation; `Shaders/Common/` contains frame, lighting, reflection and screen-query helpers. `Shaders/Geometry/` contains vertex stages, and `Shaders/Passes/` contains opaque, shadow, reflection, transmission, transmission-shadow, back-surface, probe-prefilter and BRDF-LUT programs. Multiple passes cooperate to render a dielectric surface; they are renderer execution stages rather than separate Material assets. Display and debug shaders remain in their own internal presentation/debug layers.
+
 `assets.add(MeshData)` validates and compiles geometry plus its SAH BLAS before publishing a MeshHandle. `Mesh::compile(MeshData)` performs the same compilation without Assets; `assets.add<Mesh>(compiled)` registers an already compiled resource. Copies of Mesh share their immutable data and BLAS. Other `assets.add<T>(resource)` calls store immutable CPU snapshots; `get(handle)` returns `const T&`, and `share(handle)` returns an owning `shared_ptr<const T>` for detached snapshots. Acquire on the owning thread; workers use retained immutable resources. Handles themselves remain weak, and empty/expired/foreign handles are rejected. `MeshData` has editable position/normal vertices and uint32 triangle indices; `Mesh::data() const` exposes them read-only after compilation; every three indices form one triangle. Empty and degenerate meshes have no hittable surface. Mesh line/topology APIs have been removed.
 
 `MeshData::cube(size)`, `MeshData::sphere(radius, segments, rings)` and `MeshData::triangle(a, b, c)` remain triangle builders. Sphere defaults to radius 0.5, 32 segments, 16 rings and produces a closed mesh with 482 vertices and 960 triangles. Shared mesh instances have independent Transform and Material without copying vertex data. Each compiled mesh owns its local BLAS. Scene compilation creates a separate TLAS over world-space instances; both use 16-bin SAH across all three axes.
@@ -332,7 +336,8 @@ Public interfaces are split by purpose, with one optional includes-only entry po
 | --- | --- |
 | Core/ | Scene, SceneView, Entity, Transform |
 | Math/ | Vector (Vec2/Vec3), Quaternion, Matrix4 |
-| Graphics/ | Mesh, Vertex, Geometry, Material, Camera, Motion |
+| Graphics/ | Mesh, Vertex, Geometry, Camera, Motion |
+| Materials/ | Material parameters, validation and diffuse/metal/glass/emissive presets |
 | Renderer/Common/ | Backend, FrameBackend/FrameTarget, shared SceneSnapshot, camera, HDR Film and Image |
 | Renderer/RayTracing/ | ProgressiveBackend, RayTracing, RayScene/Compiler, RayQuery, Integrator, BSDF and Sampler |
 | Renderer/Rasterization/ | Rasterization and independent raster settings |

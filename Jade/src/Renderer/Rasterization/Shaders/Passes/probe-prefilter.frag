@@ -1,5 +1,8 @@
 #version 330 core
-#include "shared.glsl"
+#include "../Materials/GGX.glsl"
+#include "../Common/Sampling.glsl"
+uniform samplerCube u_Probe;
+uniform float u_Roughness;
 in vec2 uv;
 uniform vec3 u_Direction, u_Right, u_Up;
 out vec4 color;

@@ -1,7 +1,6 @@
 #include "RasterPipeline.hpp"
 #include <JadeShaders.hpp>
 #include "../Common/Math.hpp"
-#include "../../Graphics/Materials.hpp"
 #include "../../internal/Mesh/MeshAccess.hpp"
 #include <algorithm>
 #include <cmath>
@@ -136,14 +135,16 @@ RasterPipeline::RasterPipeline(OpenGLDevice &device, Renderer::RasterizationConf
     : m_Device(device), m_Config(config), m_Capture(device)
 {
   try {
-    m_Forward = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::forward_frag);
-    m_Shadow = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::shadow_frag);
-    m_GlassShadow = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::glass_shadow_frag);
-    m_Normal = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::normal_frag);
-    m_Final = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::final_frag);
-    m_Glass = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::glass_frag);
-    m_Prefilter = std::make_unique<OpenGLProgram>(Shaders::full_vert, Shaders::prefilter_frag);
-    m_BrdfProgram = std::make_unique<OpenGLProgram>(Shaders::full_vert, Shaders::brdf_frag);
+    m_OpaquePass = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::opaque_frag);
+    m_ShadowPass = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::shadow_frag);
+    m_TransmissionShadowPass =
+        std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::transmission_shadow_frag);
+    m_BackSurfacePass = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::back_surface_frag);
+    m_ReflectionPass = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::reflection_frag);
+    m_TransmissionPass = std::make_unique<OpenGLProgram>(Shaders::mesh_vert, Shaders::transmission_frag);
+    m_ProbePrefilterPass =
+        std::make_unique<OpenGLProgram>(Shaders::fullscreen_vert, Shaders::probe_prefilter_frag);
+    m_BrdfLutPass = std::make_unique<OpenGLProgram>(Shaders::fullscreen_vert, Shaders::brdf_lut_frag);
     glGenVertexArrays(1, &m_Vao);
     glGenFramebuffers(1, &m_Gbuffer);
     glGenFramebuffers(1, &m_BackFbo);
@@ -163,7 +164,7 @@ RasterPipeline::RasterPipeline(OpenGLDevice &device, Renderer::RasterizationConf
     CheckFramebuffer();
     glViewport(0, 0, 64, 64);
     glDisable(GL_DEPTH_TEST);
-    glUseProgram(m_BrdfProgram->Handle());
+    glUseProgram(m_BrdfLutPass->Handle());
     fullscreen(m_Vao);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   } catch (...) {
@@ -197,11 +198,13 @@ void RasterPipeline::prepare(const Renderer::SceneSnapshot &snapshot)
   if (worldChanged) {
     m_Bounds = {};
     m_Centers.clear();
+    std::vector<RasterMaterial> materials;
+    materials.reserve(snapshot.instances.size());
     for (const auto &instance : snapshot.instances) {
       if (!instance.mesh)
         throw std::invalid_argument("Raster geometry requires an immutable mesh.");
       Renderer::Math::inverseAffine(instance.objectToWorld);
-      Renderer::validateMaterial(instance.material);
+      materials.push_back(compileRasterMaterial(instance.material));
       const auto box = MeshAccess::acceleration(*instance.mesh).bounds();
       Bounds transformed;
       if (box.valid())
@@ -213,6 +216,7 @@ void RasterPipeline::prepare(const Renderer::SceneSnapshot &snapshot)
       m_Centers.push_back(transformed.valid() ? transformed.center()
                                               : Math::point(instance.objectToWorld, {}));
     }
+    m_Materials = std::move(materials);
     for (auto &probe : m_Probes)
       probe->ready = false;
   }
@@ -305,8 +309,8 @@ void RasterPipeline::uniforms(OpenGLProgram &p, const CameraFrame &camera, Image
   integer(p, "u_ReflectionSteps", m_Config.reflectionSteps);
   integer(p, "u_RefractionSteps", m_Config.refractionSteps);
 }
-void RasterPipeline::geometry(const Renderer::RenderInstance &instance, const CameraFrame &camera,
-                              ImageSize size, OpenGLProgram &p)
+void RasterPipeline::geometry(const Renderer::RenderInstance &instance, const RasterMaterial &material,
+                              const CameraFrame &camera, ImageSize size, OpenGLProgram &p)
 {
   matrix(p, "u_Model", instance.objectToWorld);
   matrix(p, "u_VP", camera.viewProjection(size));
@@ -319,10 +323,10 @@ void RasterPipeline::geometry(const Renderer::RenderInstance &instance, const Ca
   vector(p, "u_Eye", camera.position);
   vector(p, "u_Forward", camera.forward);
   integer(p, "u_Perspective", camera.lens.projection == Projection::Perspective);
-  const auto &m = instance.material;
+  const auto &m = material;
   rgb(p, "u_BaseColor", m.baseColor);
   rgb(p, "u_Emission", m.emission);
-  integer(p, "u_ModelKind", static_cast<int>(m.model));
+  integer(p, "u_ModelKind", static_cast<int>(m.closure));
   scalar(p, "u_Roughness", m.roughness);
   scalar(p, "u_Ior", m.ior);
   integer(p, "u_TwoSided", m.twoSidedEmission);
@@ -345,11 +349,11 @@ void RasterPipeline::shadows(const Renderer::SceneSnapshot &snapshot)
       CheckFramebuffer();
       glClearDepth(1);
       glClear(GL_DEPTH_BUFFER_BIT);
-      glUseProgram(m_Shadow->Handle());
+      glUseProgram(m_ShadowPass->Handle());
       for (std::size_t j = 0; j < snapshot.instances.size(); ++j)
-        if (snapshot.instances[j].material.model != MaterialModel::Dielectric) {
-          integer(*m_Shadow, "u_SkipPrimitive", j == l.instance ? static_cast<int>(l.primitive) : -1);
-          geometry(snapshot.instances[j], l.cameras[face], size, *m_Shadow);
+        if (!m_Materials[j].transmission()) {
+          integer(*m_ShadowPass, "u_SkipPrimitive", j == l.instance ? static_cast<int>(l.primitive) : -1);
+          geometry(snapshot.instances[j], m_Materials[j], l.cameras[face], size, *m_ShadowPass);
         }
       glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_GlassShadowFbo);
       glFramebufferTextureLayer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_GlassDepth, 0, layer);
@@ -362,11 +366,12 @@ void RasterPipeline::shadows(const Renderer::SceneSnapshot &snapshot)
       glBindFramebuffer(GL_FRAMEBUFFER, m_GlassShadowFbo);
       const GLfloat clear[] = {1, 1, 1, 1};
       glClearBufferfv(GL_COLOR, 0, clear);
-      glUseProgram(m_GlassShadow->Handle());
+      glUseProgram(m_TransmissionShadowPass->Handle());
       for (std::size_t j = 0; j < snapshot.instances.size(); ++j)
-        if (snapshot.instances[j].material.model == MaterialModel::Dielectric) {
-          integer(*m_GlassShadow, "u_SkipPrimitive", j == l.instance ? static_cast<int>(l.primitive) : -1);
-          geometry(snapshot.instances[j], l.cameras[face], size, *m_GlassShadow);
+        if (m_Materials[j].transmission()) {
+          integer(*m_TransmissionShadowPass, "u_SkipPrimitive",
+                  j == l.instance ? static_cast<int>(l.primitive) : -1);
+          geometry(snapshot.instances[j], m_Materials[j], l.cameras[face], size, *m_TransmissionShadowPass);
         }
     }
   ++m_Stats.shadowBuilds;
@@ -426,10 +431,10 @@ void RasterPipeline::core(const Renderer::SceneSnapshot &snapshot, const CameraF
   glClearColor(0, 0, 0, 0);
   glClearDepth(1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  uniforms(*m_Forward, camera, size);
+  uniforms(*m_OpaquePass, camera, size);
   for (std::size_t i = 0; i < snapshot.instances.size(); ++i)
-    if (i != excluded && snapshot.instances[i].material.model != MaterialModel::Dielectric)
-      geometry(snapshot.instances[i], camera, size, *m_Forward);
+    if (i != excluded && !m_Materials[i].transmission())
+      geometry(snapshot.instances[i], m_Materials[i], camera, size, *m_OpaquePass);
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_2D, m_Source);
   glGenerateMipmap(GL_TEXTURE_2D);
@@ -442,22 +447,22 @@ void RasterPipeline::core(const Renderer::SceneSnapshot &snapshot, const CameraF
   glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer);
   glDepthFunc(GL_LEQUAL);
   glDepthMask(GL_FALSE);
-  uniforms(*m_Final, camera, size);
-  integer(*m_Final, "u_Reflections", !capture && m_Config.reflections);
+  uniforms(*m_ReflectionPass, camera, size);
+  integer(*m_ReflectionPass, "u_Reflections", !capture && m_Config.reflections);
   for (std::size_t i = 0; i < snapshot.instances.size(); ++i)
-    if (i != excluded && snapshot.instances[i].material.model != MaterialModel::Dielectric) {
-      texture(*m_Final, "u_Probe", 8, GL_TEXTURE_CUBE_MAP, nearestProbe(m_Centers[i]));
-      geometry(snapshot.instances[i], camera, size, *m_Final);
+    if (i != excluded && !m_Materials[i].transmission()) {
+      texture(*m_ReflectionPass, "u_Probe", 8, GL_TEXTURE_CUBE_MAP, nearestProbe(m_Centers[i]));
+      geometry(snapshot.instances[i], m_Materials[i], camera, size, *m_ReflectionPass);
     }
-  std::vector<std::size_t> glass;
+  std::vector<std::size_t> transmitting;
   for (std::size_t i = 0; i < snapshot.instances.size(); ++i)
-    if (i != excluded && snapshot.instances[i].material.model == MaterialModel::Dielectric)
-      glass.push_back(i);
-  std::stable_sort(glass.begin(), glass.end(), [&](auto a, auto b) {
+    if (i != excluded && m_Materials[i].transmission())
+      transmitting.push_back(i);
+  std::stable_sort(transmitting.begin(), transmitting.end(), [&](auto a, auto b) {
     const auto x = m_Centers[a] - camera.position, y = m_Centers[b] - camera.position;
     return dot(x, x) > dot(y, y);
   });
-  for (const auto i : glass) {
+  for (const auto i : transmitting) {
     if (!capture) {
       glBindFramebuffer(GL_FRAMEBUFFER, m_BackFbo);
       glDepthMask(GL_TRUE);
@@ -468,8 +473,8 @@ void RasterPipeline::core(const Renderer::SceneSnapshot &snapshot, const CameraF
       glDepthFunc(GL_LESS);
       glEnable(GL_CULL_FACE);
       glCullFace(GL_FRONT);
-      glUseProgram(m_Normal->Handle());
-      geometry(snapshot.instances[i], camera, size, *m_Normal);
+      glUseProgram(m_BackSurfacePass->Handle());
+      geometry(snapshot.instances[i], m_Materials[i], camera, size, *m_BackSurfacePass);
       glDisable(GL_CULL_FACE);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer);
@@ -480,13 +485,13 @@ void RasterPipeline::core(const Renderer::SceneSnapshot &snapshot, const CameraF
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
-    uniforms(*m_Glass, camera, size);
-    texture(*m_Glass, "u_Source", 4, GL_TEXTURE_2D, m_Transmission);
-    texture(*m_Glass, "u_Probe", 8, GL_TEXTURE_CUBE_MAP, nearestProbe(m_Centers[i]));
-    integer(*m_Glass, "u_Capture", capture);
-    integer(*m_Glass, "u_Reflections", !capture && m_Config.reflections);
-    integer(*m_Glass, "u_Refractions", !capture && m_Config.refractions);
-    geometry(snapshot.instances[i], camera, size, *m_Glass);
+    uniforms(*m_TransmissionPass, camera, size);
+    texture(*m_TransmissionPass, "u_Source", 4, GL_TEXTURE_2D, m_Transmission);
+    texture(*m_TransmissionPass, "u_Probe", 8, GL_TEXTURE_CUBE_MAP, nearestProbe(m_Centers[i]));
+    integer(*m_TransmissionPass, "u_Capture", capture);
+    integer(*m_TransmissionPass, "u_Reflections", !capture && m_Config.reflections);
+    integer(*m_TransmissionPass, "u_Refractions", !capture && m_Config.refractions);
+    geometry(snapshot.instances[i], m_Materials[i], camera, size, *m_TransmissionPass);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDepthMask(GL_TRUE);
@@ -500,7 +505,7 @@ void RasterPipeline::probes(const Renderer::SceneSnapshot &snapshot)
   }
   std::vector<std::size_t> selected;
   for (std::size_t i = 0; i < snapshot.instances.size(); ++i)
-    if (snapshot.instances[i].material.model != MaterialModel::Diffuse)
+    if (m_Materials[i].reflection())
       selected.push_back(i);
   std::stable_sort(selected.begin(), selected.end(), [&](auto a, auto b) {
     const auto x = m_Centers[a] - snapshot.camera->position, y = m_Centers[b] - snapshot.camera->position;
@@ -542,8 +547,8 @@ void RasterPipeline::probes(const Renderer::SceneSnapshot &snapshot)
       glBindFramebuffer(GL_FRAMEBUFFER, m_ProbeFbo);
       glDrawBuffer(GL_COLOR_ATTACHMENT0);
       glDisable(GL_DEPTH_TEST);
-      glUseProgram(m_Prefilter->Handle());
-      texture(*m_Prefilter, "u_Probe", 8, GL_TEXTURE_CUBE_MAP, p->raw);
+      glUseProgram(m_ProbePrefilterPass->Handle());
+      texture(*m_ProbePrefilterPass, "u_Probe", 8, GL_TEXTURE_CUBE_MAP, p->raw);
       for (int mip = 0; mip < mipCount(r); ++mip)
         for (int face = 0; face < 6; ++face) {
           glViewport(0, 0, std::max(1, r >> mip), std::max(1, r >> mip));
@@ -551,10 +556,10 @@ void RasterPipeline::probes(const Renderer::SceneSnapshot &snapshot)
                                  p->filtered, mip);
           CheckFramebuffer();
           const auto c = cubeCamera({}, face, range());
-          vector(*m_Prefilter, "u_Direction", c.forward);
-          vector(*m_Prefilter, "u_Right", c.right);
-          vector(*m_Prefilter, "u_Up", c.up);
-          scalar(*m_Prefilter, "u_Roughness", static_cast<float>(mip) / (mipCount(r) - 1));
+          vector(*m_ProbePrefilterPass, "u_Direction", c.forward);
+          vector(*m_ProbePrefilterPass, "u_Right", c.right);
+          vector(*m_ProbePrefilterPass, "u_Up", c.up);
+          scalar(*m_ProbePrefilterPass, "u_Roughness", static_cast<float>(mip) / (mipCount(r) - 1));
           fullscreen(m_Vao);
         }
       p->ready = true;

@@ -2,7 +2,7 @@
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Assets/Assets.hpp>
 #include <Jade/Graphics/Geometry.hpp>
-#include <Jade/Graphics/Material.hpp>
+#include <Jade/Materials/Material.hpp>
 
 #include <gtest/gtest.h>
 

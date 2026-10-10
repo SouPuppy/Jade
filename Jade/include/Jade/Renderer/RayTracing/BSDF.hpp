@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Graphics/Material.hpp>
+#include <Jade/Materials/Material.hpp>
 #include <Jade/Renderer/RayTracing/Ray.hpp>
 #include <Jade/Renderer/RayTracing/Sampler.hpp>
 

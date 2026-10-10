@@ -317,3 +317,29 @@ TEST(Rasterization, MissingVertexNormalsUseFiniteGeometricNormalsForGlassAndShad
   const auto pixels = gpu.render(renderer);
   EXPECT_GT(center(pixels).r, .1f);
 }
+
+TEST(Rasterization, ChangingMaterialModelsRecompilesPassSelectionAndRestoresTheOriginalImage)
+{
+  GPU gpu;
+  const auto diffuse = Materials::Diffuse({.7f, .7f, .7f});
+  auto object = gpu.add(MeshData::sphere(1), diffuse);
+  gpu.add(quad(5, -2), Materials::Emissive({2, .5f, .1f}));
+  auto config = quick();
+  config.reflections = false;
+  Rasterization renderer(config);
+  const auto original = gpu.render(renderer);
+  EXPECT_LT(center(original).r, .01f);
+
+  object.get<Material>() = Materials::Glass(0, 1);
+  const auto transmitted = gpu.render(renderer);
+  EXPECT_NEAR(center(transmitted).r, 2, 1e-4f);
+  EXPECT_EQ(object.get<Material>(), Materials::Glass(0, 1));
+
+  object.get<Material>() = Materials::Gold(0);
+  EXPECT_LT(center(gpu.render(renderer)).r, .01f);
+  object.get<Material>().emission = {3, 2, 1};
+  EXPECT_NEAR(center(gpu.render(renderer)).r, 3, 1e-4f);
+
+  object.get<Material>() = diffuse;
+  EXPECT_LT(difference(gpu.render(renderer), original), 1e-5f);
+}

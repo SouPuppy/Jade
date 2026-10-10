@@ -1,5 +1,6 @@
 #version 330 core
-#include "shared.glsl"
+#include "../Materials/GGX.glsl"
+#include "../Common/Sampling.glsl"
 in vec2 uv;
 out vec4 color;
 void main()

@@ -17,9 +17,9 @@
 #include <Jade/Graphics/Camera.hpp>
 #include <Jade/Graphics/Mesh.hpp>
 #include <Jade/Graphics/MeshData.hpp>
-#include <Jade/Graphics/Materials.hpp>
+#include <Jade/Materials/Presets.hpp>
 #include <Jade/Graphics/Geometry.hpp>
-#include <Jade/Graphics/Material.hpp>
+#include <Jade/Materials/Material.hpp>
 #include <Jade/Graphics/Motion.hpp>
 #include <Jade/Graphics/Vertex.hpp>
 #include <Jade/Input/Key.hpp>

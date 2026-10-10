@@ -1,5 +1,7 @@
 #version 330 core
-#include "shared.glsl"
+#include "../Common/Frame.glsl"
+#include "../Materials/Parameters.glsl"
+#include "../Materials/Dielectric.glsl"
 in vec3 worldPosition, worldNormal;
 uniform int u_SkipPrimitive, u_PrimitiveBase;
 out vec4 color;

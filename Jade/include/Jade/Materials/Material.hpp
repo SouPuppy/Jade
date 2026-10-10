@@ -6,6 +6,7 @@ namespace Jade {
 
 enum class MaterialModel { Diffuse, Metal, Dielectric };
 
+// Physical parameters only; each backend owns its execution representation.
 // For Metal, baseColor is normal-incidence reflectance. For Dielectric it is
 // a surface transmission tint (not volumetric absorption).
 struct Material {
@@ -18,8 +19,6 @@ struct Material {
   bool operator==(const Material &) const = default;
 };
 
-} // namespace Jade
-
-namespace Jade::Renderer {
 void validateMaterial(const Material &material);
-}
+
+} // namespace Jade

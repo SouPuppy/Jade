@@ -2,7 +2,7 @@
 
 #include <Jade/Renderer/Common/SceneSnapshot.hpp>
 #include <Jade/Core/Scene.hpp>
-#include <Jade/Graphics/Material.hpp>
+#include <Jade/Materials/Material.hpp>
 #include <Jade/Renderer/Common/CameraFrame.hpp>
 
 #include <memory>

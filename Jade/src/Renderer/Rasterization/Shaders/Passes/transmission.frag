@@ -1,5 +1,8 @@
 #version 330 core
-#include "shared.glsl"
+#include "../Common/Lighting.glsl"
+#include "../Common/Reflection.glsl"
+uniform sampler2D u_BackPosition, u_BackNormal;
+uniform bool u_Refractions;
 in vec3 worldPosition, worldNormal;
 uniform vec2 u_Size;
 uniform bool u_Capture;
