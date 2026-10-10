@@ -15,7 +15,7 @@ struct FramebufferSize {
   int height = 0;
 };
 
-namespace Detail { class OpenGLDisplay; }
+namespace Detail { class OpenGLDevice; }
 
 // Internal window facade. All operations belong to the main thread.
 class Window final {
@@ -30,12 +30,13 @@ public:
   void WaitEvents(double timeoutSeconds);
   bool ShouldClose() const;
   void RequestClose();
+  void SetTitle(const std::string& title);
   bool IsKeyPressed(Key key) const;
   Detail::InputState& Input() noexcept;
   FramebufferSize GetFramebufferSize() const;
 
 private:
-  friend class Detail::OpenGLDisplay;
+  friend class Detail::OpenGLDevice;
   void* NativeHandle() const;
 
   struct Impl;

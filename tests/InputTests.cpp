@@ -1,4 +1,4 @@
-#include <Jade/Renderer/RayTracing.hpp>
+#include <Jade/Renderer/RayTracing/RayTracing.hpp>
 #include "TestScene.hpp"
 #include <Jade/Application.hpp>
 #include <Jade/Events/Keyboard.hpp>

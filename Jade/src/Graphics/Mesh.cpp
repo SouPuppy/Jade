@@ -3,7 +3,7 @@
 #include "../internal/Mesh/MeshValidation.hpp"
 #include "../internal/Math/Validation.hpp"
 #include "../internal/Mesh/MeshAccess.hpp"
-#include "../Renderer/Math.hpp"
+#include "../Renderer/Common/Math.hpp"
 
 #include <limits>
 #include <stdexcept>

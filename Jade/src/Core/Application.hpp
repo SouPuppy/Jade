@@ -4,8 +4,7 @@
 
 #include "../internal/Platform/Window.hpp"
 #include "../internal/Events/EventDispatcher.hpp"
-#include "../internal/Renderer/RenderSession.hpp"
-#include "../internal/Renderer/OpenGL/OpenGLDisplay.hpp"
+#include "../internal/Renderer/Host/RenderHost.hpp"
 
 #include <optional>
 
@@ -25,12 +24,11 @@ struct Application::Impl {
   std::optional<std::shared_ptr<Scene>> pendingScene;
   Window window;
   bool wireframe = false;
-  Detail::OpenGLDisplay display;
-  Detail::RenderSession rendering;
+  Detail::RenderHost rendering;
 
   explicit Impl(const ApplicationConfig &config)
       : frameLimits(config.frameLimits), logPerformance(config.logPerformance), debug(config.debug),
-        axisGizmo(config.axisGizmo), window(config.window), display(window, config.vsync)
+        axisGizmo(config.axisGizmo), window(config.window), rendering(window, config.vsync, config.window.title)
   {
   }
 };

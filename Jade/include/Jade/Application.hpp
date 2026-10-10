@@ -10,20 +10,21 @@
 #include <Jade/Events/MouseMoved.hpp>
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/WindowConfig.hpp>
-#include <Jade/Renderer/Backend.hpp>
+#include <Jade/Renderer/Common/Backend.hpp>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <typeindex>
 
 namespace Jade {
 
 struct ApplicationConfig {
   WindowConfig window;
   bool vsync = false;
-  // Built-in unmodified F/F3/O shortcuts. Independent of logging and build type.
+  // Built-in unmodified F/F3/O shortcuts. I cycles registered renderers independently. Independent of logging and build type.
   bool debug = false;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
@@ -49,16 +50,19 @@ public:
 
   // Assets are shared across scenes. Selection is deferred while Run is active.
   Assets &assets() noexcept;
-  // Select one owned computational backend. Configure outside Run.
+  // Register one owned backend per concrete type. Configure outside Run.
   template <class TRenderer, class... Args> TRenderer &use(Args &&...args)
   {
     static_assert(std::is_base_of_v<Renderer::Backend, TRenderer>,
                   "Application::use requires a Renderer::Backend.");
     auto backend = std::make_unique<TRenderer>(std::forward<Args>(args)...);
     auto &result = *backend;
-    InstallRenderer(std::move(backend));
+    InstallRenderer(typeid(TRenderer), std::move(backend));
     return result;
   }
+  template<class TRenderer> void setRenderer() { SelectRenderer(typeid(TRenderer)); }
+  const Renderer::Backend* activeRenderer() const noexcept;
+  void cycleRenderer();
   Renderer::RenderProgress renderProgress() const;
   // Returns the committed selection, including nullptr when no scene is active.
   std::shared_ptr<Scene> scene() const noexcept;
@@ -98,7 +102,8 @@ public:
   void Run(const RunOptions &options = {});
 
 private:
-  void InstallRenderer(std::unique_ptr<Renderer::Backend> backend);
+  void InstallRenderer(std::type_index type, std::unique_ptr<Renderer::Backend> backend);
+  void SelectRenderer(std::type_index type);
   EventConnection Connect(KeyAction action, KeyChord chord,
                           std::function<EventFlow(const KeyEvent &)> callback);
   EventConnection Connect(MouseAction action, MouseButton button,

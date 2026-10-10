@@ -39,7 +39,7 @@ Both executables were launched from their actual bin directories using --frames 
 
 ## Public consumer and visual output
 
-The standalone-header check exposes only Jade/include. The external CMake consumer additionally rejects leaked GLFW/GLAD include paths at compile time. It captures a SceneSnapshot, compiles RenderScene, accumulates Film through RayTracing and exports RGBA8 output without constructing Application or opening a window.
+The standalone-header check exposes only Jade/include. The external CMake consumer additionally rejects leaked GLFW/GLAD include paths at compile time. It captures a SceneSnapshot, compiles RayScene, accumulates Film through RayTracing and exports RGBA8 output without constructing Application or opening a window.
 
 The exported preview was visually inspected. It shows a grounded diffuse bunny, metal cube, closed glass sphere and emissive ceiling mesh. Floor illumination, contact shadows, metal reflections and glass refraction come from the integrator. Low-sample noise remains expected; this version has no denoiser, textures, volumes, nested media or dedicated caustic algorithm.
 

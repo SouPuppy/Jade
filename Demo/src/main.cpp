@@ -52,6 +52,7 @@ int main(int argc, char **argv)
     config.axisGizmo = false;
     Jade::Application app(config);
 
+    app.use<Jade::Renderer::Rasterization>();
     Jade::Renderer::RayTracingConfig rendering;
     rendering.resolutionScale = 0.5f;
     rendering.maxSamples = 0;
@@ -60,6 +61,7 @@ int main(int argc, char **argv)
     rendering.workerCount = 0;
     rendering.exposureEV = 0;
     app.use<Jade::Renderer::RayTracing>(rendering);
+    app.setRenderer<Jade::Renderer::Rasterization>();
 
     const auto cubeMesh = app.assets().add(Jade::MeshData::cube(2));
     const auto sphereMesh = app.assets().add(Jade::MeshData::sphere(1));

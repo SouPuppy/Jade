@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Renderer/LinearRGB.hpp>
+#include <Jade/Renderer/Common/LinearRGB.hpp>
 
 namespace Jade {
 
@@ -19,3 +19,7 @@ struct Material {
 };
 
 } // namespace Jade
+
+namespace Jade::Renderer {
+void validateMaterial(const Material &material);
+}

@@ -1,8 +1,10 @@
 #include <Jade/Jade.hpp>
 
-#include "internal/Renderer/RenderSession.hpp"
-#include "internal/Renderer/OpenGL/OpenGLDisplay.hpp"
-#include "Renderer/Math.hpp"
+#include "internal/Platform/Window.hpp"
+#include "internal/Renderer/Host/ProgressiveSession.hpp"
+#include "internal/Renderer/Presentation/OpenGLDisplay.hpp"
+#include "internal/Renderer/Debug/DebugDraw.hpp"
+#include "Renderer/Common/Math.hpp"
 
 #include <gtest/gtest.h>
 #include <GLFW/glfw3.h>
@@ -71,7 +73,7 @@ MeshData quad(float half, float z, bool upward = true, int divisions = 1)
   return mesh;
 }
 
-LinearRGB estimate(const RenderScene &scene, int samples = 4096)
+LinearRGB estimate(const RayScene &scene, int samples = 4096)
 {
   PathIntegrator integrator({4, 4});
   IndependentSampler sampler(42);
@@ -102,19 +104,19 @@ struct Control {
   bool blockFirst = false;
   std::vector<Vec3> cameras;
 };
-class RecordingBackend final : public Backend {
+class RecordingBackend final : public ProgressiveBackend {
 public:
   explicit RecordingBackend(std::shared_ptr<Control> control, std::uint64_t limit = 1)
       : m_Control(std::move(control)), m_Limit(limit)
   {
   }
-  RenderSettings settings() const override
+  ProgressiveSettings samplingSettings() const override
   {
-    RenderSettings s;
+    ProgressiveSettings s;
     s.maxSamples = m_Limit;
     return s;
   }
-  void render(const RenderScene &, const RenderRequest &request, Film &film) override
+  void render(const RayScene &, const RenderRequest &request, Film &film) override
   {
     const int call = ++m_Control->calls;
     {
@@ -146,7 +148,7 @@ TEST(RayGeometry, NearestHitClippingBackFacesAndSharedResources)
   second.add<Transform>().position = {0, 0, -4};
   second.add<Geometry>(first.get<Geometry>().mesh);
   second.add<Material>();
-  const auto scene = RenderScene::build(f.snapshot());
+  const auto scene = RayScene::build(f.snapshot());
   EXPECT_EQ(scene.meshCount(), 1u);
   SurfaceHit hit;
   ASSERT_TRUE(scene.intersect({{0, 0, 5}, {0, 0, -1}}, hit));
@@ -159,7 +161,7 @@ TEST(RayGeometry, NearestHitClippingBackFacesAndSharedResources)
   EXPECT_FALSE(hit.frontFace);
   EXPECT_NEAR(hit.t, 1, 1e-5);
   EXPECT_FALSE(scene.intersect({{0, 0, 5}, {1, 0, 0}}, hit));
-  EXPECT_FALSE(RenderScene{}.occluded({}));
+  EXPECT_FALSE(RayScene{}.occluded({}));
 }
 
 TEST(RayGeometry, HierarchyShearAndNonuniformScaleMatchWorldGeometry)
@@ -173,7 +175,7 @@ TEST(RayGeometry, HierarchyShearAndNonuniformScaleMatchWorldGeometry)
   object.get<Transform>().rotation = Quaternion::angleAxis({0, 0, 1}, 35);
   f.scene.setParent(object, parent);
   const auto source = f.snapshot();
-  const auto accelerated = RenderScene::build(source);
+  const auto accelerated = RayScene::build(source);
   auto baked = source;
   MeshData mesh = source.instances[0].mesh->data();
   const auto model = source.instances[0].objectToWorld;
@@ -184,7 +186,7 @@ TEST(RayGeometry, HierarchyShearAndNonuniformScaleMatchWorldGeometry)
   }
   baked.instances[0].mesh = std::make_shared<const Mesh>(Mesh::compile(std::move(mesh)));
   baked.instances[0].objectToWorld = Matrix4::Identity();
-  const auto reference = RenderScene::build(baked);
+  const auto reference = RayScene::build(baked);
   IndependentSampler sampler;
   int hits = 0;
   for (int i = 0; i < 1000; ++i) {
@@ -215,7 +217,7 @@ TEST(RayGeometry, SnapshotsRetainMeshesAndIgnoreLaterEdits)
     entity.get<Material>().emission = {10, 0, 0};
     EXPECT_NE(snapshot, f.snapshot());
   }
-  const auto detached = RenderScene::build(snapshot);
+  const auto detached = RayScene::build(snapshot);
   SurfaceHit hit;
   ASSERT_TRUE(detached.intersect({{0, 0, 5}, {0, 0, -1}}, hit));
   EXPECT_EQ(detached.material(hit).emission, (LinearRGB{}));
@@ -226,13 +228,13 @@ TEST(RayGeometry, DegenerateTrianglesAndInvalidBindings)
   Fixture f;
   auto object = f.add(MeshData::triangle({}, {1, 1, 1}, {2, 2, 2}));
   SurfaceHit hit;
-  EXPECT_FALSE(RenderScene::build(f.snapshot()).intersect({{0, 0, 5}, {0, 0, -1}}, hit));
+  EXPECT_FALSE(RayScene::build(f.snapshot()).intersect({{0, 0, 5}, {0, 0, -1}}, hit));
   auto invalid = f.snapshot();
   invalid.instances[0].objectToWorld.at(3, 2) = 1;
-  EXPECT_THROW(RenderScene::build(invalid), std::invalid_argument);
+  EXPECT_THROW(RayScene::build(invalid), std::invalid_argument);
   invalid.instances[0].objectToWorld = Matrix4::Identity();
   invalid.instances[0].objectToWorld.at(0, 3) = INFINITY;
-  EXPECT_THROW(RenderScene::build(invalid), std::invalid_argument);
+  EXPECT_THROW(RayScene::build(invalid), std::invalid_argument);
   object.remove<Material>();
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
   object.add<Material>();
@@ -342,15 +344,15 @@ TEST(PathTracing, NoEmittersMeansBlackAndEmissionIsDirectionalHdr)
   IndependentSampler sampler;
   PathIntegrator integrator;
   const Ray ray{{0, 0, 5}, {0, 0, -1}};
-  EXPECT_EQ(integrator.Li(ray, RenderScene::build(f.snapshot()), sampler), (LinearRGB{}));
+  EXPECT_EQ(integrator.Li(ray, RayScene::build(f.snapshot()), sampler), (LinearRGB{}));
   object.get<Material>().emission = {12, 4, 2};
-  auto scene = RenderScene::build(f.snapshot());
+  auto scene = RayScene::build(f.snapshot());
   const auto value = integrator.Li(ray, scene, sampler);
   EXPECT_NEAR(value.r, 12, 1e-5);
   EXPECT_NEAR(value.g, 4, 1e-5);
   EXPECT_EQ(integrator.Li({{0, 0, 0}, {0, 0, 1}}, scene, sampler), (LinearRGB{}));
   object.get<Material>().twoSidedEmission = true;
-  scene = RenderScene::build(f.snapshot());
+  scene = RayScene::build(f.snapshot());
   EXPECT_GT(integrator.Li({{0, 0, 0}, {0, 0, 1}}, scene, sampler).r, 0);
 }
 
@@ -366,12 +368,12 @@ TEST(PathTracing, EmissiveMeshSubdivisionPreservesEnergyAndShadowsOcclude)
   fine.add(quad(5, 0), diffuse);
   coarse.add(quad(1, 2, false), emission);
   fine.add(quad(1, 2, false, 4), emission);
-  const auto a = estimate(RenderScene::build(coarse.snapshot()));
-  const auto b = estimate(RenderScene::build(fine.snapshot()));
+  const auto a = estimate(RayScene::build(coarse.snapshot()));
+  const auto b = estimate(RayScene::build(fine.snapshot()));
   EXPECT_GT(a.r, .5f);
   EXPECT_NEAR(a.r, b.r, .05f * a.r);
   coarse.add(quad(5, 1.5f), Material{});
-  const auto blocked = estimate(RenderScene::build(coarse.snapshot()));
+  const auto blocked = estimate(RayScene::build(coarse.snapshot()));
   EXPECT_LT(blocked.r, .01f);
 }
 
@@ -388,7 +390,7 @@ TEST(PathTracing, IndirectEmissionSurvivesBeyondCameraFarPlane)
   IndependentSampler sampler;
   sampler.start(0, 0);
   const auto value =
-      PathIntegrator({4, 4}).Li({{0, 0, 1}, {0, 0, -1}, .1f, 2}, RenderScene::build(f.snapshot()), sampler);
+      PathIntegrator({4, 4}).Li({{0, 0, 1}, {0, 0, -1}, .1f, 2}, RayScene::build(f.snapshot()), sampler);
   EXPECT_GT(value.r, 0);
 }
 
@@ -400,7 +402,7 @@ TEST(RayTracing, HeadlessRenderingIsDeterministicAcrossWorkerCounts)
   light.baseColor = {0, 0, 0};
   f.add(MeshData::sphere(1, 16, 8), light);
   const auto snapshot = f.snapshot();
-  const auto scene = RenderScene::build(snapshot);
+  const auto scene = RayScene::build(snapshot);
   RayTracingConfig one;
   one.workerCount = 1;
   RayTracingConfig many;
@@ -447,12 +449,12 @@ TEST(Film, HdrMeanToneMappingAndValidation)
   EXPECT_THROW((RayTracing{invalid}), std::invalid_argument);
 }
 
-TEST(RenderSession, CoalescesMovingSnapshotsAndResetsAccumulation)
+TEST(ProgressiveSession, CoalescesMovingSnapshotsAndResetsAccumulation)
 {
   Fixture f;
   auto control = std::make_shared<Control>();
   control->blockFirst = true;
-  Jade::Detail::RenderSession session;
+  Jade::Detail::ProgressiveSession session;
   session.install(std::make_unique<RecordingBackend>(control));
   session.start();
   session.submit(f.snapshot(), {8, 8});
@@ -475,12 +477,12 @@ TEST(RenderSession, CoalescesMovingSnapshotsAndResetsAccumulation)
   EXPECT_EQ(session.image()->size, (ImageSize{8, 8}));
 }
 
-TEST(RenderSession, InvalidationsCancelAndResizeCannotPublishStaleImages)
+TEST(ProgressiveSession, InvalidationsCancelAndResizeCannotPublishStaleImages)
 {
   Fixture f;
   auto control = std::make_shared<Control>();
   control->blockFirst = true;
-  Jade::Detail::RenderSession session;
+  Jade::Detail::ProgressiveSession session;
   session.install(std::make_unique<RecordingBackend>(control));
   session.start();
   session.submit(f.snapshot(), {8, 8});
@@ -494,17 +496,17 @@ TEST(RenderSession, InvalidationsCancelAndResizeCannotPublishStaleImages)
   EXPECT_EQ(session.image()->size, (ImageSize{12, 7}));
 }
 
-TEST(RenderSession, PropagatesBackendFailuresAndEnforcesRoundContract)
+TEST(ProgressiveSession, PropagatesBackendFailuresAndEnforcesRoundContract)
 {
-  class Broken final : public Backend {
+  class Broken final : public ProgressiveBackend {
   public:
-    void render(const RenderScene &, const RenderRequest &, Film &) override
+    void render(const RayScene &, const RenderRequest &, Film &) override
     {
       throw std::runtime_error("worker failure");
     }
   };
   Fixture f;
-  Jade::Detail::RenderSession session;
+  Jade::Detail::ProgressiveSession session;
   session.install(std::make_unique<Broken>());
   session.start();
   session.submit(f.snapshot(), {8, 8});
@@ -527,7 +529,9 @@ TEST(OpenGLDisplay, PresentsSrgbPixelsWithCorrectImageOrientation)
   config.width = 64;
   config.height = 64;
   Jade::Window window(config);
-  Jade::Detail::OpenGLDisplay display(window, false);
+  Jade::Detail::OpenGLDevice device(window, false);
+  Jade::Detail::OpenGLDisplay display(device);
+  Jade::Detail::DebugDraw debug(device);
   display.begin({64, 64});
   const Image image{{2, 2}, {255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255}};
   display.image(image);
@@ -618,7 +622,7 @@ TEST(PathTracing, DiffuseWallReturnsIndirectColoredLight)
       {{2, -2, 0}, {-1, 0, 0}}, {{2, -2, 3}, {-1, 0, 0}}, {{2, 2, 3}, {-1, 0, 0}}, {{2, 2, 0}, {-1, 0, 0}}};
   wall.indices = {0, 1, 2, 0, 2, 3};
   f.add(wall, red);
-  const auto scene = RenderScene::build(f.snapshot());
+  const auto scene = RayScene::build(f.snapshot());
   PathIntegrator direct({1, 4}), indirect({4, 4});
   IndependentSampler a(42), b(42);
   LinearRGB da, db;
@@ -642,7 +646,7 @@ TEST(RayGeometry, SahBvhAgreesWithIndependentBruteForce)
           {static_cast<float>((i % 6) - 3) * 1.5f, static_cast<float>(i / 6 - 2) * 1.5f,
            -static_cast<float>(i % 3)});
   const auto snapshot = f.snapshot();
-  const auto scene = RenderScene::build(snapshot);
+  const auto scene = RayScene::build(snapshot);
   IndependentSampler sampler(817);
   for (std::uint64_t r = 0; r < 400; ++r) {
     sampler.start(0, r);
@@ -688,9 +692,11 @@ TEST(OpenGLDisplay, WireframeAndAxesAreIndependentUnlitDiagnostics)
   config.width = 64;
   config.height = 64;
   Jade::Window window(config);
-  Jade::Detail::OpenGLDisplay display(window, false);
+  Jade::Detail::OpenGLDevice device(window, false);
+  Jade::Detail::OpenGLDisplay display(device);
+  Jade::Detail::DebugDraw debug(device);
   display.begin({64, 64});
-  display.wireframe(snapshot, {64, 64});
+  debug.wireframe(snapshot, {64, 64});
   std::vector<unsigned char> pixels(64 * 64 * 4);
   glReadBuffer(GL_BACK);
   glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
@@ -701,7 +707,7 @@ TEST(OpenGLDisplay, WireframeAndAxesAreIndependentUnlitDiagnostics)
   EXPECT_GT(edges, 50);
   EXPECT_LT(edges, 1000);
   display.begin({64, 64});
-  display.axes(*snapshot.camera, {64, 64});
+  debug.axes(*snapshot.camera, {64, 64});
   glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
   int red = 0, green = 0;
   for (std::size_t i = 0; i < pixels.size(); i += 4) {
@@ -719,12 +725,12 @@ TEST(RayTracing, CustomIntegratorWorksHeadlesslyAndLocksDuringApplicationRun)
 {
   class Constant final : public Integrator {
   public:
-    LinearRGB Li(const Ray &, const RenderScene &, Sampler &) const override { return {.25f, .5f, .75f}; }
+    LinearRGB Li(const Ray &, const RayScene &, Sampler &) const override { return {.25f, .5f, .75f}; }
   };
   RayTracing renderer;
   renderer.setIntegrator(std::make_unique<Constant>());
   Film film({4, 4});
-  renderer.render(RenderScene{}, {{}, film.size(), 0, 0, {}}, film);
+  renderer.render(RayScene{}, {{}, film.size(), 0, 0, {}}, film);
   EXPECT_EQ(film.pixels()[0], (LinearRGB{.25f, .5f, .75f}));
   ApplicationConfig config;
   config.window.visible = false;
@@ -742,7 +748,7 @@ TEST(RendererTests, CancelledSceneCompilationCanBeRetried)
 {
   Fixture fixture;
   fixture.add(MeshData::cube());
-  SceneCompiler compiler;
+  RaySceneCompiler compiler;
   std::stop_source cancellation;
   cancellation.request_stop();
   EXPECT_EQ(compiler.compile(fixture.snapshot(), cancellation.get_token()).instanceCount(), 0u);

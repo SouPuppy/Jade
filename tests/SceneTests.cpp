@@ -1,4 +1,4 @@
-#include <Jade/Renderer/RayTracing.hpp>
+#include <Jade/Renderer/RayTracing/RayTracing.hpp>
 #include <Jade/Jade.hpp>
 
 #include "internal/Core/SceneTransforms.hpp"

@@ -35,6 +35,8 @@ void Window::RequestClose()
   glfwSetWindowShouldClose(m_Impl->window.Handle(), GLFW_TRUE);
 }
 
+void Window::SetTitle(const std::string& title) { glfwSetWindowTitle(m_Impl->window.Handle(),title.c_str()); }
+
 bool Window::IsKeyPressed(Key key) const
 {
   return m_Impl->input.IsDown(key);

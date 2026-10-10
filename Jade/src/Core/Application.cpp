@@ -47,13 +47,16 @@ Application::~Application()
 Assets &Application::assets() noexcept { return m_Impl->assets; }
 std::shared_ptr<Scene> Application::scene() const noexcept { return m_Impl->scene; }
 
-void Application::InstallRenderer(std::unique_ptr<Renderer::Backend> backend)
+void Application::InstallRenderer(std::type_index type, std::unique_ptr<Renderer::Backend> backend)
 {
   if (m_Impl->running || m_Impl->switching)
     throw std::logic_error("Renderer installation must occur outside Run and lifecycle callbacks.");
-  m_Impl->rendering.install(std::move(backend));
+  m_Impl->rendering.install(type, std::move(backend));
 }
 
+void Application::SelectRenderer(std::type_index type) { m_Impl->rendering.select(type); }
+const Renderer::Backend* Application::activeRenderer() const noexcept { return m_Impl->rendering.active(); }
+void Application::cycleRenderer() { m_Impl->rendering.cycle(); }
 Renderer::RenderProgress Application::renderProgress() const { return m_Impl->rendering.progress(); }
 
 void Application::setScene(std::shared_ptr<Scene> scene)
@@ -163,7 +166,7 @@ void Application::Run(const RunOptions &options)
   const auto start = Clock::now();
   std::uint64_t frames = 0;
   struct RunGuard {
-    Detail::RenderSession &rendering;
+    Detail::RenderHost &rendering;
     bool &running;
     const std::uint64_t &frames;
     Clock::time_point start;
@@ -192,6 +195,7 @@ void Application::Run(const RunOptions &options)
   Renderer::ImageSize previousSize;
 
   while (!m_Impl->window.ShouldClose() && !m_Impl->stopRequested) {
+    m_Impl->rendering.applyPending();
     if (ApplyPendingScene()) {
       previousFrame.reset();
       diagnostics.Resume();
@@ -215,6 +219,9 @@ void Application::Run(const RunOptions &options)
             flow == EventFlow::Continue && !m_Impl->stopRequested) {
           m_Impl->window.RequestClose();
         }
+        if (key->action == KeyAction::Pressed && key->event.key == Key::I &&
+            key->event.modifiers == Modifiers::None && flow == EventFlow::Continue &&
+            !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) cycleRenderer();
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
           if (key->event.key == Key::F) {
@@ -305,25 +312,13 @@ void Application::Run(const RunOptions &options)
       previousSize = imageSize;
     }
     m_Impl->rendering.rethrowError();
-    m_Impl->display.begin(imageSize);
+    std::optional<Renderer::SceneSnapshot> snapshot;
     if (active) {
       const auto camera = active->camera();
-      if (camera.has<Transform>() && camera.has<Camera>()) {
-        auto snapshot = Renderer::SceneSnapshot::capture(*active, m_Impl->assets);
-        if (m_Impl->wireframe) {
-          m_Impl->display.wireframe(snapshot, imageSize);
-        } else {
-          m_Impl->rendering.submit(snapshot, imageSize);
-          if (const auto image = m_Impl->rendering.image())
-            m_Impl->display.image(*image);
-        }
-        if (m_Impl->axisGizmo)
-          m_Impl->display.axes(*snapshot.camera, imageSize);
-      } else
-        m_Impl->rendering.invalidate();
-    } else
-      m_Impl->rendering.invalidate();
-    m_Impl->display.present();
+      if (camera.has<Transform>() && camera.has<Camera>())
+        snapshot = Renderer::SceneSnapshot::capture(*active, m_Impl->assets);
+    }
+    m_Impl->rendering.draw(snapshot ? &*snapshot : nullptr, imageSize, m_Impl->wireframe, m_Impl->axisGizmo);
     const auto completed = Clock::now();
     const auto stats = frameClock.FinishFrame(completed);
     frames = stats.frame;
@@ -341,10 +336,13 @@ void Application::Run(const RunOptions &options)
             "fps={:.1f} interval_avg={:.2f}ms interval_max={:.2f}ms work_avg={:.2f}ms work_max={:.2f}ms",
             summary.fps, summary.intervalAvgMs, summary.intervalMaxMs, summary.workAvgMs, summary.workMaxMs);
         const auto progress = renderProgress();
-        if (progress.samplesPerPixel != 0)
+        if (progress.samplesPerPixel && *progress.samplesPerPixel != 0)
           rayLog << Log::debug("revision={} spp={} size={}x{} sample_ms={:.2f}", progress.revision,
-                               progress.samplesPerPixel, progress.size.width, progress.size.height,
+                               *progress.samplesPerPixel, progress.size.width, progress.size.height,
                                progress.sampleMilliseconds);
+        else if (progress.completedFrames != 0)
+          performanceLog << Log::debug("renderer={} frames={} size={}x{} cpu_frame_ms={:.2f}",
+              progress.rendererName, progress.completedFrames, progress.size.width, progress.size.height, progress.frameMilliseconds);
       }
     }
     if (options.frameLimit != 0 && frames >= options.frameLimit) {

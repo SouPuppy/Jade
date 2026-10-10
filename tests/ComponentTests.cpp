@@ -1,4 +1,4 @@
-#include <Jade/Renderer/RayTracing.hpp>
+#include <Jade/Renderer/RayTracing/RayTracing.hpp>
 #include "TestScene.hpp"
 #include <Jade/Jade.hpp>
 #include "internal/Math/Matrix4.hpp"

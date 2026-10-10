@@ -6,7 +6,7 @@ add_library(Jade STATIC
   src/internal/Acceleration/BVH.cpp
   src/internal/Acceleration/BVH.hpp
   src/internal/Mesh/MeshAccess.hpp
-  src/internal/Renderer/RenderSceneAccess.hpp
+  src/internal/Renderer/RaySceneAccess.hpp
   src/Assets/Assets.cpp
   src/Core/Application.cpp
   src/Core/Entity.cpp
@@ -24,8 +24,8 @@ add_library(Jade STATIC
   src/internal/Platform/GLFW/GlfwRuntime.cpp
   src/internal/Platform/GLFW/GlfwWindow.cpp
   src/internal/Platform/Window.cpp
-  src/internal/Renderer/OpenGL/OpenGLContext.cpp
-  src/internal/Renderer/OpenGL/OpenGLProgram.cpp
+  src/internal/Renderer/Device/OpenGL/OpenGLContext.cpp
+  src/internal/Renderer/Device/OpenGL/OpenGLProgram.cpp
   src/Math/Matrix4.cpp
   src/Math/Quaternion.cpp
   src/Module/CameraControl.cpp
@@ -78,39 +78,73 @@ add_library(Jade STATIC
   src/internal/Platform/GLFW/GlfwRuntime.hpp
   src/internal/Platform/GLFW/GlfwWindow.hpp
   src/internal/Platform/Window.hpp
-  src/internal/Renderer/OpenGL/OpenGLContext.hpp
-  src/internal/Renderer/OpenGL/OpenGLProgram.hpp
+  src/internal/Renderer/Device/OpenGL/OpenGLContext.hpp
+  src/internal/Renderer/Device/OpenGL/OpenGLProgram.hpp
   src/Math/Matrix4.hpp
   src/Math/Quaternion.hpp
   src/Module/CameraControl.hpp
   include/Jade/Graphics/Geometry.hpp
   include/Jade/Graphics/Material.hpp
-  include/Jade/Renderer/BSDF.hpp
-  include/Jade/Renderer/Backend.hpp
-  include/Jade/Renderer/CameraFrame.hpp
-  include/Jade/Renderer/Image.hpp
-  include/Jade/Renderer/Integrator.hpp
-  include/Jade/Renderer/LinearRGB.hpp
-  include/Jade/Renderer/Ray.hpp
-  include/Jade/Renderer/RayTracing.hpp
-  include/Jade/Renderer/RenderScene.hpp
-  include/Jade/Renderer/Sampler.hpp
-  src/Renderer/BSDF.cpp
-  src/Renderer/BSDF.hpp
-  src/Renderer/Image.cpp
-  src/Renderer/Image.hpp
-  src/Renderer/Integrator.cpp
-  src/Renderer/Integrator.hpp
-  src/Renderer/Math.hpp
-  src/Renderer/RayTracing.cpp
-  src/Renderer/RayTracing.hpp
-  src/Renderer/RenderScene.cpp
-  src/Renderer/RenderScene.hpp
+  include/Jade/Renderer/RayTracing/BSDF.hpp
+  include/Jade/Renderer/Common/Backend.hpp
+  include/Jade/Renderer/Common/CameraFrame.hpp
+  include/Jade/Renderer/Common/Image.hpp
+  include/Jade/Renderer/RayTracing/Integrator.hpp
+  include/Jade/Renderer/Common/LinearRGB.hpp
+  include/Jade/Renderer/RayTracing/Ray.hpp
+  include/Jade/Renderer/RayTracing/RayTracing.hpp
+  include/Jade/Renderer/RayTracing/RayScene.hpp
+  include/Jade/Renderer/RayTracing/Sampler.hpp
+  src/Renderer/RayTracing/BSDF.cpp
+  src/Renderer/RayTracing/BSDF.hpp
+  src/Renderer/Common/Image.cpp
+  src/Renderer/Common/Image.hpp
+  src/Renderer/RayTracing/Integrator.cpp
+  src/Renderer/RayTracing/Integrator.hpp
+  src/Renderer/Common/Math.hpp
+  src/Renderer/RayTracing/RayTracing.cpp
+  src/Renderer/RayTracing/RayTracing.hpp
+  src/Renderer/RayTracing/RayScene.cpp
+  src/Renderer/RayTracing/RayScene.hpp
   src/internal/Core/SceneTransforms.hpp
-  src/internal/Renderer/OpenGL/OpenGLDisplay.cpp
-  src/internal/Renderer/OpenGL/OpenGLDisplay.hpp
-  src/internal/Renderer/RenderSession.cpp
-  src/internal/Renderer/RenderSession.hpp
+  src/internal/Renderer/Presentation/OpenGLDisplay.cpp
+  src/internal/Renderer/Presentation/OpenGLDisplay.hpp
+  src/internal/Renderer/Host/ProgressiveSession.cpp
+  src/internal/Renderer/Host/ProgressiveSession.hpp
+  include/Jade/Renderer/Common/FrameBackend.hpp
+  include/Jade/Renderer/Common/SceneSnapshot.hpp
+  include/Jade/Renderer/Rasterization/Rasterization.hpp
+  include/Jade/Renderer/RayTracing/ProgressiveBackend.hpp
+  src/Renderer/Common/CameraFrame.cpp
+  src/Renderer/Common/CameraFrame.hpp
+  src/Renderer/Common/Emitters.cpp
+  src/Renderer/Common/Emitters.hpp
+  src/Renderer/Common/SceneSnapshot.cpp
+  src/Renderer/Common/SceneSnapshot.hpp
+  src/Renderer/Rasterization/RasterPipeline.cpp
+  src/Renderer/Rasterization/RasterPipeline.hpp
+  src/Renderer/Rasterization/Rasterization.cpp
+  src/Renderer/Rasterization/Rasterization.hpp
+  src/Renderer/Rasterization/Shaders/brdf.frag
+  src/Renderer/Rasterization/Shaders/final.frag
+  src/Renderer/Rasterization/Shaders/forward.frag
+  src/Renderer/Rasterization/Shaders/full.vert
+  src/Renderer/Rasterization/Shaders/glass-shadow.frag
+  src/Renderer/Rasterization/Shaders/glass.frag
+  src/Renderer/Rasterization/Shaders/mesh.vert
+  src/Renderer/Rasterization/Shaders/normal.frag
+  src/Renderer/Rasterization/Shaders/prefilter.frag
+  src/Renderer/Rasterization/Shaders/shadow.frag
+  src/Renderer/Rasterization/Shaders/shared.glsl
+  src/Renderer/RayTracing/Ray.cpp
+  src/Renderer/RayTracing/Ray.hpp
+  src/internal/Renderer/Debug/DebugDraw.cpp
+  src/internal/Renderer/Debug/DebugDraw.hpp
+  src/internal/Renderer/Device/OpenGL/OpenGLDevice.cpp
+  src/internal/Renderer/Device/OpenGL/OpenGLDevice.hpp
+  src/internal/Renderer/Host/RenderHost.cpp
+  src/internal/Renderer/Host/RenderHost.hpp
+  src/internal/Renderer/RasterizationAccess.hpp
 )
 add_library(Jade::Jade ALIAS Jade)
 target_include_directories(Jade PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -124,3 +158,18 @@ target_link_libraries(Jade PRIVATE glfw jade_glad OpenGL::GL)
 jade_configure_target(Jade)
 get_target_property(jade_sources Jade SOURCES)
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${jade_sources})
+
+set(jade_shader_root "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Rasterization/Shaders")
+set(jade_shader_files mesh.vert full.vert forward.frag shadow.frag glass-shadow.frag normal.frag final.frag glass.frag prefilter.frag brdf.frag)
+set(jade_shader_dependencies "${jade_shader_root}/shared.glsl")
+foreach(shader IN LISTS jade_shader_files)
+  list(APPEND jade_shader_dependencies "${jade_shader_root}/${shader}")
+endforeach()
+set(jade_shader_header "${CMAKE_CURRENT_BINARY_DIR}/generated/JadeShaders.hpp")
+add_custom_command(OUTPUT "${jade_shader_header}"
+  COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/EmbedShaders.py"
+    "${jade_shader_header}" "${jade_shader_root}" ${jade_shader_files}
+  DEPENDS ${jade_shader_dependencies} "${PROJECT_SOURCE_DIR}/cmake/EmbedShaders.py"
+  VERBATIM)
+target_sources(Jade PRIVATE "${jade_shader_header}")
+target_include_directories(Jade PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")

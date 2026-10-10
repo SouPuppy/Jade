@@ -169,7 +169,7 @@ Rendering can also run headlessly through public interfaces:
 
 ```cpp
 auto snapshot = Jade::Renderer::SceneSnapshot::capture(*scene, app.assets());
-auto prepared = Jade::Renderer::RenderScene::build(snapshot);
+auto prepared = Jade::Renderer::RayScene::build(snapshot);
 Jade::Renderer::Film film({320, 200});
 Jade::Renderer::RayTracing renderer;
 for (std::uint64_t sample = 0; sample < 64; ++sample) {
@@ -178,7 +178,7 @@ for (std::uint64_t sample = 0; sample < 64; ++sample) {
 auto image = film.resolve(); // Top-left origin, opaque sRGB RGBA8.
 ```
 
-Backend computes one sample round into linear HDR Film, with no window access. RenderRequest supplies camera, size, sample index, seed and cancellation token. Custom Integrator implementations receive Ray, immutable RenderScene and Sampler; install one with `RayTracing::setIntegrator`. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
+Backend computes one sample round into linear HDR Film, with no window access. RenderRequest supplies camera, size, sample index, seed and cancellation token. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with `RayTracing::setIntegrator`. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
 
 PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding once; OpenGL does not repeat color conversion. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
 
@@ -308,7 +308,7 @@ Public interfaces are split by purpose, with one optional includes-only entry po
 | Input/, Events/ | Key/button bindings and event contracts |
 | Application.hpp, Color.hpp, Log.hpp, WindowConfig.hpp | Application loop and value/configuration types |
 
-There are no folder aggregation headers. Source `.cpp` files include their matching private `.hpp` first and are explicitly listed in CMake. Registry storage, RenderSession, OpenGL display, OBJ parsing, input state, event dispatch, matrix construction and clock are internal. Consumers receive only `Jade/include`.
+There are no folder aggregation headers. Source `.cpp` files include their matching private `.hpp` first and are explicitly listed in CMake. Registry storage, ProgressiveSession, OpenGL display, OBJ parsing, input state, event dispatch, matrix construction and clock are internal. Consumers receive only `Jade/include`.
 
 ## Frame scheduling and logs
 
@@ -448,7 +448,7 @@ Jade/src/Math/       # Matrix4, Quaternion
 Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
 Jade/src/Renderer/   # Scene TLAS compilation, BSDF, path integration and Film
-Jade/src/internal/   # Registry, RenderSession, OpenGL display, platform and input
+Jade/src/internal/   # Registry, ProgressiveSession, OpenGL display, platform and input
 Demo/               # Two scenes, cube/bunny and animated hierarchy
 assets/             # Bunny OBJ and attribution
 tests/              # ECS, assets, math, input, scheduling and pixel checks

@@ -1,7 +1,7 @@
 #include <Jade/Jade.hpp>
 #include "internal/Acceleration/BVH.hpp"
 #include "internal/Mesh/MeshAccess.hpp"
-#include "internal/Renderer/RenderSceneAccess.hpp"
+#include "internal/Renderer/RaySceneAccess.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <numeric>
@@ -157,7 +157,7 @@ TEST(CompiledMesh, StandaloneBlasPreservesOriginalTriangleIdsAndLifetime)
     identity = MeshAccess::identity(assets.get(handle));
     retained.instances.push_back({assets.share(handle), Matrix4::Identity(), Materials::Gold(), 19});
   }
-  SceneCompiler first, second;
+  RaySceneCompiler first, second;
   const auto a = first.compile(retained), b = second.compile(retained);
   EXPECT_EQ(MeshAccess::identity(*retained.instances[0].mesh), identity);
   ASSERT_TRUE(a.intersect({{0, 0, 1}, {0, 0, -1}}, hit));
@@ -168,18 +168,18 @@ TEST(CompiledMesh, StandaloneBlasPreservesOriginalTriangleIdsAndLifetime)
 TEST(SceneAcceleration, ReusesRefitsAndKeepsPublishedScenesImmutable)
 {
   auto input = instances(12);
-  SceneCompiler compiler;
+  RaySceneCompiler compiler;
   const auto first = compiler.compile(input);
-  EXPECT_EQ(RenderSceneAccess::update(first), SceneAccelerationUpdate::Rebuilt);
+  EXPECT_EQ(RaySceneAccess::update(first), SceneAccelerationUpdate::Rebuilt);
   input.camera = CameraFrame{};
   input.instances[0].material = Materials::Gold();
   const auto material = compiler.compile(input);
-  EXPECT_EQ(RenderSceneAccess::update(material), SceneAccelerationUpdate::Reused);
-  EXPECT_EQ(RenderSceneAccess::geometryIdentity(first), RenderSceneAccess::geometryIdentity(material));
+  EXPECT_EQ(RaySceneAccess::update(material), SceneAccelerationUpdate::Reused);
+  EXPECT_EQ(RaySceneAccess::geometryIdentity(first), RaySceneAccess::geometryIdentity(material));
   input.instances[0].objectToWorld.at(1, 3) = .03f;
   const auto moved = compiler.compile(input);
-  EXPECT_EQ(RenderSceneAccess::update(moved), SceneAccelerationUpdate::Refit);
-  EXPECT_NE(RenderSceneAccess::geometryIdentity(first), RenderSceneAccess::geometryIdentity(moved));
+  EXPECT_EQ(RaySceneAccess::update(moved), SceneAccelerationUpdate::Refit);
+  EXPECT_NE(RaySceneAccess::geometryIdentity(first), RaySceneAccess::geometryIdentity(moved));
   SurfaceHit oldHit, newHit;
   ASSERT_TRUE(first.intersect({{0, 0, 1}, {0, 0, -1}}, oldHit));
   ASSERT_TRUE(moved.intersect({{0, 0, 1}, {0, 0, -1}}, newHit));
@@ -191,25 +191,25 @@ TEST(SceneAcceleration, ReusesRefitsAndKeepsPublishedScenesImmutable)
   EXPECT_FALSE(away.occluded({{0, 0, 1}, {0, 0, -1}}));
   EXPECT_TRUE(first.occluded({{0, 0, 1}, {0, 0, -1}}));
   std::swap(input.instances[0], input.instances[1]);
-  EXPECT_EQ(RenderSceneAccess::update(compiler.compile(input)), SceneAccelerationUpdate::Rebuilt);
+  EXPECT_EQ(RaySceneAccess::update(compiler.compile(input)), SceneAccelerationUpdate::Rebuilt);
   input.instances[0].mesh = std::make_shared<const Mesh>(Mesh::compile(MeshData::sphere()));
-  EXPECT_EQ(RenderSceneAccess::update(compiler.compile(input)), SceneAccelerationUpdate::Rebuilt);
+  EXPECT_EQ(RaySceneAccess::update(compiler.compile(input)), SceneAccelerationUpdate::Rebuilt);
   input.instances.pop_back();
-  EXPECT_EQ(RenderSceneAccess::update(compiler.compile(input)), SceneAccelerationUpdate::Rebuilt);
+  EXPECT_EQ(RaySceneAccess::update(compiler.compile(input)), SceneAccelerationUpdate::Rebuilt);
 }
 
 TEST(SceneAcceleration, QualityDegradationTriggersSahRebuild)
 {
   auto input = instances(64);
-  SceneCompiler compiler;
+  RaySceneCompiler compiler;
   const auto original = compiler.compile(input);
   // Interleave distant groups in the old contiguous leaves.
   for (std::size_t i = 0; i < input.instances.size(); ++i)
     input.instances[i].objectToWorld.at(0, 3) = static_cast<float>((i % 2) * 32 + i / 2) * 2;
   const auto rebuilt = compiler.compile(input);
-  EXPECT_EQ(RenderSceneAccess::update(rebuilt), SceneAccelerationUpdate::Rebuilt);
-  EXPECT_GT(RenderSceneAccess::statistics(rebuilt).nodes, 1u);
-  EXPECT_NE(RenderSceneAccess::geometryIdentity(original), RenderSceneAccess::geometryIdentity(rebuilt));
+  EXPECT_EQ(RaySceneAccess::update(rebuilt), SceneAccelerationUpdate::Rebuilt);
+  EXPECT_GT(RaySceneAccess::statistics(rebuilt).nodes, 1u);
+  EXPECT_NE(RaySceneAccess::geometryIdentity(original), RaySceneAccess::geometryIdentity(rebuilt));
   SurfaceHit hit;
   EXPECT_TRUE(rebuilt.intersect({{64, 0, 1}, {0, 0, -1}}, hit));
 }
@@ -218,21 +218,21 @@ TEST(SceneAcceleration, EmitterDistributionTracksOnlyItsDependencies)
 {
   auto input = instances(3);
   input.instances[2].material = Materials::Emissive();
-  SceneCompiler compiler;
+  RaySceneCompiler compiler;
   const auto first = compiler.compile(input);
   input.camera = CameraFrame{};
   input.instances[0].material = Materials::Gold();
   input.instances[0].objectToWorld.at(1, 3) = .02f;
   const auto ordinary = compiler.compile(input);
-  EXPECT_EQ(RenderSceneAccess::emitterIdentity(first), RenderSceneAccess::emitterIdentity(ordinary));
+  EXPECT_EQ(RaySceneAccess::emitterIdentity(first), RaySceneAccess::emitterIdentity(ordinary));
   input.instances[2].objectToWorld.at(1, 3) = 2;
   const auto moved = compiler.compile(input);
-  EXPECT_NE(RenderSceneAccess::emitterIdentity(first), RenderSceneAccess::emitterIdentity(moved));
+  EXPECT_NE(RaySceneAccess::emitterIdentity(first), RaySceneAccess::emitterIdentity(moved));
   EXPECT_FLOAT_EQ(first.sampleEmitter(.5f, {.4f, .3f}).position.y + 2,
                   moved.sampleEmitter(.5f, {.4f, .3f}).position.y);
   input.instances[2].material.emission = {20, 10, 10};
   const auto changed = compiler.compile(input);
-  EXPECT_NE(RenderSceneAccess::emitterIdentity(moved), RenderSceneAccess::emitterIdentity(changed));
+  EXPECT_NE(RaySceneAccess::emitterIdentity(moved), RaySceneAccess::emitterIdentity(changed));
   input.instances[2].material.twoSidedEmission = true;
   EXPECT_TRUE(compiler.compile(input).sampleEmitter(.5f, {.4f, .3f}).twoSided);
 }
@@ -240,7 +240,7 @@ TEST(SceneAcceleration, EmitterDistributionTracksOnlyItsDependencies)
 TEST(SceneAcceleration, CancellationAndFailureDoNotCommitCompilerCaches)
 {
   auto input = instances(16);
-  SceneCompiler compiler;
+  RaySceneCompiler compiler;
   const auto first = compiler.compile(input);
   auto moved = input;
   moved.instances[0].objectToWorld.at(1, 3) = 3;
@@ -250,9 +250,9 @@ TEST(SceneAcceleration, CancellationAndFailureDoNotCommitCompilerCaches)
   moved.instances[0].material.roughness = -1;
   EXPECT_THROW(compiler.compile(moved), std::invalid_argument);
   const auto restored = compiler.compile(input);
-  EXPECT_EQ(RenderSceneAccess::geometryIdentity(restored), RenderSceneAccess::geometryIdentity(first));
-  EXPECT_EQ(RenderSceneAccess::emitterIdentity(restored), RenderSceneAccess::emitterIdentity(first));
-  EXPECT_EQ(RenderSceneAccess::update(restored), SceneAccelerationUpdate::Reused);
+  EXPECT_EQ(RaySceneAccess::geometryIdentity(restored), RaySceneAccess::geometryIdentity(first));
+  EXPECT_EQ(RaySceneAccess::emitterIdentity(restored), RaySceneAccess::emitterIdentity(first));
+  EXPECT_EQ(RaySceneAccess::update(restored), SceneAccelerationUpdate::Reused);
 }
 
 TEST(SahBvh, NonuniformFixtureReducesCostAndCandidateTests)

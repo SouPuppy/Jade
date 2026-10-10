@@ -8,7 +8,7 @@ Entity identifies an existence in Scene. Components describe its state, systems 
 flowchart LR
   Scene --> Snapshot[SceneSnapshot]
   Assets --> Snapshot
-  Snapshot --> Compiler[SceneCompiler]
+  Snapshot --> Compiler[RaySceneCompiler]
   Compiler --> Geometry[Mesh BLAS + instance TLAS]
   Compiler --> Emitters[Emissive triangle distribution]
   Camera[CameraFrame] --> Rays
@@ -33,10 +33,10 @@ flowchart LR
 | Graphics/Geometry.hpp | MeshHandle component |
 | Graphics/Material.hpp, Graphics/Materials.hpp | Material values and diffuse/metal/glass/emissive presets |
 | Graphics/Camera.hpp, Graphics/Motion.hpp | Projection settings and scene motion |
-| Renderer/Ray.hpp, Renderer/RenderScene.hpp | Ray queries, surface hits, immutable scene compilation |
-| Renderer/BSDF.hpp, Renderer/Sampler.hpp, Renderer/Integrator.hpp | Scattering, reproducible samples and light transport |
-| Renderer/Image.hpp, Renderer/CameraFrame.hpp | Linear HDR film, sRGB output and camera ray generation |
-| Renderer/Backend.hpp, Renderer/RayTracing.hpp | Backend interface and multithreaded CPU path tracer |
+| Renderer/Ray.hpp, Renderer/RayTracing/RayScene.hpp | Ray queries, surface hits, immutable scene compilation |
+| Renderer/RayTracing/BSDF.hpp, Renderer/Sampler.hpp, Renderer/RayTracing/Integrator.hpp | Scattering, reproducible samples and light transport |
+| Renderer/Common/Image.hpp, Renderer/CameraFrame.hpp | Linear HDR film, sRGB output and camera ray generation |
+| Renderer/Backend.hpp, Renderer/RayTracing/RayTracing.hpp | Backend interface and multithreaded CPU path tracer |
 | Application.hpp | Window loop, active Scene, events and renderer installation |
 | Module/CameraControl.hpp, Input/, Events/ | Scene-local controls and typed events |
 | Jade.hpp | Optional includes-only entry point |
@@ -155,7 +155,7 @@ Application::use<Renderer::RayTracing>(config) installs the owned backend before
 
 The main thread alone accesses Scene, Entity and Assets and performs OpenGL calls. SceneSnapshot::capture copies resolved transforms, materials and camera pose while retaining immutable meshes. A coordinator compiles snapshots and drives the backend; a persistent worker pool processes 16x16 pixel tiles. Worker sampling depends on seed, pixel, sample and dimension, so thread scheduling does not change results. Integrators used by multiple workers must support concurrent const Li calls.
 
-Assets compiles each Mesh BLAS before publishing the resource. SceneCompiler consumes precompiled immutable meshes and holds no mesh-build cache. A three-axis 16-bin SAH builder constructs a separate instance TLAS using transformed bounds. Transform-only changes refit a private copy; a cost above 1.5 times its last SAH build triggers reconstruction. Instance layout or mesh changes rebuild; material/camera changes reuse geometry. Mesh intersection transforms rays into object space without normalizing their directions, preserving world ray parameters under nonuniform scale and shear. Shading normals use inverse transpose transforms; geometric normals identify front/back faces. Degenerate triangles are excluded, both sides can intersect, and shadow queries terminate on any occluder. Cancellation checkpoints interrupt TLAS construction/refit; a cancelled compilation returns an empty scene without modifying the last successful cache state. Old published nodes are never changed by refit. BLAS and TLAS share a private binary BVH with near-first traversal, target leaf size 4, depth cap 48, deterministic fallback for inseparable centroids and double-precision SAH costs. Original triangle IDs are preserved through an independent primitive-order array. SceneCompiler itself belongs to one coordinator and is not a concurrent mutable service.
+Assets compiles each Mesh BLAS before publishing the resource. RaySceneCompiler consumes precompiled immutable meshes and holds no mesh-build cache. A three-axis 16-bin SAH builder constructs a separate instance TLAS using transformed bounds. Transform-only changes refit a private copy; a cost above 1.5 times its last SAH build triggers reconstruction. Instance layout or mesh changes rebuild; material/camera changes reuse geometry. Mesh intersection transforms rays into object space without normalizing their directions, preserving world ray parameters under nonuniform scale and shear. Shading normals use inverse transpose transforms; geometric normals identify front/back faces. Degenerate triangles are excluded, both sides can intersect, and shadow queries terminate on any occluder. Cancellation checkpoints interrupt TLAS construction/refit; a cancelled compilation returns an empty scene without modifying the last successful cache state. Old published nodes are never changed by refit. BLAS and TLAS share a private binary BVH with near-first traversal, target leaf size 4, depth cap 48, deterministic fallback for inseparable centroids and double-precision SAH costs. Original triangle IDs are preserved through an independent primitive-order array. RaySceneCompiler itself belongs to one coordinator and is not a concurrent mutable service.
 
 PathIntegrator handles emitted radiance, next-event sampling of emissive triangles, BSDF sampling, multiple importance sampling and Russian roulette. Emitter selection uses transformed area times emission luminance. Its immutable distribution is reused across camera changes, ordinary material edits and non-emissive instance motion. Emissive transforms/emission settings or instance-layout changes rebuild it. Diffuse scattering is Lambertian; metals use GGX; dielectrics use Fresnel reflection, refraction and total internal reflection, with smooth and rough variants. Glass assumes a closed mesh separating air from one dielectric; nested media and volumetric absorption are not implemented. Secondary rays use offset surface origins with float error bounds and unrestricted distance. Near/far camera clipping applies only to primary rays. Escaped rays contribute black. There is no ambient term, fixed directional light or implicit environment.
 

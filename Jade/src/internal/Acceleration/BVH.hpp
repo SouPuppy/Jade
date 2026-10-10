@@ -1,5 +1,5 @@
 #pragma once
-#include <Jade/Renderer/Ray.hpp>
+#include <Jade/Renderer/RayTracing/Ray.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
