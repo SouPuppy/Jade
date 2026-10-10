@@ -8,9 +8,9 @@
 
 namespace Jade {
 namespace Detail { class Registry; }
-class World;
+class Scene;
 
-// A copyable identity. Components belong to the World, not to this handle.
+// A copyable identity. Components belong to the Scene, not to this handle.
 // A const handle can access mutable components, like a const pointer value.
 class Entity final {
 public:
@@ -40,7 +40,7 @@ public:
   }
 
 private:
-  friend class World;
+  friend class Scene;
   Entity(const std::shared_ptr<Detail::Registry>& registry, std::uint32_t index, std::uint32_t generation)
     : m_Registry(registry), m_Index(index), m_Generation(generation) {}
 

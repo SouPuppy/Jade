@@ -9,6 +9,9 @@ add_executable(JadeSmokeTests
   LogTests.cpp
   FrameDiagnosticsTests.cpp
   EventLogTests.cpp
+  SceneTests.cpp
+  ModuleTests.cpp
+  TestScene.hpp
 )
 target_link_libraries(JadeSmokeTests PRIVATE Jade::Jade GTest::gtest_main jade_glad glfw)
 # Only tests inspect pixels and scheduling internals; consumers receive public headers.

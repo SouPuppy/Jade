@@ -3,8 +3,9 @@ add_library(Jade STATIC
   src/Core/Application.cpp
   src/Core/Entity.cpp
   src/Core/Log.cpp
-  src/Core/World.cpp
+  src/Core/Scene.cpp
   src/Graphics/builtins/Cube.cpp
+  src/Graphics/builtins/Sphere.cpp
   src/Graphics/Mesh.cpp
   src/Graphics/Motion.cpp
   src/internal/Core/Registry.cpp
@@ -21,15 +22,18 @@ add_library(Jade STATIC
   src/internal/Renderer/OpenGL/OpenGLRenderer.cpp
   src/internal/Renderer/Renderer.cpp
   src/internal/Renderer/RenderSystem.cpp
+  src/Math/Matrix4.cpp
   src/Math/Quaternion.cpp
+  src/Module/CameraControl.cpp
   include/Jade/Application.hpp
   include/Jade/Assets/AssetHandle.hpp
   include/Jade/Assets/Assets.hpp
   include/Jade/Color.hpp
   include/Jade/Core/Entity.hpp
   include/Jade/Core/Transform.hpp
-  include/Jade/Core/World.hpp
+  include/Jade/Core/Scene.hpp
   include/Jade/Events/Event.hpp
+  include/Jade/Events/SceneLifecycle.hpp
   include/Jade/Events/FrameUpdate.hpp
   include/Jade/Events/Keyboard.hpp
   include/Jade/Events/Mouse.hpp
@@ -44,15 +48,18 @@ add_library(Jade STATIC
   include/Jade/Input/MouseButton.hpp
   include/Jade/Jade.hpp
   include/Jade/Log.hpp
+  include/Jade/Math/Matrix4.hpp
   include/Jade/Math/Quaternion.hpp
   include/Jade/Math/Vector.hpp
+  include/Jade/Module/CameraControl.hpp
   include/Jade/WindowConfig.hpp
   src/Assets/Assets.hpp
   src/Core/Application.hpp
   src/Core/Entity.hpp
   src/Core/Log.hpp
-  src/Core/World.hpp
+  src/Core/Scene.hpp
   src/Graphics/builtins/Cube.hpp
+  src/Graphics/builtins/Sphere.hpp
   src/Graphics/Mesh.hpp
   src/Graphics/Motion.hpp
   src/internal/Core/FrameClock.hpp
@@ -74,8 +81,11 @@ add_library(Jade STATIC
   src/internal/Renderer/OpenGL/OpenGLProgram.hpp
   src/internal/Renderer/OpenGL/OpenGLRenderer.hpp
   src/internal/Renderer/Renderer.hpp
+  src/internal/Renderer/SceneTransforms.hpp
   src/internal/Renderer/RenderSystem.hpp
+  src/Math/Matrix4.hpp
   src/Math/Quaternion.hpp
+  src/Module/CameraControl.hpp
 )
 add_library(Jade::Jade ALIAS Jade)
 target_include_directories(Jade PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

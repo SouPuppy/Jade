@@ -8,7 +8,7 @@ namespace Jade::Motion {
 Vec3 getFront(const Transform& transform);
 Vec3 getRight(const Transform& transform);
 Vec3 getUp(const Transform& transform);
-// Aims -Z at a world target. Does not retain a target or change position.
+// Target and up are in the parent coordinate system. Root coordinates are world coordinates.
 void lookAt(Transform& transform, Vec3 target, Vec3 up = {0, 1, 0});
 
 // Distances per call. Held input passes speed * event.dt.
@@ -16,7 +16,7 @@ void forward(Transform& transform, float distance = 0.1f);
 void backward(Transform& transform, float distance = 0.1f);
 void right(Transform& transform, float distance = 0.1f);
 void left(Transform& transform, float distance = 0.1f);
-// Vertical translation remains along world Y.
+// Vertical translation follows parent Y (world Y for a root).
 void up(Transform& transform, float distance = 0.1f);
 void down(Transform& transform, float distance = 0.1f);
 // Degrees around the current local axes. Positive yaw looks right, pitch up,

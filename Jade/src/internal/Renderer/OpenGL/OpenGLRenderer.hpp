@@ -19,6 +19,7 @@ public:
   ~OpenGLRenderer();
 
   void setWireframe(bool enabled) noexcept { m_Wireframe = enabled; }
+  bool wireframeEnabled() const noexcept { return m_Wireframe; }
   bool BeginFrame(FramebufferSize size, const Color& clearColor);
   void DrawMesh(const Mesh& mesh, const DrawParameters& parameters);
   void Present();

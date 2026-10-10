@@ -1,4 +1,4 @@
-#include <Jade/Core/World.hpp>
+#include <Jade/Core/Scene.hpp>
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Assets/Assets.hpp>
 #include <Jade/Graphics/MeshRenderer.hpp>
@@ -28,12 +28,12 @@ struct OnDestroy {
 struct Throws { Throws() { throw std::runtime_error("constructor"); } };
 } // namespace
 
-TEST(World, EmptyIdentitiesAcceptPlainAndNoncopyableComponents)
+TEST(Scene, EmptyIdentitiesAcceptPlainAndNoncopyableComponents)
 {
-  Jade::World world;
-  auto entity = world.create();
+  Jade::Scene scene;
+  auto entity = scene.create();
   EXPECT_TRUE(entity.valid());
-  EXPECT_TRUE(world.owns(entity));
+  EXPECT_TRUE(scene.owns(entity));
   EXPECT_FALSE(entity.has<Jade::Transform>());
   EXPECT_EQ(entity.add<Counter>(42).value, 42);
   EXPECT_EQ(*entity.add<Owned>(7).value, 7);
@@ -50,18 +50,18 @@ TEST(World, EmptyIdentitiesAcceptPlainAndNoncopyableComponents)
   EXPECT_FALSE(entity.has<Throws>());
 }
 
-TEST(World, DestroyedEntitiesNeverAliasReusedSlotsAndOwnersStayDistinct)
+TEST(Scene, DestroyedEntitiesNeverAliasReusedSlotsAndOwnersStayDistinct)
 {
-  Jade::World world, other;
-  const auto old = world.create();
+  Jade::Scene scene, other;
+  const auto old = scene.create();
   const auto foreign = other.create();
   EXPECT_EQ(old.id(), foreign.id());
   EXPECT_NE(old, foreign);
-  EXPECT_FALSE(world.owns(foreign));
-  EXPECT_THROW(world.destroy(foreign), std::invalid_argument);
+  EXPECT_FALSE(scene.owns(foreign));
+  EXPECT_THROW(scene.destroy(foreign), std::invalid_argument);
   old.add<Counter>(5);
-  world.destroy(old);
-  const auto replacement = world.create();
+  scene.destroy(old);
+  const auto replacement = scene.create();
   replacement.add<Counter>(99);
   EXPECT_NE(old.id(), replacement.id());
   EXPECT_FALSE(old.valid());
@@ -69,25 +69,25 @@ TEST(World, DestroyedEntitiesNeverAliasReusedSlotsAndOwnersStayDistinct)
   EXPECT_THROW(old.get<Counter>(), std::logic_error);
   EXPECT_THROW(old.add<Counter>(), std::logic_error);
   EXPECT_THROW(old.remove<Counter>(), std::logic_error);
-  EXPECT_THROW(world.destroy(old), std::logic_error);
+  EXPECT_THROW(scene.destroy(old), std::logic_error);
   EXPECT_EQ(replacement.get<Counter>().value, 99);
 }
 
-TEST(World, HandlesExpireWithWorldAndComponentsAreDestroyedExactlyOnce)
+TEST(Scene, HandlesExpireWithSceneAndComponentsAreDestroyedExactlyOnce)
 {
   Jade::Entity handle;
   int destructions = 0;
   {
-    Jade::World world;
-    handle = world.create();
+    Jade::Scene scene;
+    handle = scene.create();
     handle.add<OnDestroy>([&] { ++destructions; });
-    auto removed = world.create();
+    auto removed = scene.create();
     removed.add<OnDestroy>([&] { ++destructions; });
     removed.remove<OnDestroy>();
     EXPECT_EQ(destructions, 1);
     removed.remove<OnDestroy>();
     removed.add<OnDestroy>([&] { ++destructions; });
-    world.destroy(removed);
+    scene.destroy(removed);
     EXPECT_EQ(destructions, 2);
   }
   EXPECT_EQ(destructions, 3);
@@ -97,14 +97,14 @@ TEST(World, HandlesExpireWithWorldAndComponentsAreDestroyedExactlyOnce)
   EXPECT_THROW(handle.get<OnDestroy>(), std::logic_error);
 }
 
-TEST(World, ComponentReferencesRemainStableAcrossPoolAndEntityGrowth)
+TEST(Scene, ComponentReferencesRemainStableAcrossPoolAndEntityGrowth)
 {
-  Jade::World world;
-  auto first = world.create();
+  Jade::Scene scene;
+  auto first = scene.create();
   auto& counter = first.add<Counter>(9);
   const auto* address = &counter;
   for (int index = 0; index < 1024; ++index) {
-    auto next = world.create();
+    auto next = scene.create();
     next.add<Counter>(index);
     next.add<Label>(index);
   }
@@ -112,65 +112,65 @@ TEST(World, ComponentReferencesRemainStableAcrossPoolAndEntityGrowth)
   EXPECT_EQ(counter.value, 9);
 }
 
-TEST(World, QueriesSnapshotMatchesSkipRemovalsAndDeferNewMatches)
+TEST(Scene, QueriesSnapshotMatchesSkipRemovalsAndDeferNewMatches)
 {
-  Jade::World world;
-  const auto first = world.create(), erased = world.create(), stripped = world.create();
-  const auto missing = world.create();
+  Jade::Scene scene;
+  const auto first = scene.create(), erased = scene.create(), stripped = scene.create();
+  const auto missing = scene.create();
   for (auto entity : {first, erased, stripped}) {
     entity.add<Counter>(); entity.add<Label>();
   }
   missing.add<Counter>();
   Jade::Entity created;
   std::vector<Jade::Entity> visited;
-  world.each<Counter, Label>([&](Jade::Entity entity, Counter&, Label&) {
+  for (const auto entity : scene.view<Counter, Label>()) {
     visited.push_back(entity);
     if (entity == first) {
-      world.destroy(erased);
+      scene.destroy(erased);
       stripped.remove<Label>();
       missing.add<Label>();
-      created = world.create(); // May reuse erased's slot, with a different generation.
+      created = scene.create(); // May reuse erased's slot, with a different generation.
       created.add<Counter>(); created.add<Label>();
     }
-  });
+  }
   EXPECT_EQ(visited, (std::vector<Jade::Entity>{first}));
   visited.clear();
-  world.each<Counter, Label>([&](Jade::Entity entity, Counter&, Label&) { visited.push_back(entity); });
+  for (const auto entity : scene.view<Counter, Label>()) visited.push_back(entity);
   ASSERT_EQ(visited.size(), 3u);
   EXPECT_NE(std::find(visited.begin(), visited.end(), created), visited.end());
   EXPECT_NE(std::find(visited.begin(), visited.end(), missing), visited.end());
 }
 
-TEST(World, ComponentDestructorsCanMutateTheWorldAfterRemoval)
+TEST(Scene, ComponentDestructorsCanMutateTheSceneAfterRemoval)
 {
-  Jade::World world;
-  const auto entity = world.create();
+  Jade::Scene scene;
+  const auto entity = scene.create();
   entity.add<OnDestroy>([&] {
     EXPECT_FALSE(entity.has<OnDestroy>());
     entity.add<Counter>(17);
-    world.create().add<Label>();
+    scene.create().add<Label>();
   });
   entity.remove<OnDestroy>();
   EXPECT_EQ(entity.get<Counter>().value, 17);
   entity.add<OnDestroy>([&] {
     EXPECT_FALSE(entity.valid());
-    world.create().add<Counter>(88);
+    scene.create().add<Counter>(88);
   });
-  world.destroy(entity);
+  scene.destroy(entity);
   EXPECT_FALSE(entity.valid());
 }
 
-TEST(World, ConstructorDestroyingItsEntityCannotAttachToAReusedIdentity)
+TEST(Scene, ConstructorDestroyingItsEntityCannotAttachToAReusedIdentity)
 {
   struct DuringConstruction {
     explicit DuringConstruction(std::function<void()> callback) { callback(); }
   };
-  Jade::World world;
-  auto entity = world.create();
+  Jade::Scene scene;
+  auto entity = scene.create();
   Jade::Entity next;
   EXPECT_THROW(entity.add<DuringConstruction>([&] {
-    world.destroy(entity);
-    next = world.create();
+    scene.destroy(entity);
+    next = scene.create();
   }), std::logic_error);
   EXPECT_TRUE(next.valid());
   EXPECT_FALSE(next.has<DuringConstruction>());
@@ -179,9 +179,9 @@ TEST(World, ConstructorDestroyingItsEntityCannotAttachToAReusedIdentity)
 TEST(Assets, SharedImmutableMeshesKeepIndependentEntityState)
 {
   Jade::Assets assets;
-  Jade::World world;
+  Jade::Scene scene;
   const auto mesh = assets.add(Jade::Mesh::cube());
-  const auto first = world.create(), second = world.create();
+  const auto first = scene.create(), second = scene.create();
   first.add<Jade::Transform>().position = {-2, 0, 0};
   second.add<Jade::Transform>().position = {2, 0, 0};
   first.add<Jade::MeshRenderer>(mesh, Jade::Color{1, 0, 0, 1});
@@ -195,7 +195,7 @@ TEST(Assets, SharedImmutableMeshesKeepIndependentEntityState)
   const auto* address = &assets.get(mesh);
   for (int index = 0; index < 128; ++index) assets.add(Counter{index});
   EXPECT_EQ(&assets.get(mesh), address);
-  world.destroy(first);
+  scene.destroy(first);
   EXPECT_TRUE(mesh.valid());
   EXPECT_EQ(assets.get(mesh).indices.size(), 36u);
 }

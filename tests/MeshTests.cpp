@@ -3,12 +3,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 
@@ -86,6 +88,70 @@ TEST(Mesh, CubeHasRequestedBoundsOutwardWindingAndHardFaceNormals)
       std::numeric_limits<float>::quiet_NaN()}) {
     EXPECT_THROW(Jade::Mesh::cube(size), std::invalid_argument);
   }
+}
+
+TEST(Mesh, SphereHasRequestedRadiusAndSmoothOutwardNormals)
+{
+  const auto mesh = Jade::Mesh::sphere(2.5f);
+  EXPECT_EQ(mesh.topology, Jade::MeshTopology::Triangles);
+  ASSERT_EQ(mesh.vertices.size(), 482u);
+  ASSERT_EQ(mesh.indices.size(), 2880u);
+  EXPECT_EQ(mesh.vertices.front().position, (Jade::Vec3{0, 2.5f, 0}));
+  EXPECT_EQ(mesh.vertices.back().position, (Jade::Vec3{0, -2.5f, 0}));
+  for (const auto& vertex : mesh.vertices) {
+    ExpectUnit(vertex.normal);
+    EXPECT_NEAR(Jade::dot(vertex.position, vertex.position), 6.25f, 1e-5f);
+    EXPECT_EQ(vertex.position, vertex.normal * 2.5f);
+  }
+  EXPECT_FLOAT_EQ(Jade::Mesh::sphere().vertices.front().position.y, 0.5f);
+  Jade::Assets assets;
+  const auto handle = assets.add(mesh);
+  EXPECT_EQ(assets.get(handle).indices, mesh.indices);
+}
+
+TEST(Mesh, SphereIsClosedWithNondegenerateOutwardTrianglesAtPolesAndSeam)
+{
+  for (const auto [longitude, latitude] : {std::pair{3u, 2u}, {7u, 5u}, {32u, 16u}}) {
+    const auto mesh = Jade::Mesh::sphere(1, longitude, latitude);
+    EXPECT_EQ(mesh.vertices.size(), 2u + longitude * (latitude - 1));
+    EXPECT_EQ(mesh.indices.size(), 6u * longitude * (latitude - 1));
+    struct Edge { int count = 0; int direction = 0; };
+    std::map<std::pair<std::uint32_t, std::uint32_t>, Edge> edges;
+    for (std::size_t i = 0; i < mesh.indices.size(); i += 3) {
+      const auto a = mesh.indices[i], b = mesh.indices[i + 1], c = mesh.indices[i + 2];
+      ASSERT_LT(a, mesh.vertices.size()); ASSERT_LT(b, mesh.vertices.size()); ASSERT_LT(c, mesh.vertices.size());
+      const auto pa = mesh.vertices[a].position, pb = mesh.vertices[b].position, pc = mesh.vertices[c].position;
+      EXPECT_GT(Jade::dot(Jade::cross(pb - pa, pc - pa), pa + pb + pc), 0);
+      for (const auto [from, to] : {std::pair{a, b}, {b, c}, {c, a}}) {
+        auto& edge = edges[{std::min(from, to), std::max(from, to)}];
+        ++edge.count;
+        edge.direction += from < to ? 1 : -1;
+      }
+    }
+    for (const auto& [key, edge] : edges) {
+      (void)key;
+      EXPECT_EQ(edge.count, 2);
+      EXPECT_EQ(edge.direction, 0);
+    }
+    // Euler characteristic of a closed sphere; every vertex participates.
+    EXPECT_EQ(mesh.vertices.size() + mesh.indices.size() / 3, edges.size() + 2);
+  }
+}
+
+TEST(Mesh, SphereRejectsInvalidRadiusSubdivisionsAndUnrepresentableCounts)
+{
+  for (const auto radius : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
+      std::numeric_limits<float>::quiet_NaN()}) {
+    EXPECT_THROW(Jade::Mesh::sphere(radius), std::invalid_argument);
+  }
+  EXPECT_THROW(Jade::Mesh::sphere(1, 0, 16), std::invalid_argument);
+  EXPECT_THROW(Jade::Mesh::sphere(1, 2, 16), std::invalid_argument);
+  EXPECT_THROW(Jade::Mesh::sphere(1, 32, 0), std::invalid_argument);
+  EXPECT_THROW(Jade::Mesh::sphere(1, 32, 1), std::invalid_argument);
+  const auto max = std::numeric_limits<std::uint32_t>::max();
+  EXPECT_THROW(Jade::Mesh::sphere(1, max, 2), std::invalid_argument);
+  EXPECT_THROW(Jade::Mesh::sphere(1, 3, max), std::invalid_argument);
+  EXPECT_THROW(Jade::Mesh::sphere(1, max, max), std::invalid_argument);
 }
 
 TEST(Mesh, LineAndTriangleBuildersUseVec3AndValidateTopology)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Core/World.hpp>
+#include <Jade/Core/Scene.hpp>
 #include <Jade/Assets/Assets.hpp>
 #include <Jade/Color.hpp>
 #include <Jade/Events/Event.hpp>
@@ -22,13 +22,15 @@ namespace Jade {
 struct ApplicationConfig {
   WindowConfig window;
   bool vsync = false;
+  // Built-in unmodified F/F3/O shortcuts. Independent of logging and build type.
+  bool debug = false;
   Color clearColor;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
   // Debug summaries once per second, rate-limited hitch warnings and optional
   // per-frame Trace. Work time excludes the explicit frame-pacing wait.
   bool logPerformance = true;
-  // Unit XYZ axes at the world origin, visible over objects. F3 toggles them.
+  // Unit XYZ axes at the world origin, visible over objects. Debug enables F3.
   bool axisGizmo = true;
 };
 
@@ -46,13 +48,12 @@ public:
   Application(const Application&) = delete;
   Application& operator=(const Application&) = delete;
 
-  // World and Assets own data; entity/asset handles do not extend their lifetime.
-  // Scene mutation and Run() belong to the main thread.
-  World& world() noexcept;
+  // Assets are shared across scenes. Selection is deferred while Run is active.
   Assets& assets() noexcept;
-  Entity camera() const noexcept;
-  // Requires a live entity in this World with Transform and Camera.
-  void setCamera(Entity camera);
+  // Returns the committed selection, including nullptr when no scene is active.
+  std::shared_ptr<Scene> scene() const noexcept;
+  // Last request wins. nullptr unloads; selecting the current scene emits no events.
+  void setScene(std::shared_ptr<Scene> scene);
   // Callbacks run on the main thread in registration order. Ignoring the
   // returned handle keeps the callback; use disconnect() to cancel it.
   template<class Event, class Callback>
@@ -63,18 +64,18 @@ public:
     if constexpr (std::is_same_v<Event, FrameUpdate> || std::is_same_v<Event, MouseMoved>
         || std::is_same_v<Event, MouseScrolled>) {
       return Connect([function](const Event& event) {
-        return InvokeCallback(*function, event);
+        return Detail::InvokeEventCallback(*function, event);
       });
     } else if constexpr (std::is_base_of_v<MouseEvent, Event> && !std::is_same_v<MouseEvent, Event>) {
       return Connect(Event::action, Event::binding, [function](const MouseEvent& event) {
-        return InvokeCallback(*function, Event(event));
+        return Detail::InvokeEventCallback(*function, Event(event));
       });
     } else {
       static_assert(std::is_base_of_v<KeyEvent, Event> && !std::is_same_v<KeyEvent, Event>,
         "Application::on supports KeyPressed/Released/Held, MousePressed/Released/Held, "
         "MouseMoved, MouseScrolled and FrameUpdate.");
       return Connect(Event::action, Event::chord, [function](const KeyEvent& event) {
-        return InvokeCallback(*function, Event(event));
+        return Detail::InvokeEventCallback(*function, Event(event));
       });
     }
   }
@@ -83,39 +84,12 @@ public:
   void stop() noexcept;
   // Applies to triangle meshes beginning with the next frame.
   void setWireframe(bool enabled) noexcept;
+  bool wireframeEnabled() const noexcept;
   void setAxisGizmo(bool enabled) noexcept;
   bool axisGizmoEnabled() const noexcept;
   void Run(const RunOptions& options = {});
 
 private:
-  template<class Callback, class Event>
-  static EventFlow InvokeCallback(Callback& callback, const Event& event)
-  {
-    if constexpr (std::is_invocable_v<Callback&, const Event&>) {
-      using Result = std::invoke_result_t<Callback&, const Event&>;
-      static_assert(std::is_same_v<Result, void> || std::is_same_v<Result, EventFlow>,
-        "Event callbacks return void or Jade::EventFlow.");
-      if constexpr (std::is_same_v<Result, EventFlow>) {
-        return std::invoke(callback, event);
-      } else {
-        std::invoke(callback, event);
-        return EventFlow::Continue;
-      }
-    } else {
-      static_assert(std::is_invocable_v<Callback&>,
-        "Event callbacks accept either no arguments or const Event&.");
-      using Result = std::invoke_result_t<Callback&>;
-      static_assert(std::is_same_v<Result, void> || std::is_same_v<Result, EventFlow>,
-        "Event callbacks return void or Jade::EventFlow.");
-      if constexpr (std::is_same_v<Result, EventFlow>) {
-        return std::invoke(callback);
-      } else {
-        std::invoke(callback);
-        return EventFlow::Continue;
-      }
-    }
-  }
-
   EventConnection Connect(KeyAction action, KeyChord chord,
     std::function<EventFlow(const KeyEvent&)> callback);
   EventConnection Connect(MouseAction action, MouseButton button,
@@ -123,6 +97,7 @@ private:
   EventConnection Connect(std::function<EventFlow(const FrameUpdate&)> callback);
   EventConnection Connect(std::function<EventFlow(const MouseMoved&)> callback);
   EventConnection Connect(std::function<EventFlow(const MouseScrolled&)> callback);
+  bool ApplyPendingScene();
   struct Impl;
   std::unique_ptr<Impl> m_Impl;
 };

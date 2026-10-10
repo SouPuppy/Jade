@@ -1,3 +1,4 @@
+#include "TestScene.hpp"
 #include <Jade/Jade.hpp>
 #include "internal/Math/Matrix4.hpp"
 
@@ -56,31 +57,32 @@ TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
   config.window.visible = false; config.logPerformance = false;
   config.window.width = 160; config.window.height = 120;
   Jade::Application app(config);
-  const auto initial = app.camera();
+  MakeTestScene(app);
+  const auto initial = app.scene()->camera();
   EXPECT_TRUE(initial.has<Jade::Transform>());
   EXPECT_TRUE(initial.has<Jade::Camera>());
   EXPECT_EQ(initial.get<Jade::Transform>().position, (Jade::Vec3{3, 3, 5}));
-  const auto selected = app.world().create();
+  const auto selected = app.scene()->create();
   selected.add<Jade::Camera>().projection = Jade::Projection::Orthographic;
-  EXPECT_EQ(app.camera(), initial);
-  EXPECT_THROW(app.setCamera(selected), std::invalid_argument);
+  EXPECT_EQ(app.scene()->camera(), initial);
+  EXPECT_THROW(app.scene()->setCamera(selected), std::invalid_argument);
   selected.add<Jade::Transform>().position = {0, 0, 5};
-  app.setCamera(selected);
-  EXPECT_EQ(app.camera(), selected);
-  Jade::World other;
+  app.scene()->setCamera(selected);
+  EXPECT_EQ(app.scene()->camera(), selected);
+  Jade::Scene other;
   const auto foreign = other.create();
   foreign.add<Jade::Transform>(); foreign.add<Jade::Camera>();
-  EXPECT_THROW(app.setCamera(foreign), std::invalid_argument);
-  EXPECT_EQ(app.camera(), selected);
+  EXPECT_THROW(app.scene()->setCamera(foreign), std::invalid_argument);
+  EXPECT_EQ(app.scene()->camera(), selected);
   selected.remove<Jade::Camera>();
   EXPECT_NO_THROW(app.Run({2, true}));
   selected.add<Jade::Camera>();
   EXPECT_NO_THROW(app.Run({1, true}));
-  app.world().destroy(selected);
-  EXPECT_FALSE(app.camera().valid());
+  app.scene()->destroy(selected);
+  EXPECT_FALSE(app.scene()->camera().valid());
   EXPECT_NO_THROW(app.Run({1, true}));
-  EXPECT_THROW(app.setCamera(selected), std::invalid_argument);
-  app.setCamera(initial);
+  EXPECT_THROW(app.scene()->setCamera(selected), std::invalid_argument);
+  app.scene()->setCamera(initial);
   app.setWireframe(true);
   EXPECT_NO_THROW(app.Run({1, true}));
   std::array<GLint, 2> mode{};

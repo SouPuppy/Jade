@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Jade/Core/Transform.hpp>
+#include <Jade/Math/Matrix4.hpp>
 #include <Jade/Graphics/Camera.hpp>
 
 #include "Validation.hpp"
@@ -10,22 +11,6 @@
 
 namespace Jade::Detail {
 
-// Column-major storage for glUniformMatrix4fv(..., GL_FALSE, ...).
-struct Matrix4 {
-  std::array<float, 16> values{};
-  float& at(std::size_t row, std::size_t column) noexcept { return values[column * 4 + row]; }
-  float at(std::size_t row, std::size_t column) const noexcept { return values[column * 4 + row]; }
-  const float* data() const noexcept { return values.data(); }
-  static Matrix4 Identity() noexcept
-  {
-    Matrix4 result;
-    for (std::size_t index = 0; index < 4; ++index) {
-      result.at(index, index) = 1;
-    }
-    return result;
-  }
-};
-
 inline Matrix4 Checked(Matrix4 matrix)
 {
   for (const auto value : matrix.values) {
@@ -34,21 +19,6 @@ inline Matrix4 Checked(Matrix4 matrix)
     }
   }
   return matrix;
-}
-
-inline Matrix4 operator*(const Matrix4& a, const Matrix4& b)
-{
-  Matrix4 result;
-  for (std::size_t row = 0; row < 4; ++row) {
-    for (std::size_t column = 0; column < 4; ++column) {
-      double value = 0;
-      for (std::size_t index = 0; index < 4; ++index) {
-        value += static_cast<double>(a.at(row, index)) * b.at(index, column);
-      }
-      result.at(row, column) = static_cast<float>(value);
-    }
-  }
-  return Checked(result);
 }
 
 using Direction = std::array<double, 3>;

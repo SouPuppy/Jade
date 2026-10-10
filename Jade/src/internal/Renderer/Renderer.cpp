@@ -15,6 +15,11 @@ void Renderer::setWireframe(bool enabled) noexcept
   m_Impl->backend.setWireframe(enabled);
 }
 
+bool Renderer::wireframeEnabled() const noexcept
+{
+  return m_Impl->backend.wireframeEnabled();
+}
+
 bool Renderer::BeginFrame(FramebufferSize size, const Color& clearColor)
 {
   return m_Impl->backend.BeginFrame(size, clearColor);

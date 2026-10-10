@@ -6,8 +6,9 @@
 #include <Jade/Color.hpp>
 #include <Jade/Core/Entity.hpp>
 #include <Jade/Core/Transform.hpp>
-#include <Jade/Core/World.hpp>
+#include <Jade/Core/Scene.hpp>
 #include <Jade/Events/Event.hpp>
+#include <Jade/Events/SceneLifecycle.hpp>
 #include <Jade/Events/FrameUpdate.hpp>
 #include <Jade/Events/Keyboard.hpp>
 #include <Jade/Events/Mouse.hpp>
@@ -21,6 +22,8 @@
 #include <Jade/Input/Key.hpp>
 #include <Jade/Input/MouseButton.hpp>
 #include <Jade/Log.hpp>
+#include <Jade/Math/Matrix4.hpp>
 #include <Jade/Math/Quaternion.hpp>
 #include <Jade/Math/Vector.hpp>
+#include <Jade/Module/CameraControl.hpp>
 #include <Jade/WindowConfig.hpp>

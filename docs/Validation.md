@@ -1,6 +1,47 @@
 # Windows x64 Validation
 
-## Logger refactor
+## Application debug controls and Scene modules
+
+Validated on 2026-10-10 with MSVC/C++20, CMake/Ninja and real OpenGL through llvmpipe. Debug and Release engine/Demo builds passed without compiler warnings; both full GoogleTest suites passed 139/139 tests.
+
+Fourteen new tests cover per-type/per-Scene installation without constructing module instances, repeated use and activation, exception rollback of new nested modules/subscriptions, retention of existing modules/subscribers, recursive installation rejection and retry, and expired connections. Application debug checks cover opt-in F/F3/O in both builds, exact modifiers and ignored repeat, propagation/Stop/app.stop, renderer-backed wireframe state, retained-scene projection during deferred selection, zoom preservation and absent/destroyed/incomplete cameras. CameraControl checks cover all movement bindings and speeds against actual dt, roll/zoom, dynamic camera targeting, duplicate installation, ordered dragging, release/focus/camera/scene resets, empty scenes and missing components, and absence of a Scene ownership cycle. The existing F3 integration test explicitly enables debug and still checks independent initial axis visibility.
+
+All 28 public headers compiled independently using only Jade/include with MSVC C++20 /W4 /WX. A separate CMake consumer with Demo/tests disabled linked only Jade::Jade, included Module/CameraControl.hpp, installed it twice in both scenes, enabled config.debug, queried wireframe state and ran scene switching/rendering/unload successfully.
+
+Automated Debug and Release Demo launches from bin injected F/F3/O, switched 1 -> 2 -> 1, and posted WM_CLOSE. Both verified one wireframe on/off and axes off/on transition, orthographic projection in each scene and restored showroom projection back to perspective, three scene activations, llvmpipe/performance output, empty stderr, plain redirected logs and exit code 0. These are automated launch/input checks; no manual visual inspection is claimed.
+
+Reports/output are build/validation/windows-debug-modules.xml/.log and windows-release-modules.xml/.log. Focused checks are modules-debug-focused.log; independent headers are module-headers.log; external consumer source/build/output are scene-consumer/, scene-consumer-build/ and module-consumer.log. Demo stdout/stderr are windows-debug-modules-demo.log/.err and windows-release-modules-demo.log/.err. All artifacts remain under ignored build/validation/.
+
+## Sphere mesh builder
+
+Validated on 2026-10-10 with MSVC/C++20, CMake/Ninja and real OpenGL through llvmpipe. Debug and Release engine/Demo builds passed without compiler warnings; both full GoogleTest suites passed 125/125 tests.
+
+Mesh::sphere(radius=0.5, segments=32, rings=16) generates centered indexed triangles with smooth radial normals, shared poles and wrapped longitude indices. Tests check requested radius, unit normals, default counts, minimum/odd/default tessellation, nondegenerate outward winding, two oppositely directed triangle uses per edge, Euler closure, Assets registration and invalid parameters/count overflow before allocation. A real OpenGL readback checks circular silhouette, clear corners, lighting variation and wireframe rendering.
+
+Demo's hierarchy now shares a sphere mesh across sun/earth/moon. Automated Debug and Release launches from bin switched 1 -> 2 -> 1 and closed successfully, with empty stderr and plain redirected logs. Reports/output are build/validation/windows-debug-sphere.xml/.log and windows-release-sphere.xml/.log; Demo output is windows-debug-sphere-demo.log/.err and windows-release-sphere-demo.log/.err. These checks do not claim manual visual inspection.
+
+## Scene, hierarchy and lifecycle refactor
+
+Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja, C++20 and real OpenGL through llvmpipe:
+
+| Configuration | Engine and Demo build | GoogleTest | Demo scene switching |
+| --- | --- | --- | --- |
+| windows-debug | Passed | 121/121 passed | 1 → 2 → 1, close exit 0 |
+| windows-release | Passed | 121/121 passed | 1 → 2 → 1, close exit 0 |
+
+The maintained API is Scene/Entity with iterable component views, explicit scene/camera selection, scene-owned controls and Application-owned shared Assets/global events. World, its headers and Application camera/world methods have been removed; there are no compatibility aliases. Material remains deferred and MeshRenderer still uses a MeshHandle and Color.
+
+Twenty-one new tests cover independently empty scenes and weak view lifetimes; hierarchy ownership/cycles, attachment ordering, local-pose-preserving reparenting, identity groups and component removal; complete subtree invalidation before reentrant component destruction; 4,096-level nonrecursive traversal; full matrices, inherited shear and normal transforms; parented camera eye/rotation with scale-independent projection; deferred selection, last-request wins, unload, lifecycle ordering/consumption/reentry, exception recovery and pending-request cancellation; single-Application activation reservations, expired connections; global-before-scene input, preserved physical Held state and scene-consumed default actions. Existing tests were migrated to Scene without reinstating implicit cameras.
+
+Three of those tests inspect real OpenGL pixels for inherited position/scale, removing parent Transform, cascading deletion, inverse-transpose lighting under nonuniform parent scale and child rotation, and parented-camera projection equivalence. Existing depth, resize, wireframe, projection, axes, mesh, asset, input, scheduler and logger checks remain in the full suite.
+
+All 27 public headers compiled independently using only Jade/include with MSVC C++20 /W4 /WX. A separate CMake consumer disabled both Demo and tests, linked only Jade::Jade, created explicit cameras and parented mesh entities, iterated views, queried Matrix4, switched scenes, verified lifecycle/dt and ran clear-only after unload. It built and exited successfully.
+
+Debug and Release Demo checks launched from bin with no GALLIUM_DRIVER override, hid the GLFW window, injected the two scene-selection key transitions and posted WM_CLOSE. Both logged showroom → hierarchy → showroom activation and performance summaries, produced empty stderr, contained no ANSI in redirected logs and exited with code 0. These are automated launch/input checks; no manual visual inspection is claimed.
+
+Reports and stdout are build/validation/windows-debug-scenes.xml/.log and windows-release-scenes.xml/.log. Standalone header output is scene-headers.log; the external consumer source/build/output is scene-consumer/, scene-consumer-build/ and scene-consumer.log. Demo stdout/stderr is windows-debug-scenes-demo.log/.err and windows-release-scenes-demo.log/.err. The added reservation test also has focused Debug/Release results in scene-reservation-debug.log and scene-reservation-release.log. All artifacts stay under ignored build/validation/.
+
+## Previous logger refactor
 
 Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja and C++20:
 
@@ -59,7 +100,7 @@ is saved to `build/validation/windows-debug-logger-refactor.log` and
 in both configurations; manual Demo interaction was not repeated for this change.
 The following Entity/Assets section records the preceding 75-test baseline.
 
-## Current Entity/Assets implementation
+## Previous Entity/Assets implementation
 
 Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja, C++20 and Mesa 26.2.4 llvmpipe:
 

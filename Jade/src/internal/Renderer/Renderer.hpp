@@ -20,6 +20,7 @@ public:
   Renderer& operator=(const Renderer&) = delete;
 
   void setWireframe(bool enabled) noexcept;
+  bool wireframeEnabled() const noexcept;
   bool BeginFrame(FramebufferSize size, const Color& clearColor);
   void DrawMesh(const Mesh& mesh, const Detail::DrawParameters& parameters);
   void Present();

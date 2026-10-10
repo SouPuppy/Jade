@@ -13,7 +13,7 @@
 
 namespace {
 
-std::array<float, 4> Transform(const Jade::Detail::Matrix4& matrix, float x, float y, float z)
+std::array<float, 4> Transform(const Jade::Matrix4& matrix, float x, float y, float z)
 {
   const std::array<float, 4> point{x, y, z, 1};
   std::array<float, 4> result{};
@@ -25,7 +25,7 @@ std::array<float, 4> Transform(const Jade::Detail::Matrix4& matrix, float x, flo
   return result;
 }
 
-std::array<float, 3> Project(const Jade::Detail::Matrix4& matrix, float x, float y, float z)
+std::array<float, 3> Project(const Jade::Matrix4& matrix, float x, float y, float z)
 {
   const auto clip = Transform(matrix, x, y, z);
   return {clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3]};

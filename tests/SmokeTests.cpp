@@ -1,3 +1,4 @@
+#include "TestScene.hpp"
 #include <Jade/Application.hpp>
 #include <Jade/Color.hpp>
 #include <Jade/Core/Transform.hpp>
@@ -157,11 +158,12 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   LogCapture capture;
   auto config = HiddenApplication();
   Jade::Application app(config);
-  auto entity = app.world().create();
+  const auto scene = MakeTestScene(app);
+  auto entity = scene->create();
   auto& pose = entity.add<Jade::Transform>();
   const auto* address = &pose;
   for (int index = 0; index < 64; ++index) {
-    app.world().create().add<Jade::Transform>();
+    scene->create().add<Jade::Transform>();
   }
   EXPECT_EQ(&entity.get<Jade::Transform>(), address);
 

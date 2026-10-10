@@ -1,4 +1,5 @@
 #include "RenderSystem.hpp"
+#include "SceneTransforms.hpp"
 
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Graphics/Camera.hpp>
@@ -8,26 +9,30 @@
 
 namespace Jade::Detail {
 
-void RenderSystem::Render(World& world, const Assets& assets, Entity camera,
+void RenderSystem::Render(const Scene& scene, const Assets& assets,
   Renderer& renderer, FramebufferSize size, bool axisGizmo)
 {
+  const auto camera = scene.camera();
   if (size.width <= 0 || size.height <= 0 || !camera.has<Transform>() || !camera.has<Camera>()) {
     return;
   }
+  SceneTransforms transforms(scene);
   const auto viewProjection = ProjectionMatrix(camera.get<Camera>(), static_cast<double>(size.width) / size.height)
-    * ViewMatrix(camera.get<Transform>());
-  world.each<Transform, MeshRenderer>([&](Entity, const Transform& transform, const MeshRenderer& visual) {
+    * transforms.CameraView(camera);
+  for (const auto entity : scene.view<Transform, MeshRenderer>()) {
+    const auto& visual = entity.get<MeshRenderer>();
     if (visual.mesh.empty()) {
-      return;
+      continue;
     }
     const auto& mesh = assets.get(visual.mesh);
     Validate(visual.color);
     DrawParameters parameters;
-    parameters.transform = viewProjection * ModelMatrix(transform);
-    parameters.normalTransform = NormalMatrix(transform);
+    const auto& pose = transforms.Resolve(entity);
+    parameters.transform = viewProjection * pose.model;
+    parameters.normalTransform = pose.normal;
     parameters.color = visual.color;
     renderer.DrawMesh(mesh, parameters);
-  });
+  }
   if (axisGizmo) {
     // Internal debug resources, shared across frames. No world component storage.
     static const std::array<Mesh, 3> axes{{

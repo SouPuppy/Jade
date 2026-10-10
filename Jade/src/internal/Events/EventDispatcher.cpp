@@ -10,8 +10,6 @@
 namespace Jade::Detail {
 namespace {
 
-const Log::Logger logger{"Events"};
-
 std::string_view KeyName(Key key) noexcept
 {
   static constexpr auto names = std::to_array<std::string_view>({
@@ -82,7 +80,14 @@ void EventDispatcher::Prune()
   std::erase_if(m_Slots, [](const auto& slot) { return !*slot->active; });
   // Emit after mutation: a logging sink may register or dispatch other events.
   for (const auto& slot : removed) {
-    logger << Log::debug("Disconnected: id={} binding={}", slot->id, slot->binding);
+    m_Logger << Log::debug("Disconnected: id={} binding={}", slot->id, slot->binding);
+  }
+}
+
+void EventDispatcher::RollbackSubscriptions(std::size_t checkpoint) noexcept
+{
+  for (const auto& slot : m_Slots) {
+    if (slot->id >= checkpoint) *slot->active = false;
   }
 }
 
@@ -90,7 +95,7 @@ std::shared_ptr<bool> EventDispatcher::Add(std::shared_ptr<Slot> slot)
 {
   slot->id = m_NextId++;
   m_Slots.push_back(slot);
-  logger << Log::debug("Subscribed: id={} binding={}", slot->id, slot->binding);
+  m_Logger << Log::debug("Subscribed: id={} binding={}", slot->id, slot->binding);
   return slot->active;
 }
 
@@ -143,6 +148,16 @@ std::shared_ptr<bool> EventDispatcher::Connect(MouseHandler handler)
   return Add(std::move(slot));
 }
 
+std::shared_ptr<bool> EventDispatcher::ConnectLifecycle(bool activated, std::function<EventFlow()> handler)
+{
+  Prune();
+  auto slot = std::make_shared<Slot>();
+  slot->activated = activated;
+  slot->binding = activated ? "SceneActivated" : "SceneDeactivated";
+  slot->lifecycleHandler = std::move(handler);
+  return Add(std::move(slot));
+}
+
 template<typename Matches, typename Invoke>
 EventDispatcher::DispatchResult EventDispatcher::DispatchTo(
   std::string_view event, Matches matches, Invoke invoke)
@@ -162,16 +177,26 @@ EventDispatcher::DispatchResult EventDispatcher::DispatchTo(
         break;
       }
     } catch (const std::exception& error) {
-      logger << Log::error("Handler failed: event={} subscription={} binding={} reason={}",
+      m_Logger << Log::error("Handler failed: event={} subscription={} binding={} reason={}",
         event, slot->id, slot->binding, error.what());
       throw;
     } catch (...) {
-      logger << Log::error("Handler failed: event={} subscription={} binding={} reason=non-standard exception",
+      m_Logger << Log::error("Handler failed: event={} subscription={} binding={} reason=non-standard exception",
         event, slot->id, slot->binding);
       throw;
     }
   }
   return result;
+}
+
+EventFlow EventDispatcher::DispatchLifecycle(bool activated)
+{
+  const auto name = activated ? "SceneActivated" : "SceneDeactivated";
+  const auto result = DispatchTo(name,
+    [&](const Slot& slot) { return slot.lifecycleHandler && slot.activated == activated; },
+    [](const Slot& slot) { return slot.lifecycleHandler(); });
+  m_Logger << Log::debug("{}: handlers={} consumed_by={}", name, result.handlers, result.consumedBy);
+  return result.flow;
 }
 
 EventFlow EventDispatcher::Dispatch(KeyAction action, const KeyEvent& event)
@@ -183,12 +208,12 @@ EventFlow EventDispatcher::Dispatch(KeyAction action, const KeyEvent& event)
   try {
     if (action == KeyAction::Held) {
       if (Log::Enabled(Log::Level::Trace)) {
-        logger << Log::trace("{}: binding={} dt={:.4f}s handlers={} consumed_by={}",
+        m_Logger << Log::trace("{}: binding={} dt={:.4f}s handlers={} consumed_by={}",
           EventName(action), ChordName({event.key, event.modifiers}), event.dt,
           result.handlers, result.consumedBy);
       }
     } else if (Log::Enabled(Log::Level::Debug)) {
-      logger << Log::debug("{}: binding={} handlers={} consumed_by={}",
+      m_Logger << Log::debug("{}: binding={} handlers={} consumed_by={}",
         EventName(action), ChordName({event.key, event.modifiers}), result.handlers, result.consumedBy);
     }
   } catch (...) {
@@ -202,7 +227,7 @@ EventFlow EventDispatcher::Dispatch(const FrameUpdate& event)
   const auto result = DispatchTo("FrameUpdate",
     [](const Slot& slot) { return static_cast<bool>(slot.frameHandler); },
     [&](const Slot& slot) { return slot.frameHandler(event); });
-  logger << Log::trace("FrameUpdate: frame={} dt={:.4f}s handlers={} consumed_by={}",
+  m_Logger << Log::trace("FrameUpdate: frame={} dt={:.4f}s handlers={} consumed_by={}",
     event.frame, event.dt, result.handlers, result.consumedBy);
   return result.flow;
 }
@@ -214,10 +239,10 @@ EventFlow EventDispatcher::Dispatch(MouseAction action, const MouseEvent& event)
     return slot.buttonHandler && slot.mouseAction == action && slot.button == event.button;
   }, [&](const Slot& slot) { return slot.buttonHandler(event); });
   if (action == MouseAction::Held) {
-    logger << Log::trace("{}: button={} dt={:.4f}s handlers={} consumed_by={}",
+    m_Logger << Log::trace("{}: button={} dt={:.4f}s handlers={} consumed_by={}",
       EventName(action), ButtonName(event.button), event.dt, result.handlers, result.consumedBy);
   } else {
-    logger << Log::debug("{}: button={} handlers={} consumed_by={}",
+    m_Logger << Log::debug("{}: button={} handlers={} consumed_by={}",
       EventName(action), ButtonName(event.button), result.handlers, result.consumedBy);
   }
   return result.flow;
@@ -228,7 +253,7 @@ EventFlow EventDispatcher::Dispatch(const MouseScrolled& event)
   const auto result = DispatchTo("MouseScrolled",
     [](const Slot& slot) { return static_cast<bool>(slot.scrollHandler); },
     [&](const Slot& slot) { return slot.scrollHandler(event); });
-  logger << Log::trace("MouseScrolled: dx={:.3f} dy={:.3f} handlers={} consumed_by={}",
+  m_Logger << Log::trace("MouseScrolled: dx={:.3f} dy={:.3f} handlers={} consumed_by={}",
     event.dx, event.dy, result.handlers, result.consumedBy);
   return result.flow;
 }
@@ -238,7 +263,7 @@ EventFlow EventDispatcher::Dispatch(const MouseMoved& event)
   const auto result = DispatchTo("MouseMoved",
     [](const Slot& slot) { return static_cast<bool>(slot.mouseHandler); },
     [&](const Slot& slot) { return slot.mouseHandler(event); });
-  logger << Log::trace("MouseMoved: x={:.2f} y={:.2f} dx={:.2f} dy={:.2f} handlers={} consumed_by={}",
+  m_Logger << Log::trace("MouseMoved: x={:.2f} y={:.2f} dx={:.2f} dy={:.2f} handlers={} consumed_by={}",
     event.x, event.y, event.dx, event.dy, result.handlers, result.consumedBy);
   return result.flow;
 }

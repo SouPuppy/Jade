@@ -2,6 +2,7 @@
 
 #include <Jade/Events/Event.hpp>
 #include <Jade/Events/FrameUpdate.hpp>
+#include <Jade/Log.hpp>
 #include <Jade/Events/Keyboard.hpp>
 #include <Jade/Events/Mouse.hpp>
 #include <Jade/Events/MouseMoved.hpp>
@@ -18,6 +19,8 @@ namespace Jade::Detail {
 
 class EventDispatcher final {
 public:
+  explicit EventDispatcher(std::string_view scope = {})
+    : m_Logger(scope.empty() ? "Events" : std::format("Events/{}", scope)) {}
   using KeyHandler = std::function<EventFlow(const KeyEvent&)>;
   using FrameHandler = std::function<EventFlow(const FrameUpdate&)>;
   using MouseHandler = std::function<EventFlow(const MouseMoved&)>;
@@ -29,11 +32,15 @@ public:
   std::shared_ptr<bool> Connect(FrameHandler handler);
   std::shared_ptr<bool> Connect(MouseHandler handler);
   std::shared_ptr<bool> Connect(ScrollHandler handler);
+  std::shared_ptr<bool> ConnectLifecycle(bool activated, std::function<EventFlow()> handler);
+  EventFlow DispatchLifecycle(bool activated);
   EventFlow Dispatch(KeyAction action, const KeyEvent& event);
   EventFlow Dispatch(MouseAction action, const MouseEvent& event);
   EventFlow Dispatch(const FrameUpdate& event);
   EventFlow Dispatch(const MouseMoved& event);
   EventFlow Dispatch(const MouseScrolled& event);
+  std::size_t SubscriptionCheckpoint() const noexcept { return m_NextId; }
+  void RollbackSubscriptions(std::size_t checkpoint) noexcept;
 
 private:
   struct Slot {
@@ -49,6 +56,8 @@ private:
     MouseHandler mouseHandler;
     ButtonHandler buttonHandler;
     ScrollHandler scrollHandler;
+    bool activated = false;
+    std::function<EventFlow()> lifecycleHandler;
   };
 
   struct DispatchResult {
@@ -63,6 +72,7 @@ private:
   void Prune();
   std::vector<std::shared_ptr<Slot>> m_Slots;
   std::size_t m_NextId = 1;
+  const Log::Logger m_Logger;
 };
 
 } // namespace Jade::Detail

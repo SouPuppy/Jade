@@ -6,7 +6,7 @@
 
 namespace Jade::Detail {
 
-// Renderer input contains no Entity, World, Camera or component ownership.
+// Renderer input contains no Entity, Scene, Camera or component ownership.
 struct DrawParameters {
   Matrix4 transform = Matrix4::Identity();
   Matrix4 normalTransform = Matrix4::Identity();
