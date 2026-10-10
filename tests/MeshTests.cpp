@@ -22,8 +22,8 @@ public:
   {
     static std::atomic<unsigned int> sequence = 0;
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    m_Directory = std::filesystem::temp_directory_path()
-      / ("jade-mesh-test-" + std::to_string(stamp) + "-" + std::to_string(sequence++));
+    m_Directory = std::filesystem::temp_directory_path() /
+                  ("jade-mesh-test-" + std::to_string(stamp) + "-" + std::to_string(sequence++));
     if (!std::filesystem::create_directory(m_Directory)) {
       throw std::runtime_error("Could not create an isolated OBJ test directory.");
     }
@@ -33,7 +33,7 @@ public:
     std::error_code error;
     std::filesystem::remove_all(m_Directory, error);
   }
-  std::filesystem::path Write(const std::string& contents) const
+  std::filesystem::path Write(const std::string &contents) const
   {
     const auto path = m_Directory / "mesh.obj";
     std::ofstream output(path);
@@ -44,22 +44,19 @@ public:
     }
     return path;
   }
-  const std::filesystem::path& Directory() const { return m_Directory; }
+  const std::filesystem::path &Directory() const { return m_Directory; }
 
 private:
   std::filesystem::path m_Directory;
 };
 
-Jade::Mesh LoadMesh(const std::filesystem::path& path)
+Jade::Mesh LoadMesh(const std::filesystem::path &path)
 {
   Jade::Assets assets;
   return assets.get(assets.load<Jade::Mesh>(path));
 }
 
-void ExpectUnit(Jade::Vec3 normal)
-{
-  EXPECT_NEAR(Jade::dot(normal, normal), 1.0f, 1e-5f);
-}
+void ExpectUnit(Jade::Vec3 normal) { EXPECT_NEAR(Jade::dot(normal, normal), 1.0f, 1e-5f); }
 
 } // namespace
 
@@ -68,7 +65,7 @@ TEST(Mesh, CubeHasRequestedBoundsOutwardWindingAndHardFaceNormals)
   const auto mesh = Jade::Mesh::cube(2);
   ASSERT_EQ(mesh.vertices.size(), 24u);
   ASSERT_EQ(mesh.indices.size(), 36u);
-  for (const auto& vertex : mesh.vertices) {
+  for (const auto &vertex : mesh.vertices) {
     EXPECT_FLOAT_EQ(std::abs(vertex.position.x), 1);
     EXPECT_FLOAT_EQ(std::abs(vertex.position.y), 1);
     EXPECT_FLOAT_EQ(std::abs(vertex.position.z), 1);
@@ -76,16 +73,16 @@ TEST(Mesh, CubeHasRequestedBoundsOutwardWindingAndHardFaceNormals)
     EXPECT_FLOAT_EQ(Jade::dot(vertex.position, vertex.normal), 1);
   }
   for (std::size_t triangle = 0; triangle < mesh.indices.size(); triangle += 3) {
-    const auto& a = mesh.vertices[mesh.indices[triangle]];
-    const auto& b = mesh.vertices[mesh.indices[triangle + 1]];
-    const auto& c = mesh.vertices[mesh.indices[triangle + 2]];
+    const auto &a = mesh.vertices[mesh.indices[triangle]];
+    const auto &b = mesh.vertices[mesh.indices[triangle + 1]];
+    const auto &c = mesh.vertices[mesh.indices[triangle + 2]];
     EXPECT_EQ(a.normal, b.normal);
     EXPECT_EQ(a.normal, c.normal);
     EXPECT_GT(Jade::dot(Jade::cross(b.position - a.position, c.position - a.position), a.normal), 0);
   }
   EXPECT_FLOAT_EQ(Jade::Mesh::cube().vertices[0].position.z, 0.5f);
-  for (const auto size : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
-      std::numeric_limits<float>::quiet_NaN()}) {
+  for (const auto size :
+       {0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
     EXPECT_THROW(Jade::Mesh::cube(size), std::invalid_argument);
   }
 }
@@ -93,12 +90,11 @@ TEST(Mesh, CubeHasRequestedBoundsOutwardWindingAndHardFaceNormals)
 TEST(Mesh, SphereHasRequestedRadiusAndSmoothOutwardNormals)
 {
   const auto mesh = Jade::Mesh::sphere(2.5f);
-  EXPECT_EQ(mesh.topology, Jade::MeshTopology::Triangles);
   ASSERT_EQ(mesh.vertices.size(), 482u);
   ASSERT_EQ(mesh.indices.size(), 2880u);
   EXPECT_EQ(mesh.vertices.front().position, (Jade::Vec3{0, 2.5f, 0}));
   EXPECT_EQ(mesh.vertices.back().position, (Jade::Vec3{0, -2.5f, 0}));
-  for (const auto& vertex : mesh.vertices) {
+  for (const auto &vertex : mesh.vertices) {
     ExpectUnit(vertex.normal);
     EXPECT_NEAR(Jade::dot(vertex.position, vertex.position), 6.25f, 1e-5f);
     EXPECT_EQ(vertex.position, vertex.normal * 2.5f);
@@ -115,20 +111,26 @@ TEST(Mesh, SphereIsClosedWithNondegenerateOutwardTrianglesAtPolesAndSeam)
     const auto mesh = Jade::Mesh::sphere(1, longitude, latitude);
     EXPECT_EQ(mesh.vertices.size(), 2u + longitude * (latitude - 1));
     EXPECT_EQ(mesh.indices.size(), 6u * longitude * (latitude - 1));
-    struct Edge { int count = 0; int direction = 0; };
+    struct Edge {
+      int count = 0;
+      int direction = 0;
+    };
     std::map<std::pair<std::uint32_t, std::uint32_t>, Edge> edges;
     for (std::size_t i = 0; i < mesh.indices.size(); i += 3) {
       const auto a = mesh.indices[i], b = mesh.indices[i + 1], c = mesh.indices[i + 2];
-      ASSERT_LT(a, mesh.vertices.size()); ASSERT_LT(b, mesh.vertices.size()); ASSERT_LT(c, mesh.vertices.size());
-      const auto pa = mesh.vertices[a].position, pb = mesh.vertices[b].position, pc = mesh.vertices[c].position;
+      ASSERT_LT(a, mesh.vertices.size());
+      ASSERT_LT(b, mesh.vertices.size());
+      ASSERT_LT(c, mesh.vertices.size());
+      const auto pa = mesh.vertices[a].position, pb = mesh.vertices[b].position,
+                 pc = mesh.vertices[c].position;
       EXPECT_GT(Jade::dot(Jade::cross(pb - pa, pc - pa), pa + pb + pc), 0);
       for (const auto [from, to] : {std::pair{a, b}, {b, c}, {c, a}}) {
-        auto& edge = edges[{std::min(from, to), std::max(from, to)}];
+        auto &edge = edges[{std::min(from, to), std::max(from, to)}];
         ++edge.count;
         edge.direction += from < to ? 1 : -1;
       }
     }
-    for (const auto& [key, edge] : edges) {
+    for (const auto &[key, edge] : edges) {
       (void)key;
       EXPECT_EQ(edge.count, 2);
       EXPECT_EQ(edge.direction, 0);
@@ -140,8 +142,8 @@ TEST(Mesh, SphereIsClosedWithNondegenerateOutwardTrianglesAtPolesAndSeam)
 
 TEST(Mesh, SphereRejectsInvalidRadiusSubdivisionsAndUnrepresentableCounts)
 {
-  for (const auto radius : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
-      std::numeric_limits<float>::quiet_NaN()}) {
+  for (const auto radius :
+       {0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
     EXPECT_THROW(Jade::Mesh::sphere(radius), std::invalid_argument);
   }
   EXPECT_THROW(Jade::Mesh::sphere(1, 0, 16), std::invalid_argument);
@@ -154,25 +156,15 @@ TEST(Mesh, SphereRejectsInvalidRadiusSubdivisionsAndUnrepresentableCounts)
   EXPECT_THROW(Jade::Mesh::sphere(1, max, max), std::invalid_argument);
 }
 
-TEST(Mesh, LineAndTriangleBuildersUseVec3AndValidateTopology)
+TEST(Mesh, TriangleBuilderUsesVec3AndRequiresCompletePrimitives)
 {
   Jade::Assets assets;
-  auto line = Jade::Mesh::line({1, 2, 3}, {4, 5, 6});
-  EXPECT_EQ(line.topology, Jade::MeshTopology::Lines);
-  EXPECT_EQ(line.vertices.size(), 2u);
-  EXPECT_EQ(line.indices, (std::vector<std::uint32_t>{0, 1}));
-  EXPECT_EQ(line.vertices[1].position, (Jade::Vec3{4, 5, 6}));
-  EXPECT_NO_THROW(assets.add(line));
-  line.indices.push_back(0);
-  EXPECT_THROW(assets.add(line), std::invalid_argument);
   auto triangle = Jade::Mesh::triangle({0, 0, 2}, {1, 0, 2}, {0, 1, 2});
-  EXPECT_EQ(triangle.topology, Jade::MeshTopology::Triangles);
   EXPECT_EQ(triangle.vertices[0].normal, (Jade::Vec3{0, 0, 1}));
   EXPECT_NO_THROW(assets.add(triangle));
-  triangle.topology = static_cast<Jade::MeshTopology>(123);
+  triangle.indices.push_back(0);
   EXPECT_THROW(assets.add(triangle), std::invalid_argument);
   const float nan = std::numeric_limits<float>::quiet_NaN();
-  EXPECT_THROW(Jade::Mesh::line({nan, 0, 0}, {}), std::invalid_argument);
   EXPECT_THROW(Jade::Mesh::triangle({}, {1, 1, 1}, {0, nan, 0}), std::invalid_argument);
 }
 
@@ -220,8 +212,7 @@ TEST(Assets, OwnsMeshSnapshotsAndRejectsInvalidRegistration)
 TEST(Mesh, ObjGeneratesAreaWeightedNormalsAndSharesPositions)
 {
   ObjFixture fixture;
-  const auto mesh = LoadMesh(fixture.Write(
-    "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 2\nf 1 2 3\nf 1 4 2\n"));
+  const auto mesh = LoadMesh(fixture.Write("v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 2\nf 1 2 3\nf 1 4 2\n"));
   ASSERT_EQ(mesh.vertices.size(), 4u);
   ASSERT_EQ(mesh.indices.size(), 6u);
   EXPECT_EQ(mesh.indices[0], mesh.indices[3]);
@@ -230,7 +221,7 @@ TEST(Mesh, ObjGeneratesAreaWeightedNormalsAndSharesPositions)
   EXPECT_FLOAT_EQ(normal.x, 0);
   EXPECT_NEAR(normal.y, 2.0f / std::sqrt(5.0f), 1e-6f);
   EXPECT_NEAR(normal.z, 1.0f / std::sqrt(5.0f), 1e-6f);
-  for (const auto& vertex : mesh.vertices) {
+  for (const auto &vertex : mesh.vertices) {
     ExpectUnit(vertex.normal);
   }
 }
@@ -238,9 +229,8 @@ TEST(Mesh, ObjGeneratesAreaWeightedNormalsAndSharesPositions)
 TEST(Mesh, ObjPreservesExplicitNormalsAndSplitsHardEdges)
 {
   ObjFixture fixture;
-  const auto mesh = LoadMesh(fixture.Write(
-    "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 4\nvn 0 0 -2\n"
-    "f 1//1 2//1 3//1\nf 1//2 3//2 2//2\n"));
+  const auto mesh = LoadMesh(fixture.Write("v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 4\nvn 0 0 -2\n"
+                                           "f 1//1 2//1 3//1\nf 1//2 3//2 2//2\n"));
   ASSERT_EQ(mesh.vertices.size(), 6u);
   ASSERT_EQ(mesh.indices.size(), 6u);
   for (std::size_t index = 0; index < 3; ++index) {
@@ -253,20 +243,18 @@ TEST(Mesh, ObjPreservesExplicitNormalsAndSplitsHardEdges)
 TEST(Mesh, ObjAcceptsNegativeIndicesUvsCommentsAndConvexPolygons)
 {
   ObjFixture fixture;
-  const auto mesh = LoadMesh(fixture.Write(
-    "# unit quad\r\nv 0 0 0\r\nv 1 0 0\r\nv 1 1 0\r\nv 0 1 0\r\n"
-    "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\n"
-    "o Quad\ng Front\ns 1\nusemtl Ignored\n"
-    "f -4/-4/-1 -3/-3/-1 -2/-2/-1 -1/-1/-1 # two triangles\n"));
+  const auto mesh = LoadMesh(fixture.Write("# unit quad\r\nv 0 0 0\r\nv 1 0 0\r\nv 1 1 0\r\nv 0 1 0\r\n"
+                                           "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\n"
+                                           "o Quad\ng Front\ns 1\nusemtl Ignored\n"
+                                           "f -4/-4/-1 -3/-3/-1 -2/-2/-1 -1/-1/-1 # two triangles\n"));
   ASSERT_EQ(mesh.vertices.size(), 4u);
   ASSERT_EQ(mesh.indices.size(), 6u);
   EXPECT_EQ(mesh.indices, (std::vector<std::uint32_t>{0, 1, 2, 0, 2, 3}));
-  for (const auto& vertex : mesh.vertices) {
+  for (const auto &vertex : mesh.vertices) {
     EXPECT_EQ(vertex.normal, (Jade::Vec3{0, 0, 1}));
   }
-  const auto noNormals = LoadMesh(fixture.Write(
-    "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0\nf 1/1 2/1 3/1\n"));
-  for (const auto& vertex : noNormals.vertices) {
+  const auto noNormals = LoadMesh(fixture.Write("v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0\nf 1/1 2/1 3/1\n"));
+  for (const auto &vertex : noNormals.vertices) {
     EXPECT_EQ(vertex.normal, (Jade::Vec3{0, 0, 1}));
   }
 }
@@ -275,19 +263,18 @@ TEST(Mesh, ObjReportsMalformedInputWithPathAndLine)
 {
   ObjFixture fixture;
   const std::string positions = "v 0 0 0\nv 1 0 0\nv 0 1 0\n";
-  for (const auto& invalid : {"f 0 2 3", "f 1 2 4", "f -4 -2 -1", "f 1 2",
-      "f 1x 2 3", "f 1/1 2/1 3/1", "f 1//1 2//1 3//1", "f 1/ 2/ 3/"}) {
+  for (const auto &invalid : {"f 0 2 3", "f 1 2 4", "f -4 -2 -1", "f 1 2", "f 1x 2 3", "f 1/1 2/1 3/1",
+                              "f 1//1 2//1 3//1", "f 1/ 2/ 3/"}) {
     SCOPED_TRACE(invalid);
     const auto path = fixture.Write(positions + invalid + "\n");
     try {
       LoadMesh(path);
       FAIL() << "Accepted malformed OBJ";
-    } catch (const std::runtime_error& error) {
+    } catch (const std::runtime_error &error) {
       EXPECT_NE(std::string(error.what()).find("mesh.obj' line 4:"), std::string::npos);
     }
   }
-  for (const auto& contents : {"", "v 0 0 0\n", "v 1 2\n", "v nan 0 0\n",
-      "v 1e99 0 0\n", "vn 0 0 0\n"}) {
+  for (const auto &contents : {"", "v 0 0 0\n", "v 1 2\n", "v nan 0 0\n", "v 1e99 0 0\n", "vn 0 0 0\n"}) {
     EXPECT_THROW(LoadMesh(fixture.Write(contents)), std::runtime_error);
   }
   EXPECT_THROW(LoadMesh(fixture.Directory() / "missing.obj"), std::runtime_error);
@@ -299,7 +286,7 @@ TEST(Mesh, LoadsTheSmallestBundledBunnyAndGeneratesFiniteNormals)
   ASSERT_EQ(mesh.vertices.size(), 453u);
   ASSERT_EQ(mesh.indices.size(), 948u * 3);
   std::size_t nonzeroNormals = 0;
-  for (const auto& vertex : mesh.vertices) {
+  for (const auto &vertex : mesh.vertices) {
     EXPECT_GE(vertex.position.x, -0.094f);
     EXPECT_LE(vertex.position.x, 0.059f);
     EXPECT_GE(vertex.position.y, 0.033f);

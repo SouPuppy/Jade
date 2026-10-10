@@ -16,7 +16,8 @@
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/Graphics/Camera.hpp>
 #include <Jade/Graphics/Mesh.hpp>
-#include <Jade/Graphics/MeshRenderer.hpp>
+#include <Jade/Graphics/Geometry.hpp>
+#include <Jade/Graphics/Material.hpp>
 #include <Jade/Graphics/Motion.hpp>
 #include <Jade/Graphics/Vertex.hpp>
 #include <Jade/Input/Key.hpp>
@@ -27,3 +28,13 @@
 #include <Jade/Math/Vector.hpp>
 #include <Jade/Module/CameraControl.hpp>
 #include <Jade/WindowConfig.hpp>
+#include <Jade/Renderer/Backend.hpp>
+#include <Jade/Renderer/BSDF.hpp>
+#include <Jade/Renderer/CameraFrame.hpp>
+#include <Jade/Renderer/Image.hpp>
+#include <Jade/Renderer/Integrator.hpp>
+#include <Jade/Renderer/LinearRGB.hpp>
+#include <Jade/Renderer/Ray.hpp>
+#include <Jade/Renderer/RayTracing.hpp>
+#include <Jade/Renderer/RenderScene.hpp>
+#include <Jade/Renderer/Sampler.hpp>

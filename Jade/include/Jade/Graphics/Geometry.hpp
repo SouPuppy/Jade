@@ -1,13 +1,12 @@
 #pragma once
 
 #include <Jade/Assets/AssetHandle.hpp>
-#include <Jade/Color.hpp>
 
 namespace Jade {
 
-struct MeshRenderer {
+// A triangle mesh instance. Transform and Material are separate components.
+struct Geometry {
   MeshHandle mesh;
-  Color color{1, 1, 1, 1};
 };
 
 } // namespace Jade

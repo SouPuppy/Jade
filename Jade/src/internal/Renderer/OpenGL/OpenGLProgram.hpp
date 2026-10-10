@@ -4,7 +4,7 @@
 
 namespace Jade::Detail {
 
-// Context-owned program shared by the primitive and mesh renderer implementations.
+// Context-owned program shared by the image presentation and debug drawing.
 class OpenGLProgram final {
 public:
   OpenGLProgram(const char* vertexSource, const char* fragmentSource);

@@ -10,6 +10,7 @@
 #include <Jade/Events/MouseMoved.hpp>
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/WindowConfig.hpp>
+#include <Jade/Renderer/Backend.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -24,7 +25,6 @@ struct ApplicationConfig {
   bool vsync = false;
   // Built-in unmodified F/F3/O shortcuts. Independent of logging and build type.
   bool debug = false;
-  Color clearColor;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
   // Debug summaries once per second, rate-limited hitch warnings and optional
@@ -37,44 +37,52 @@ struct ApplicationConfig {
 struct RunOptions {
   // Zero runs until the user closes the window.
   std::uint32_t frameLimit = 0;
-  bool validateRendering = false;
 };
 
 class Application final {
 public:
-  explicit Application(const ApplicationConfig& config = {});
+  explicit Application(const ApplicationConfig &config = {});
   ~Application();
 
-  Application(const Application&) = delete;
-  Application& operator=(const Application&) = delete;
+  Application(const Application &) = delete;
+  Application &operator=(const Application &) = delete;
 
   // Assets are shared across scenes. Selection is deferred while Run is active.
-  Assets& assets() noexcept;
+  Assets &assets() noexcept;
+  // Select one owned computational backend. Configure outside Run.
+  template <class TRenderer, class... Args> TRenderer &use(Args &&...args)
+  {
+    static_assert(std::is_base_of_v<Renderer::Backend, TRenderer>,
+                  "Application::use requires a Renderer::Backend.");
+    auto backend = std::make_unique<TRenderer>(std::forward<Args>(args)...);
+    auto &result = *backend;
+    InstallRenderer(std::move(backend));
+    return result;
+  }
+  Renderer::RenderProgress renderProgress() const;
   // Returns the committed selection, including nullptr when no scene is active.
   std::shared_ptr<Scene> scene() const noexcept;
   // Last request wins. nullptr unloads; selecting the current scene emits no events.
   void setScene(std::shared_ptr<Scene> scene);
   // Callbacks run on the main thread in registration order. Ignoring the
   // returned handle keeps the callback; use disconnect() to cancel it.
-  template<class Event, class Callback>
-  EventConnection on(Callback&& callback)
+  template <class Event, class Callback> EventConnection on(Callback &&callback)
   {
     using Function = std::decay_t<Callback>;
     auto function = std::make_shared<Function>(std::forward<Callback>(callback));
-    if constexpr (std::is_same_v<Event, FrameUpdate> || std::is_same_v<Event, MouseMoved>
-        || std::is_same_v<Event, MouseScrolled>) {
-      return Connect([function](const Event& event) {
-        return Detail::InvokeEventCallback(*function, event);
-      });
+    if constexpr (std::is_same_v<Event, FrameUpdate> || std::is_same_v<Event, MouseMoved> ||
+                  std::is_same_v<Event, MouseScrolled>) {
+      return Connect(
+          [function](const Event &event) { return Detail::InvokeEventCallback(*function, event); });
     } else if constexpr (std::is_base_of_v<MouseEvent, Event> && !std::is_same_v<MouseEvent, Event>) {
-      return Connect(Event::action, Event::binding, [function](const MouseEvent& event) {
+      return Connect(Event::action, Event::binding, [function](const MouseEvent &event) {
         return Detail::InvokeEventCallback(*function, Event(event));
       });
     } else {
       static_assert(std::is_base_of_v<KeyEvent, Event> && !std::is_same_v<KeyEvent, Event>,
-        "Application::on supports KeyPressed/Released/Held, MousePressed/Released/Held, "
-        "MouseMoved, MouseScrolled and FrameUpdate.");
-      return Connect(Event::action, Event::chord, [function](const KeyEvent& event) {
+                    "Application::on supports KeyPressed/Released/Held, MousePressed/Released/Held, "
+                    "MouseMoved, MouseScrolled and FrameUpdate.");
+      return Connect(Event::action, Event::chord, [function](const KeyEvent &event) {
         return Detail::InvokeEventCallback(*function, Event(event));
       });
     }
@@ -82,21 +90,22 @@ public:
 
   // Ends the current Run(), allowing a later Run() to resume.
   void stop() noexcept;
-  // Applies to triangle meshes beginning with the next frame.
+  // Wireframe bypasses the computational backend and draws diagnostic edges.
   void setWireframe(bool enabled) noexcept;
   bool wireframeEnabled() const noexcept;
   void setAxisGizmo(bool enabled) noexcept;
   bool axisGizmoEnabled() const noexcept;
-  void Run(const RunOptions& options = {});
+  void Run(const RunOptions &options = {});
 
 private:
+  void InstallRenderer(std::unique_ptr<Renderer::Backend> backend);
   EventConnection Connect(KeyAction action, KeyChord chord,
-    std::function<EventFlow(const KeyEvent&)> callback);
+                          std::function<EventFlow(const KeyEvent &)> callback);
   EventConnection Connect(MouseAction action, MouseButton button,
-    std::function<EventFlow(const MouseEvent&)> callback);
-  EventConnection Connect(std::function<EventFlow(const FrameUpdate&)> callback);
-  EventConnection Connect(std::function<EventFlow(const MouseMoved&)> callback);
-  EventConnection Connect(std::function<EventFlow(const MouseScrolled&)> callback);
+                          std::function<EventFlow(const MouseEvent &)> callback);
+  EventConnection Connect(std::function<EventFlow(const FrameUpdate &)> callback);
+  EventConnection Connect(std::function<EventFlow(const MouseMoved &)> callback);
+  EventConnection Connect(std::function<EventFlow(const MouseScrolled &)> callback);
   bool ApplyPendingScene();
   struct Impl;
   std::unique_ptr<Impl> m_Impl;

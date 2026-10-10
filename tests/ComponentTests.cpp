@@ -1,3 +1,4 @@
+#include <Jade/Renderer/RayTracing.hpp>
 #include "TestScene.hpp"
 #include <Jade/Jade.hpp>
 #include "internal/Math/Matrix4.hpp"
@@ -11,7 +12,8 @@
 
 static_assert(std::is_aggregate_v<Jade::Transform>);
 static_assert(std::is_aggregate_v<Jade::Camera>);
-static_assert(std::is_aggregate_v<Jade::MeshRenderer>);
+static_assert(std::is_aggregate_v<Jade::Geometry>);
+static_assert(std::is_aggregate_v<Jade::Material>);
 
 TEST(Camera, LookAtRejectsInvalidFramesWithoutReplacingRotation)
 {
@@ -38,25 +40,32 @@ TEST(Components, DataIsValidatedWhenConsumed)
   lens = {};
   lens.farPlane = lens.nearPlane;
   EXPECT_THROW(Jade::Detail::ProjectionMatrix(lens, 1), std::invalid_argument);
-  lens = {}; lens.viewHeight = 0;
+  lens = {};
+  lens.viewHeight = 0;
   EXPECT_THROW(Jade::Motion::zoom(lens, 1), std::invalid_argument);
-  lens = {}; lens.projection = static_cast<Jade::Projection>(42);
+  lens = {};
+  lens.projection = static_cast<Jade::Projection>(42);
   EXPECT_THROW(Jade::Detail::ProjectionMatrix(lens, 1), std::invalid_argument);
   Jade::Transform pose;
   pose.position.y = infinity;
   EXPECT_THROW(Jade::Detail::ModelMatrix(pose), std::invalid_argument);
-  pose = {}; pose.scale.y = 0;
+  pose = {};
+  pose.scale.y = 0;
   EXPECT_THROW(Jade::Detail::ModelMatrix(pose), std::invalid_argument);
-  pose = {}; pose.rotation = {0, 0, 0, 0};
+  pose = {};
+  pose.rotation = {0, 0, 0, 0};
   EXPECT_THROW(Jade::Detail::ViewMatrix(pose), std::invalid_argument);
 }
 
 TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
 {
   Jade::ApplicationConfig config;
-  config.window.visible = false; config.logPerformance = false;
-  config.window.width = 160; config.window.height = 120;
+  config.window.visible = false;
+  config.logPerformance = false;
+  config.window.width = 160;
+  config.window.height = 120;
   Jade::Application app(config);
+  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   const auto initial = app.scene()->camera();
   EXPECT_TRUE(initial.has<Jade::Transform>());
@@ -71,25 +80,27 @@ TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
   EXPECT_EQ(app.scene()->camera(), selected);
   Jade::Scene other;
   const auto foreign = other.create();
-  foreign.add<Jade::Transform>(); foreign.add<Jade::Camera>();
+  foreign.add<Jade::Transform>();
+  foreign.add<Jade::Camera>();
   EXPECT_THROW(app.scene()->setCamera(foreign), std::invalid_argument);
   EXPECT_EQ(app.scene()->camera(), selected);
   selected.remove<Jade::Camera>();
-  EXPECT_NO_THROW(app.Run({2, true}));
+  EXPECT_NO_THROW(app.Run({2}));
   selected.add<Jade::Camera>();
-  EXPECT_NO_THROW(app.Run({1, true}));
+  EXPECT_NO_THROW(app.Run({1}));
   app.scene()->destroy(selected);
   EXPECT_FALSE(app.scene()->camera().valid());
-  EXPECT_NO_THROW(app.Run({1, true}));
+  EXPECT_NO_THROW(app.Run({1}));
   EXPECT_THROW(app.scene()->setCamera(selected), std::invalid_argument);
   app.scene()->setCamera(initial);
   app.setWireframe(true);
-  EXPECT_NO_THROW(app.Run({1, true}));
+  EXPECT_NO_THROW(app.Run({1}));
   std::array<GLint, 2> mode{};
   glGetIntegerv(GL_POLYGON_MODE, mode.data());
-  EXPECT_EQ(mode[0], GL_LINE);
+  EXPECT_TRUE(app.wireframeEnabled());
+  EXPECT_EQ(mode[0], GL_FILL);
   app.setWireframe(false);
-  EXPECT_NO_THROW(app.Run({1, true}));
+  EXPECT_NO_THROW(app.Run({1}));
   glGetIntegerv(GL_POLYGON_MODE, mode.data());
   EXPECT_EQ(mode[0], GL_FILL);
 }

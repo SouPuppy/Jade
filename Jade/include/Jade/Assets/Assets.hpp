@@ -16,10 +16,10 @@ class Assets final {
 public:
   Assets();
   ~Assets();
-  Assets(const Assets&) = delete;
-  Assets& operator=(const Assets&) = delete;
+  Assets(const Assets &) = delete;
+  Assets &operator=(const Assets &) = delete;
 
-  template<class T> AssetHandle<T> add(T resource)
+  template <class T> AssetHandle<T> add(T resource)
   {
     static_assert(std::is_same_v<T, std::remove_cvref_t<T>>, "Assets require unqualified object types.");
     if constexpr (std::is_same_v<T, Mesh>) {
@@ -29,24 +29,34 @@ public:
     return AssetHandle<T>(m_Store, Add(typeid(T), std::move(stored)));
   }
 
-  template<class T> const T& get(AssetHandle<T> handle) const
+  template <class T> const T &get(AssetHandle<T> handle) const
   {
-    return *static_cast<const T*>(Get(handle.m_Store, handle.m_Id, typeid(T)));
+    return *static_cast<const T *>(Get(handle.m_Store, handle.m_Id, typeid(T)));
+  }
+
+  // Acquire on the owning thread. The immutable resource can then be retained
+  // by detached rendering snapshots, including after Assets is destroyed.
+  template <class T> std::shared_ptr<const T> share(AssetHandle<T> handle) const
+  {
+    return std::static_pointer_cast<const T>(Share(handle.m_Store, handle.m_Id, typeid(T)));
   }
 
   // Wavefront OBJ is the only file loader in this version. Relative paths use
   // the working directory. Repeated canonical paths share the same resource.
-  template<class T> AssetHandle<T> load(const std::filesystem::path& path)
+  template <class T> AssetHandle<T> load(const std::filesystem::path &path)
   {
     static_assert(std::is_same_v<T, Mesh>, "Assets::load currently supports Mesh OBJ resources only.");
     return LoadMesh(path);
   }
 
 private:
-  static void ValidateMesh(const Mesh& mesh);
+  static void ValidateMesh(const Mesh &mesh);
   std::uint64_t Add(std::type_index type, std::shared_ptr<const void> resource);
-  const void* Get(const std::weak_ptr<Detail::AssetStore>& owner, std::uint64_t id, std::type_index type) const;
-  MeshHandle LoadMesh(const std::filesystem::path& path);
+  const void *Get(const std::weak_ptr<Detail::AssetStore> &owner, std::uint64_t id,
+                  std::type_index type) const;
+  std::shared_ptr<const void> Share(const std::weak_ptr<Detail::AssetStore> &owner, std::uint64_t id,
+                                    std::type_index type) const;
+  MeshHandle LoadMesh(const std::filesystem::path &path);
   std::shared_ptr<Detail::AssetStore> m_Store;
 };
 

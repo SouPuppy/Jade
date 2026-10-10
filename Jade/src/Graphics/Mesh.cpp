@@ -8,13 +8,6 @@
 
 namespace Jade {
 
-Mesh Mesh::line(Vec3 start, Vec3 end)
-{
-  Detail::Validate(start);
-  Detail::Validate(end);
-  return {{{start, {}}, {end, {}}}, {0, 1}, MeshTopology::Lines};
-}
-
 Mesh Mesh::triangle(Vec3 a, Vec3 b, Vec3 c)
 {
   Detail::Validate(a);
@@ -36,16 +29,12 @@ namespace Detail {
 
 void ValidateMesh(const Mesh& mesh)
 {
-  // DrawElements takes a signed 32-bit count, and indices address 32-bit vertices.
+  // Triangle and vertex identities use unsigned 32-bit indices.
   if (mesh.vertices.size() > std::numeric_limits<std::uint32_t>::max()
-      || mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+      || mesh.indices.size() / 3 > std::numeric_limits<std::uint32_t>::max()) {
     throw std::invalid_argument("Mesh exceeds the supported vertex or index count.");
   }
-  if (mesh.topology != MeshTopology::Lines && mesh.topology != MeshTopology::Triangles) {
-    throw std::invalid_argument("Unknown mesh topology.");
-  }
-  const std::size_t group = mesh.topology == MeshTopology::Lines ? 2 : 3;
-  if (mesh.indices.size() % group != 0) {
+  if (mesh.indices.size() % 3 != 0) {
     throw std::invalid_argument("Mesh indices must describe complete primitives.");
   }
   for (const auto& vertex : mesh.vertices) {

@@ -1,6 +1,6 @@
 # Jade
 
-Jade is a C++20 static engine library built with CMake, currently validated on Windows x64 / MSVC. Scene owns entities, components, hierarchy, events and its camera, Assets owns shared immutable meshes, and an internal RenderSystem draws 3D geometry through OpenGL 3.3 Core. It includes quaternion camera controls, perspective/orthographic projection, OBJ loading, depth, wireframe, unit world axes, typed input events and a frame-limited loop. Include specific public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
+Jade is a C++20 static engine library validated on Windows x64 / MSVC. Its rendering kernel uses CPU progressive path tracing with shared triangle meshes, two-level BVHs, diffuse/metal/dielectric BSDFs and emissive geometry. OpenGL 3.3 presents the completed image and draws unlit wireframe/axis diagnostics. Scene owns entities, hierarchy, events and camera selection; Assets owns immutable resources. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
 
 ## Build
 
@@ -37,7 +37,7 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with a cube and Stanford Bunny at 24 FPS. Press 1 for this scene or 2 for an animated three-level sphere hierarchy. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, F toggles wireframe, F3 toggles axes and Esc exits.
+Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun; P pauses that animation. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, F switches between path tracing and unlit wireframe, F3 toggles axes and Esc exits.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -47,6 +47,7 @@ int main()
   Jade::ApplicationConfig config;
   config.debug = true; // Enable Application F/F3/O shortcuts.
   Jade::Application app(config);
+  app.use<Jade::Renderer::RayTracing>();
   auto scene = std::make_shared<Jade::Scene>();
 
   auto camera = scene->create();
@@ -60,7 +61,17 @@ int main()
   const auto mesh = app.assets().add(Jade::Mesh::cube(2.0f));
   auto cube = scene->create();
   cube.add<Jade::Transform>();
-  cube.add<Jade::MeshRenderer>(mesh);
+  cube.add<Jade::Geometry>(mesh);
+  cube.add<Jade::Material>();
+
+  auto lamp = scene->create();
+  auto& lampPose = lamp.add<Jade::Transform>();
+  lampPose.position = {0, 4, 0};
+  lampPose.scale = {1.5f, 0.05f, 1.5f};
+  lamp.add<Jade::Geometry>(mesh);
+  auto& emission = lamp.add<Jade::Material>();
+  emission.baseColor = {0, 0, 0};
+  emission.emission = {14, 12, 10};
 
   app.setScene(scene);
   app.Run();
@@ -100,59 +111,83 @@ Hierarchy belongs to Scene; Transform contains local position, rotation and scal
 
 The World type/header, `Application::world()/camera()/setCamera()` and callback-based `each()` are removed. Use Scene directly; there are no compatibility aliases.
 
-## Assets and world geometry
+## Meshes, instances and materials
 
-A Mesh is a resource, shared by handles. Each entity supplies its own Transform and MeshRenderer color:
+Every physical object is a triangle Mesh instance. Geometry references an immutable mesh resource; Material describes scattering and emission independently:
 
 ```cpp
 const auto bunnyMesh = app.assets().load<Jade::Mesh>("assets/bunny.obj");
 auto bunny = scene->create();
-auto& pose = bunny.add<Jade::Transform>();
-pose.scale = {16, 16, 16};
-pose.position = {1.9f, -1.7f, 0};
-bunny.add<Jade::MeshRenderer>(bunnyMesh, Jade::Color{1, 0.8f, 0.55f, 1});
+bunny.add<Jade::Transform>().scale = {16, 16, 16};
+bunny.add<Jade::Geometry>(bunnyMesh);
+bunny.add<Jade::Material>().baseColor = {0.8f, 0.28f, 0.12f};
 
-// Another entity can use the same asset without copying its vertex data.
-auto copy = scene->create();
-copy.add<Jade::Transform>().position = {-2, 0, 0};
-copy.add<Jade::MeshRenderer>(bunnyMesh);
+Jade::Material metal;
+metal.model = Jade::MaterialModel::Metal;
+metal.baseColor = {0.95f, 0.7f, 0.3f};
+metal.roughness = 0.18f;
+
+Jade::Material glass;
+glass.model = Jade::MaterialModel::Dielectric;
+glass.baseColor = {1, 1, 1};
+glass.roughness = 0;
+glass.ior = 1.5f;
+
+Jade::Material lamp;
+lamp.baseColor = {0, 0, 0};
+lamp.emission = {14, 12, 10}; // Linear HDR radiance, allowed to exceed 1.
 ```
 
-`assets.add<T>(resource)` stores an immutable CPU snapshot. `assets.get(handle)` returns `const T&`; `assets.load<Mesh>(path)` synchronously loads OBJ. Canonical absolute paths share a cache entry. Relative paths use the working directory. Assets remain alive until the owner is destroyed; handles do not extend that lifetime. Empty, expired or foreign handles are rejected by get. There is no unload, hot reload or Material in this version. An empty MeshRenderer handle disables its drawing.
+All illumination comes from emission on actual geometry. There are no point/directional light entities, ambient term or background illumination. Escaped rays return black. A scene without emissive geometry produces a black physical image; optional axes and wireframe are separate diagnostics.
 
-The bundled bunny has 453 vertices and 948 triangles. CMake copies `assets/` beside Demo on every build; launching from the repository root or executable's `bin` directory finds `assets/bunny.obj`. Source geometry stays intact while Transform scales and positions it. See [asset provenance and terms](assets/README.md).
+Diffuse uses Lambert scattering, metal uses GGX with colored normal-incidence Fresnel reflectance, and glass supports smooth or GGX reflection/transmission with dielectric Fresnel and total internal reflection. Glass assumes closed, outward-wound meshes with air outside. Its baseColor is a surface transmission tint; volumetric absorption and nested media are not implemented. Emission is additive to any material model and defaults to one-sided; `twoSidedEmission` enables both sides.
 
-Mesh contains `vertices` (Vertex position/normal), `indices` (uint32) and `topology`. Every two indices form a line for `MeshTopology::Lines`; every three form a triangle for `Triangles`, the default. Registration validates finite vertex data, index bounds and complete primitives. An empty mesh draws nothing. Builders produce local 3D geometry:
+Materials default to diffuse, baseColor `{0.8, 0.8, 0.8}`, roughness `0.5`, IOR `1.5`, and zero emission. BaseColor/roughness must be finite in [0, 1], IOR in [1, 10], and emission finite/nonnegative. Enabled Geometry requires Material. An empty mesh handle disables that instance; absent Transform supplies identity local pose while retaining ancestor transforms.
+
+`assets.add<T>(resource)` stores an immutable CPU snapshot, `get(handle)` returns `const T&`, and `share(handle)` returns an owning `shared_ptr<const T>` for detached snapshots. Acquire on the owning thread; workers use retained immutable resources. Handles themselves remain weak, and empty/expired/foreign handles are rejected. Meshes have position/normal vertices and uint32 triangle indices; every three indices form one triangle. Empty and degenerate meshes have no hittable surface. Mesh line/topology APIs have been removed.
+
+`Mesh::cube(size)`, `Mesh::sphere(radius, segments, rings)` and `Mesh::triangle(a, b, c)` remain triangle builders. Sphere defaults to radius 0.5, 32 segments, 16 rings and produces a closed mesh with 482 vertices and 960 triangles. Shared mesh instances have independent Transform and Material without copying vertex data. Each unique mesh receives a local BVH, with another BVH over world-space instances.
+
+OBJ loading supports positive/negative indices, common face forms, triangles and convex polygons. Explicit normals are normalized; absent normals use area-weighted smoothing. UVs, materials and smoothing groups are not retained. Triangulate concave polygons before loading. Canonical paths share a cache entry; parse/file errors include path and line. The bundled bunny has 453 vertices and 948 triangles; see [asset terms](assets/README.md).
+
+## Rendering configuration and extension
+
+Renderer registration is explicit and must occur before Run. `Application::use<T>(args...)` owns one backend, replaces an existing backend and returns its reference. T derives from `Jade::Renderer::Backend`. Replacement and algorithm configuration during Run are rejected.
 
 ```cpp
-auto lineMesh = app.assets().add(Jade::Mesh::line({1, 1, 0}, {4, 5, 0}));
-auto line = scene->create();
-line.add<Jade::Transform>();
-line.add<Jade::MeshRenderer>(lineMesh);
-line.get<Jade::Transform>().position = {0, 0, -1};
-
-const auto triangleMesh = app.assets().add(
-  Jade::Mesh::triangle({0, 0, 0}, {1, 0, 0}, {0, 1, 0}));
+Jade::Renderer::RayTracingConfig render;
+render.resolutionScale = 1; // Actual framebuffer dimensions, not fullscreen mode.
+render.maxSamples = 0;     // Unlimited; a positive value stops a static revision.
+render.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
+render.maxBounces = 12;
+render.rrStartBounce = 4;
+render.seed = 0;
+render.exposureEV = 0;
+app.use<Jade::Renderer::RayTracing>(render);
 ```
 
-Sphere generation uses the same Mesh/Assets/MeshRenderer path as Cube:
+Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount within [0, 256], maxBounces within [1, 1024], and roulette start positive. Fewer pixels improve CPU preview latency. Full framebuffer rendering is the default; no realtime full-resolution sample rate is promised.
+
+The window thread captures immutable scene/camera state. A coordinator builds/reuses BVHs and schedules 16x16 tiles on persistent CPU workers. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
+
+F enables unlit triangle edges and cancels ray computation; switching back begins fresh accumulation. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. `app.renderProgress()` returns revision, samplesPerPixel, render dimensions, sample time and inFlight; these are independent of presentation FPS.
+
+Rendering can also run headlessly through public interfaces:
 
 ```cpp
-// Radius 1, default tessellation: segments=32, rings=16.
-const auto sphereMesh = app.assets().add(Jade::Mesh::sphere(1.0f));
-auto sphere = scene->create();
-sphere.add<Jade::Transform>();
-sphere.add<Jade::MeshRenderer>(sphereMesh, Jade::Color{0.3f, 0.7f, 1, 1});
-
-// Customize longitude and pole-to-pole latitude subdivisions.
-auto finerSphere = Jade::Mesh::sphere(1.0f, 64, 32);
+auto snapshot = Jade::Renderer::SceneSnapshot::capture(*scene, app.assets());
+auto prepared = Jade::Renderer::RenderScene::build(snapshot);
+Jade::Renderer::Film film({320, 200});
+Jade::Renderer::RayTracing renderer;
+for (std::uint64_t sample = 0; sample < 64; ++sample) {
+  renderer.render(prepared, {*snapshot.camera, film.size(), sample, 42, {}}, film);
+}
+auto image = film.resolve(); // Top-left origin, opaque sRGB RGBA8.
 ```
 
-`Mesh::sphere(radius = 0.5f, segments = 32, rings = 16)` returns indexed triangles centered at the origin, with Y-up poles and smooth outward unit normals. The radius must be positive and finite, segments at least 3 and rings at least 2; unsupported vertex/index counts are rejected before allocation. Pole vertices are shared and longitude indices wrap, so the mesh is closed without duplicate seam vertices or collapsed pole triangles. The default produces 482 vertices and 960 triangles. Demo's second scene shares one sphere mesh among the sun, earth and moon.
+Backend computes one sample round into linear HDR Film, with no window access. RenderRequest supplies camera, size, sample index, seed and cancellation token. Custom Integrator implementations receive Ray, immutable RenderScene and Sampler; install one with `RayTracing::setIntegrator`. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
 
-All meshes use the active camera and world depth. Lines use unlit color; triangles use normal-based ambient and directional lighting. `Mesh::cube(size)` is centered at the local origin, with 24 vertices and 36 indices for hard face normals. Triangles generate a face normal. Degenerate primitives draw no area. The former Object class, Geometry Line/Triangle classes, `Application::create<T>()`, `Mesh::load()` and fixed 2D overlay have been removed.
-
-OBJ supports positive/negative indices, `v`, `v/vt`, `v//vn` and `v/vt/vn` faces, triangles and convex polygons. Explicit normals are normalized; absent normals receive area-weighted smoothing. UVs, materials and smoothing-group boundaries are not retained. Triangulate concave polygons before loading. File/parse errors report the path and line in `std::runtime_error`.
+PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding once; OpenGL does not repeat color conversion. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
 
 ## Camera and transforms
 
@@ -170,7 +205,7 @@ lens.viewHeight = 6;
 
 The right-handed world has Y up; an identity rotation faces local -Z with right +X and up +Y. Each local model applies scale, rotation, then translation. Camera position inherits the full parent matrix; orientation composes ancestor quaternions, ignoring ancestor scale. Its own scale is ignored. Moving position keeps orientation; `Motion::lookAt()` replaces rotation once and retains no target. Its target/up and movement use parent coordinates (world coordinates for roots). Quaternion angles use degrees through `Quaternion::angleAxis(axis, degrees)`. Motion yaw/pitch/roll compose about the current local axes, permit complete flips and normalize the result. Positive yaw turns right, pitch looks up and roll banks clockwise.
 
-Perspective makes distant geometry smaller; orthographic keeps its size. FOV controls perspective vertical coverage, and viewHeight controls orthographic vertical coverage. Resize adjusts horizontal coverage from the actual framebuffer aspect ratio. Both lens values must stay valid, even when inactive. Positions/quaternions must be finite, rotations nonzero, scale positive, color in [0, 1], FOV strictly (0, 180), heights/clipping distances positive and far greater than near. Since components are plain data, consumers validate them when used. Invalid render data throws from Run.
+Perspective makes distant geometry smaller; orthographic keeps its size. FOV controls perspective vertical coverage, and viewHeight controls orthographic vertical coverage. Resize adjusts horizontal coverage from the actual framebuffer aspect ratio. Both lens values must stay valid, even when inactive. Positions/quaternions must be finite, rotations nonzero, scale positive, FOV strictly (0, 180), heights/clipping distances positive and far greater than near. Since components are plain data, consumers validate them when used. Invalid render data throws from Run.
 
 `scene->setCamera()` rejects foreign/dead entities and missing components. If the selected camera is later destroyed or loses Transform/Camera, Run keeps processing input and clearing/presenting without world or axis drawing. Selecting a valid camera resumes rendering.
 
@@ -274,16 +309,17 @@ Public interfaces are split by purpose, with one optional includes-only entry po
 | --- | --- |
 | Core/ | Scene, SceneView, Entity, Transform |
 | Math/ | Vector (Vec2/Vec3), Quaternion, Matrix4 |
-| Graphics/ | Mesh, Vertex, MeshRenderer, Camera, Motion |
+| Graphics/ | Mesh, Vertex, Geometry, Material, Camera, Motion |
+| Renderer/ | Backend, RayTracing, Integrator, BSDF, RayQuery, snapshots, Sampler, Film and Image |
 | Assets/ | Assets, AssetHandle and MeshHandle |
 | Input/, Events/ | Key/button bindings and event contracts |
 | Application.hpp, Color.hpp, Log.hpp, WindowConfig.hpp | Application loop and value/configuration types |
 
-There are no folder aggregation headers. Source `.cpp` files include their matching private `.hpp` first and are explicitly listed in CMake. Registry storage, RenderSystem, backend, OBJ parsing, input state, event dispatch, matrix construction and clock are internal. Consumers receive only `Jade/include`.
+There are no folder aggregation headers. Source `.cpp` files include their matching private `.hpp` first and are explicitly listed in CMake. Registry storage, RenderSession, OpenGL display, OBJ parsing, input state, event dispatch, matrix construction and clock are internal. Consumers receive only `Jade/include`.
 
 ## Frame scheduling and logs
 
-`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. VSync defaults to false and may further constrain the achieved rate. `app.setWireframe(bool)` changes triangle rasterization; unit world axes default on and draw over meshes without writing depth.
+`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. VSync defaults to false and may further constrain the achieved rate. `app.setWireframe(bool)` selects the unlit debug mode and bypasses ray computation; unit world axes draw over the presented image without changing physical samples. Demo starts with axes disabled.
 
 ```text
 15:27:07.591522  INFO [Application] - Ready: window=960x640 target_fps=24 vsync=off
@@ -297,7 +333,7 @@ successful file loads at Debug and failures at Error while preserving exceptions
 Cache hits do not repeat successful load messages. Axis Gizmo, camera projection
 and Demo wireframe changes are event logs. Each Run resets timing and retains the selected Scene,
 Assets and subscriptions. `RunOptions::frameLimit` limits total submitted frames
-independently of FPS; `validateRendering` checks the clear before drawing.
+independently of FPS. Completed sample progress is available through `renderProgress()` and periodic Debug logs in the RayTracing category.
 
 `ApplicationConfig::logPerformance` defaults to true. A completed one-second
 measurement window emits one Debug summary with FPS, average/maximum frame interval
@@ -392,7 +428,7 @@ There are no logging dependencies, worker threads or automatic configuration fil
 
 The engine, dependencies and consumers share the MSVC dynamic CRT: `/MDd` for Debug and `/MD` for Release. GoogleTest follows the [official shared-CRT configuration](https://google.github.io/googletest/quickstart-cmake.html).
 
-Tests exercise public Scene, Assets and component APIs; rendering tests additionally use internal Window/Renderer and OpenGL/GLFW to inspect pixels and resize hidden windows. Rendering checks require an OpenGL 3.3-capable runtime. They do not require a particular Visual Studio installation path, Mesa installation, Windows message-injection script or preinstalled GoogleTest package. A graphics driver can provide OpenGL; Windows machines without one can optionally use the local Mesa DLLs described in [runtime/README.md](runtime/README.md).
+Tests exercise public Scene, Assets and component APIs; path-tracing tests run headlessly; presentation and debug tests additionally use internal Window/OpenGL display and GLFW pixel readback. Window/presentation checks require an OpenGL 3.3-capable runtime; computation needs no GPU. They do not require a particular Visual Studio installation path, Mesa installation, Windows message-injection script or preinstalled GoogleTest package. A graphics driver can provide OpenGL; Windows machines without one can optionally use the local Mesa DLLs described in [runtime/README.md](runtime/README.md).
 
 Mesa files are ignored under `runtime/mesa/x64/`. On first configuration, detecting `opengl32.dll` enables `JADE_USE_SOFTWARE_RENDERING`; `libgallium_wgl.dll` must also be present. `JADE_MESA_RUNTIME_DIR` can point to another directory.
 
@@ -413,15 +449,16 @@ Demo and tests share the same deployment rule. Disabling Mesa uses the system gr
 ## Layout and tests
 
 ```text
-Jade/include/Jade/   # Core/, Math/, Graphics/, Assets/, Input/, Events/
+Jade/include/Jade/   # Core/, Math/, Graphics/, Renderer/, Assets/, Input/, Events/
 Jade/src/Core/       # Application, Entity, Scene, Log
 Jade/src/Math/       # Matrix4, Quaternion
 Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
-Jade/src/internal/   # Registry, RenderSystem, OpenGL, platform, loader, input, math
+Jade/src/Renderer/   # CPU BVH, BSDF, path integration, sampling and Film
+Jade/src/internal/   # Registry, RenderSession, OpenGL display, platform and input
 Demo/               # Two scenes, cube/bunny and animated hierarchy
 assets/             # Bunny OBJ and attribution
 tests/              # ECS, assets, math, input, scheduling and pixel checks
 ```
 
-GoogleTest exercises identity generations, ownership, hierarchy, scene switching, component/query mutation, shared immutable resources, OBJ loading, quaternion controls, projections, resize, depth, lighting, wireframe, axes and events using real OpenGL readback. Tests build independently of Demo. See [Architecture](docs/Architecture.md) for boundaries and [Validation](docs/Validation.md) for recorded checks.
+GoogleTest exercises identity generations, ownership, hierarchy, scene switching, component/query mutation, shared immutable resources, OBJ loading, quaternion controls, projections, resize, ray intersections, BSDFs, emissive lighting, deterministic CPU sampling, asynchronous revisions, wireframe, axes and events; OpenGL readback validates presentation/debug output. Tests build independently of Demo. See [Architecture](docs/Architecture.md) for boundaries and [Validation](docs/Validation.md) for recorded checks.

@@ -16,9 +16,9 @@ Mesh Mesh::sphere(float radius, std::uint32_t segments, std::uint32_t rings)
     throw std::invalid_argument("Sphere requires at least 3 longitude and 2 latitude segments.");
   }
   const auto ringVertices = std::uint64_t{segments} * (rings - 1);
-  // Check before multiplying the index count or allocating geometry.
+  // Check triangle/vertex identities before multiplying indices or allocating.
   if (ringVertices + 2 > std::numeric_limits<std::uint32_t>::max()
-      || ringVertices > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()) / 6) {
+      || ringVertices > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) / 2) {
     throw std::invalid_argument("Sphere exceeds the supported vertex or index count.");
   }
 

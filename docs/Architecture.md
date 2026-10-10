@@ -2,46 +2,46 @@
 
 ## Core model and boundaries
 
-Entity identifies an existence in Scene. Components describe its state, systems interpret that state, and Assets owns shareable resources. The current foundation contains Scene/Entity, Transform, MeshRenderer, Camera and mesh assets. Physics, materials, light, prefabs and a general system scheduler are outside this implementation.
+Entity identifies an existence in Scene. Components describe its state, systems interpret that state, and Assets owns shareable resources. Rendering uses Transform, Geometry, Material and an explicitly selected Camera. The CPU path tracer is independent of the window and OpenGL display.
 
 ```mermaid
 flowchart LR
-  Application --> Scene
-  Application --> Assets
-  Scene --> Entity
-  Entity --> Transform
-  Entity --> MeshRenderer
-  Entity --> Camera
-  MeshRenderer --> MeshHandle
-  MeshHandle --> Assets
-  Assets --> Mesh
-  Scene --> RenderSystem
-  Assets --> RenderSystem
-  RenderSystem --> Renderer
-  Renderer --> OpenGL
+  Scene --> Snapshot[SceneSnapshot]
+  Assets --> Snapshot
+  Snapshot --> Compiler[SceneCompiler]
+  Compiler --> Geometry[Mesh BLAS + instance TLAS]
+  Compiler --> Emitters[Emissive triangle distribution]
+  Camera[CameraFrame] --> Rays
+  Rays --> Integrator[PathIntegrator]
+  Geometry --> Integrator
+  Emitters --> Integrator
+  BSDF --> Integrator
+  Integrator --> Film
+  Film --> Image[sRGB Image]
+  Image --> Display[OpenGLDisplay]
+  Snapshot --> Wireframe[Unlit debug edges]
+  Wireframe --> Display
 ```
 
 | Public path | Contract |
 | --- | --- |
-| Core/Entity.hpp | Copyable identity, component access, validity/generation |
-| Core/Scene.hpp | Entity/component ownership, destruction and snapshot queries |
-| Core/Transform.hpp | Local position, quaternion rotation, scale |
-| Assets/AssetHandle.hpp | Typed weak identity; MeshHandle alias |
-| Assets/Assets.hpp | Immutable resource snapshots and synchronous OBJ cache |
-| Math/Vector.hpp, Math/Quaternion.hpp, Math/Matrix4.hpp | Vectors, quaternion rotations and column-major matrices |
-| Graphics/Mesh.hpp, Graphics/Vertex.hpp | Indexed CPU mesh, topology and builders |
-| Graphics/MeshRenderer.hpp | MeshHandle and per-entity color |
-| Graphics/Camera.hpp | Projection mode, FOV, height and clip planes |
-| Graphics/Motion.hpp | Transform movement/rotation/directions and Camera zoom |
-| Module/CameraControl.hpp | Scene-local free camera controls installed by Scene::use |
-| Input/, Events/ | Typed input values, events and connection handles |
-| Application.hpp | Active Scene selection, shared Assets, global events and main loop |
-| Color.hpp, WindowConfig.hpp, Log.hpp | Shared values, window configuration and logging |
+| Core/Entity.hpp, Core/Scene.hpp | Identity, component ownership, hierarchy and queries |
+| Core/Transform.hpp | Local position, quaternion rotation and scale |
+| Assets/Assets.hpp, Assets/AssetHandle.hpp | Typed immutable resources and retained snapshots |
+| Math/ | Vectors, quaternions and column-major matrices |
+| Graphics/Mesh.hpp, Graphics/Vertex.hpp | Triangle-only indexed CPU geometry and builders |
+| Graphics/Geometry.hpp | MeshHandle component |
+| Graphics/Material.hpp | Diffuse, metal, dielectric and emission parameters |
+| Graphics/Camera.hpp, Graphics/Motion.hpp | Projection settings and scene motion |
+| Renderer/Ray.hpp, Renderer/RenderScene.hpp | Ray queries, surface hits, immutable scene compilation |
+| Renderer/BSDF.hpp, Renderer/Sampler.hpp, Renderer/Integrator.hpp | Scattering, reproducible samples and light transport |
+| Renderer/Image.hpp, Renderer/CameraFrame.hpp | Linear HDR film, sRGB output and camera ray generation |
+| Renderer/Backend.hpp, Renderer/RayTracing.hpp | Backend interface and multithreaded CPU path tracer |
+| Application.hpp | Window loop, active Scene, events and renderer installation |
+| Module/CameraControl.hpp, Input/, Events/ | Scene-local controls and typed events |
 | Jade.hpp | Optional includes-only entry point |
 
-Headers work independently. No folder aggregation header or legacy Object compatibility layer remains. Geometry consists of Mesh builders and Lines/Triangles topologies, all in 3D world space. Window/Renderer/FramebufferSize stay private. Consumer include paths expose neither backend headers nor implementation storage.
-
-Each maintained .cpp includes its corresponding private .hpp first; CMake lists every source explicitly. Data-only headers need no empty .cpp. Core/Scene.hpp includes no graphics or platform dependency. Public template operations use type-erased bridges implemented in Core and Assets.
+Headers work independently. GLFW, GLAD, Window, GPU programs and render-session storage remain private. Each maintained implementation includes its corresponding private header first and CMake lists sources explicitly. Core does not depend on rendering or platform headers. No compatibility adapters for the old MeshRenderer or lit OpenGL pipeline remain.
 
 ## Logging
 
@@ -131,7 +131,7 @@ Scene::worldMatrix resolves full ancestor × local matrices. Rendering creates a 
 
 ## Scene selection and events
 
-Application owns Window, Renderer, shared Assets and its global dispatcher, with no implicit scene or camera. It selects a shared_ptr<Scene> via setScene; nullptr selects clear/present-only operation. Each Scene retains its own camera and dispatcher while inactive. The same Scene cannot be active or reserved in another Application.
+Application owns Window, OpenGLDisplay, a render session, shared Assets and its global dispatcher, with no implicit scene or camera. It selects a shared_ptr<Scene> via setScene; nullptr selects clear/present-only operation. Each Scene retains its own camera and dispatcher while inactive. The same Scene cannot be active or reserved in another Application.
 
 Outside Run, selection commits immediately. During Run, one optional pending pointer records the last request, including unload. A processing pass holds one strong active pointer through input, update and render. At the next pass boundary it dispatches old SceneDeactivated, commits the pointer, then dispatches new SceneActivated. Reentrant lifecycle requests queue another selection rather than recurse. Selecting the current scene emits nothing.
 
@@ -141,23 +141,33 @@ Ordinary events dispatch globally first, then to the retained active scene, then
 
 ## Assets
 
-Assets owns typed immutable CPU allocations, with one-based resource IDs and weak typed handles. get returns const T&; add copies/moves a resource into an immutable snapshot. References survive later registrations. Handles do not extend owner lifetime. There is no unload or hot reload, so a nonempty handle remains valid until owner destruction. Owner identity rejects foreign, empty and expired handles. Generic user resources can be registered; Mesh is the only file-loaded type.
+Assets owns typed immutable CPU allocations, with one-based resource IDs and weak typed handles. get returns const T&; share returns shared_ptr<const T> that retains the resource independently of Assets; add copies/moves a resource into an immutable snapshot. References survive later registrations. Handles do not extend owner lifetime. There is no unload or hot reload, so a nonempty handle remains valid until owner destruction. Owner identity rejects foreign, empty and expired handles. Generic user resources can be registered; Mesh is the only file-loaded type.
 
 load<Mesh> resolves a canonical absolute path and synchronously parses OBJ. Repeated paths share one handle/allocation, including normalized relative aliases. Failure publishes neither a resource nor a cache entry; retry is allowed. Files changing after a successful load leave the cached immutable resource intact. Relative paths use the working directory; there are no hidden search paths.
 
-Mesh owns vertices (position/normal), uint32 indices and Lines/Triangles topology. Registration checks finite data, index bounds, primitive grouping and supported draw counts. cube(size) emits 24 vertices/36 indices with hard normals; line(a,b) emits two Vec3 vertices; triangle(a,b,c) emits three vertices with a generated normal. sphere(radius, segments=32, rings=16) emits a closed indexed surface with smooth radial normals, shared poles and wrapped longitude indices; radius defaults to 0.5. Vertex/index limits are checked before allocation. Builtin cube and sphere generation lives under src/Graphics/builtins. OBJ parsing and mesh validation are internal, preserving positive/negative face references, convex triangulation, supplied normal seams and generated area-weighted normals. UVs, materials and smoothing groups are discarded.
+Mesh owns vertices (position/normal) and uint32 triangle indices. Registration checks finite data, index bounds and complete triangle grouping. cube(size) emits 24 vertices/36 indices with hard face normals; triangle(a,b,c) generates a normal. sphere(radius, segments=32, rings=16) emits a closed indexed surface with smooth radial normals, shared poles and wrapped longitude indices. Sphere radius defaults to 0.5. Builtin generation lives under src/Graphics/builtins. OBJ parsing preserves positive/negative references, convex triangulation, supplied normal seams and generated area-weighted normals. OBJ UVs, material declarations and smoothing groups are discarded; Material is explicit scene data.
 
 ## Rendering and camera
 
 Scene::setCamera requires a live own-Scene identity with Transform and Camera. Creating Camera components never selects them implicitly. A removed/destroyed active camera causes clear/present only, retaining input and callbacks. Selecting a valid camera resumes geometry and axes.
 
-RenderSystem is stateless. It iterates Scene::view<Transform, MeshRenderer>(), resolves meshes through shared Assets and submits Mesh plus DrawParameters. A per-pass SceneTransforms cache computes ancestor model, normal and rotation data. Renderer and OpenGL backend accept neither Entity nor Scene. Debug axes use three immutable internal line meshes and no Entities.
+Application::use<Renderer::RayTracing>(config) installs the owned backend before Run; there is no implicit backend. Consumers can instead derive Renderer::Backend or replace a RayTracing integrator before Run. Installed configuration is sealed while the session runs. Backend::render synchronously computes one complete sample round into a Film and must either commit one round or respond to cancellation without committing. The same APIs work headlessly.
 
-Coordinates are right-handed with Y up. A quaternion maps local +X right, +Y up and -Z front into parent coordinates. Local models are T*R*S; world models multiply the complete ancestry. Normal matrices compose inverse transposes of each local linear transform, preserving the full inverse transpose under inherited shear/nonuniform scale. The camera eye inherits the full parent matrix; orientation composes ancestor quaternions without scale and its own scale is ignored. View is the inverse of this rigid pose. Projection uses framebuffer aspect and NDC Z [-1,1].
+The main thread alone accesses Scene, Entity and Assets and performs OpenGL calls. SceneSnapshot::capture copies resolved transforms, materials and camera pose while retaining immutable meshes. A coordinator compiles snapshots and drives the backend; a persistent worker pool processes 16x16 pixel tiles. Worker sampling depends on seed, pixel, sample and dimension, so thread scheduling does not change results. Integrators used by multiple workers must support concurrent const Li calls.
 
-Components are data aggregates. Consumers validate when used: finite positions and nonzero finite quaternions, positive model scales and dimensions, color channels in [0,1], FOV strictly (0,180), positive height/clipping planes and far>near. Both stored lens settings must remain valid, regardless of projection mode. Computed matrices outside float range are rejected. Invalid render data propagates an exception from Run, whose guard permits a later corrected Run.
+SceneCompiler caches one mesh BLAS per retained mesh. Median splitting builds a separate instance TLAS using transformed bounds; transform changes rebuild the TLAS while material/camera changes reuse geometry. Mesh intersection transforms rays into object space without normalizing their directions, preserving world ray parameters under nonuniform scale and shear. Shading normals use inverse transpose transforms; geometric normals identify front/back faces. Degenerate triangles are excluded, both sides can intersect, and shadow queries terminate on any occluder. Cancellation checkpoints interrupt geometry compilation; a cancelled compilation returns an empty scene while complete cached mesh BVHs remain reusable. SceneCompiler itself belongs to one coordinator and is not a concurrent mutable service.
 
-The OpenGL mesh backend owns one normal-aware shader, VAO, streaming VBO and index buffer. It explicitly packs six position/normal floats per vertex. Indexed GL_LINES uses unlit color; GL_TRIANGLES uses ambient/directional diffuse light. Mesh data is streamed per draw; persistent GPU caching is deferred. BeginFrame clears color/depth, sets GL_LESS with depth writes, viewport and fill/wireframe. Each draw restores prior depth-test/write/function state. Gizmo lines disable depth test/writes to appear over meshes without changing polygon mode. When config.debug is enabled, F3 toggles positive unit XYZ axes colored red/green/blue. GL_LINE affects triangle edges only.
+PathIntegrator handles emitted radiance, next-event sampling of emissive triangles, BSDF sampling, multiple importance sampling and Russian roulette. Emitter selection uses transformed area times emission luminance. Diffuse scattering is Lambertian; metals use GGX; dielectrics use Fresnel reflection, refraction and total internal reflection, with smooth and rough variants. Glass assumes a closed mesh separating air from one dielectric; nested media and volumetric absorption are not implemented. Secondary rays use offset surface origins with float error bounds and unrestricted distance. Near/far camera clipping applies only to primary rays. Escaped rays contribute black. There is no ambient term, fixed directional light or implicit environment.
+
+Film accumulates linear HDR radiance as a running mean. A complete sample round resolves exposure, Reinhard tone mapping and linear-to-sRGB encoding into top-left RGBA8 Image data. OpenGLDisplay presents those bytes using a fullscreen triangle without additional lighting or tone mapping. Physical render resolution defaults to the framebuffer dimensions; resolutionScale is explicit. maxSamples=0 accumulates until invalidation or stop, and renderProgress exposes the latest completed revision and sample count.
+
+Ordinary camera, material or transform changes coalesce pending snapshots: the current sample finishes, then the newest snapshot starts with a fresh Film. The previous completed image stays visible during that transition. Scene changes, resize, missing camera, minimization and wireframe toggles cancel work and invalidate the publication epoch. Completed work from an invalidated epoch cannot publish. Shutdown requests cancellation and joins the coordinator and workers before releasing resources. Worker failures propagate from Run, including finite Runs, and the guard permits recovery after correcting the cause.
+
+F switches to independent unlit triangle-edge drawing and cancels ray tracing. It never invokes the integrator. F again starts a fresh physical accumulation. OpenGLDisplay streams world-space GL_LINES; depth tests compare edges and no physical shading runs. F3 draws positive unit XYZ axes in red/green/blue as a debug overlay. Display begins each frame in GL_FILL and does not use polygon mode as its wireframe implementation.
+
+Coordinates are right-handed with Y up. A quaternion maps local +X right, +Y up and -Z forward into parent coordinates. Local models are T*R*S and world models multiply the full ancestry. Camera position inherits the full parent matrix while orientation composes ancestor quaternions without scale. CameraFrame generates perspective or orthographic rays; its view/projection matrices are used only by debug drawing.
+
+Components are data aggregates and are validated when used: finite positions, nonzero finite quaternions, positive model scales, baseColor channels in [0,1], roughness in [0,1], IOR in [1,10], finite nonnegative HDR emission, FOV strictly (0,180), positive height and clipping planes with far>near. Both stored projection settings must remain valid. Computed matrices outside float range are rejected. Nonempty Geometry requires Material; empty Geometry is skipped.
 
 Motion operates on Transform; zoom operates on Camera. Translation preserves orientation; forward/right use current local axes and up/down use parent Y. lookAt replaces the quaternion using target/up in parent coordinates once. Rotation composes normalized quaternion increments about current local axes, with rightward yaw, upward pitch and clockwise roll. There is no pitch clamp or Euler decomposition, so full flips and yaw/pitch after roll remain consistent with view/direction calculations. Zoom bounds the active lens parameter without changing pose/mode/clip planes; changing projection preserves both zoom values.
 
@@ -167,7 +177,7 @@ Scene::use<T>() invokes static void T::attach(Scene&) once per type and Scene. T
 
 Module::CameraControl lives in the engine and registers scene-local motion, left-button dragging, zoom and lifecycle callbacks. Shared callback state keeps a Scene reference and weak Entity identity without retaining the Scene. Every input resolves the current selected camera and skips missing components. A changed target or activation/deactivation resets drag state. Demo installs this module in each scene and retains only scene construction, animation and scene-selection shortcuts.
 
-ApplicationConfig.debug defaults to false independently of build type and logging. When enabled, unconsumed unmodified Pressed F/F3/O toggle wireframe, axes and the retained scene camera's projection after both dispatcher layers. O checks Transform and Camera and retains pose/zoom/clips. stop or a closed window prevents these actions. Renderer owns wireframe state and its getter backs Application::wireframeEnabled(); no second state flag is cached. Initial axes still follow config.axisGizmo independently of debug.
+ApplicationConfig.debug defaults to false independently of build type and logging. When enabled, unconsumed unmodified Pressed F/F3/O toggle wireframe, axes and the retained scene camera's projection after both dispatcher layers. O checks Transform and Camera and retains pose/zoom/clips. stop or a closed window prevents these actions. Application owns wireframe state, exposed by wireframeEnabled(). Initial axes still follow config.axisGizmo independently of debug.
 
 ## Loop, events and build
 
@@ -175,4 +185,4 @@ After committing any pending scene, the main loop polls and dispatches ordered k
 
 [Events](Events.md) describes propagation, exact modifiers and connection lifetime. CMake explicitly lists source/header pairs. Demo and tests are independently optional. GLFW/GLAD are private static dependencies; GoogleTest is configured only for tests. Windows Debug/Release use matching /MDd and /MD runtimes. Software builds select llvmpipe before GLFW when no nonempty driver override exists, and release GPU resources with the owning context current. Runtime/asset deployment stays shared across target configurations.
 
-Tests cover module installation/rollback/lifetime, opt-in debug shortcuts and camera-control targeting/reset, Scene lifetime/generations, hierarchy, mutation snapshots, deferred switching and lifecycle failures, Assets sharing/cache/lifetime, quaternion direction/view agreement, camera lifecycle, input ordering, timing and real OpenGL pixels/depth for both topologies, projections, normals, resizing, clipping, wireframe and axes. Local screenshots and Demo launch checks stay under ignored build/validation/.
+Tests cover kernel contracts, analytic transport checks, deterministic multithreading, BVH agreement with brute force, cancellation/publication and actual OpenGL display pixels. Existing module, lifecycle, assets, input, math, scheduling and logging suites remain maintained. See [Validation](Validation.md) for current build and execution results.

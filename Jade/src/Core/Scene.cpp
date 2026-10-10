@@ -1,7 +1,7 @@
 #include "Scene.hpp"
 
 #include "../internal/Core/Registry.hpp"
-#include "../internal/Renderer/SceneTransforms.hpp"
+#include "../internal/Core/SceneTransforms.hpp"
 
 #include <Jade/Graphics/Camera.hpp>
 

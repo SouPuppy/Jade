@@ -1,3 +1,4 @@
+#include <Jade/Renderer/RayTracing.hpp>
 #include "TestScene.hpp"
 #include <Jade/Application.hpp>
 #include <Jade/Color.hpp>
@@ -7,7 +8,6 @@
 
 #include "internal/Core/FrameClock.hpp"
 #include "internal/Platform/Window.hpp"
-#include "internal/Renderer/Renderer.hpp"
 
 #include <gtest/gtest.h>
 
@@ -33,20 +33,20 @@ public:
     Jade::Log::Config config;
     config.minimumLevel = level;
     config.console = false;
-    config.sink = [this](const auto& record) { m_Records.push_back(record); };
+    config.sink = [this](const auto &record) { m_Records.push_back(record); };
     Jade::Log::Configure(std::move(config));
   }
   ~LogCapture() { Jade::Log::Configure(); }
 
-  LogCapture(const LogCapture&) = delete;
-  LogCapture& operator=(const LogCapture&) = delete;
+  LogCapture(const LogCapture &) = delete;
+  LogCapture &operator=(const LogCapture &) = delete;
 
-  std::vector<Jade::Log::Record> Records(std::string_view category,
-    Jade::Log::Level level) const
+  std::vector<Jade::Log::Record> Records(std::string_view category, Jade::Log::Level level) const
   {
     std::vector<Jade::Log::Record> result;
-    for (const auto& record : m_Records) {
-      if (record.category == category && record.level == level) result.push_back(record);
+    for (const auto &record : m_Records) {
+      if (record.category == category && record.level == level)
+        result.push_back(record);
     }
     return result;
   }
@@ -56,10 +56,10 @@ private:
   std::vector<Jade::Log::Record> m_Records;
 };
 
-void CheckSummary(const Jade::Log::Record& record)
+void CheckSummary(const Jade::Log::Record &record)
 {
   const std::regex pattern(
-    R"(fps=([0-9.]+) interval_avg=([0-9.]+)ms interval_max=([0-9.]+)ms work_avg=([0-9.]+)ms work_max=([0-9.]+)ms)");
+      R"(fps=([0-9.]+) interval_avg=([0-9.]+)ms interval_max=([0-9.]+)ms work_avg=([0-9.]+)ms work_max=([0-9.]+)ms)");
   std::smatch values;
   ASSERT_TRUE(std::regex_match(record.message, values, pattern));
   EXPECT_GT(std::stod(values[1]), 0.0);
@@ -86,7 +86,8 @@ TEST(Application, ThreeClearFrames)
   auto config = HiddenApplication();
   config.logPerformance = false;
   Jade::Application app(config);
-  EXPECT_NO_THROW(app.Run({ 3, true }));
+  app.use<Jade::Renderer::RayTracing>();
+  EXPECT_NO_THROW(app.Run({3}));
   EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
   EXPECT_TRUE(capture.Records("Frame", Jade::Log::Level::Trace).empty());
 }
@@ -97,7 +98,7 @@ TEST(Application, RejectsInvalidConfigurationBeforeCreatingAWindow)
   config.frameLimits = 0;
   EXPECT_THROW((Jade::Application{config}), std::invalid_argument);
   config.frameLimits = 24;
-  config.clearColor.red = std::numeric_limits<float>::quiet_NaN();
+  config.window.width = 0;
   EXPECT_THROW((Jade::Application{config}), std::invalid_argument);
 }
 
@@ -158,10 +159,11 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   LogCapture capture;
   auto config = HiddenApplication();
   Jade::Application app(config);
+  app.use<Jade::Renderer::RayTracing>();
   const auto scene = MakeTestScene(app);
   auto entity = scene->create();
-  auto& pose = entity.add<Jade::Transform>();
-  const auto* address = &pose;
+  auto &pose = entity.add<Jade::Transform>();
+  const auto *address = &pose;
   for (int index = 0; index < 64; ++index) {
     scene->create().add<Jade::Transform>();
   }
@@ -172,9 +174,9 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   EXPECT_NE(ready[0].message.find("target_fps=24 vsync=off"), std::string::npos);
   capture.Reset();
   std::vector<std::uint64_t> frames;
-  app.on<Jade::FrameUpdate>([&frames](const auto& event) { frames.push_back(event.frame); });
+  app.on<Jade::FrameUpdate>([&frames](const auto &event) { frames.push_back(event.frame); });
   const auto start = std::chrono::steady_clock::now();
-  ASSERT_NO_THROW(app.Run({35, true}));
+  ASSERT_NO_THROW(app.Run({35}));
   const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   EXPECT_GE(elapsed, (34.0 / 24.0) * 0.85);
   ASSERT_EQ(frames.size(), 35u);
@@ -187,8 +189,9 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   for (std::size_t index = 0; index < summaries.size(); ++index) {
     CheckSummary(summaries[index]);
     if (index > 0) {
-      EXPECT_GE(std::chrono::duration<double>(summaries[index].timestamp
-        - summaries[index - 1].timestamp).count(), 0.9);
+      EXPECT_GE(
+          std::chrono::duration<double>(summaries[index].timestamp - summaries[index - 1].timestamp).count(),
+          0.9);
     }
   }
   EXPECT_TRUE(capture.Records("Frame", Jade::Log::Level::Trace).empty());
@@ -201,7 +204,7 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   capture.Reset();
   frames.clear();
   pose.position = {2, 2, 0};
-  ASSERT_NO_THROW(app.Run({2, true}));
+  ASSERT_NO_THROW(app.Run({2}));
   EXPECT_EQ(frames, (std::vector<std::uint64_t>{1, 2}));
   EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
   const auto restarted = capture.Records("Application", Jade::Log::Level::Info);
@@ -214,7 +217,8 @@ TEST(Application, PerFrameTraceRequiresExplicitVerbosity)
 {
   LogCapture capture(Jade::Log::Level::Trace);
   Jade::Application app(HiddenApplication());
-  app.Run({3, true});
+  app.use<Jade::Renderer::RayTracing>();
+  app.Run({3});
   const auto records = capture.Records("Frame", Jade::Log::Level::Trace);
   ASSERT_EQ(records.size(), 3u);
   for (std::size_t index = 0; index < records.size(); ++index) {
@@ -228,16 +232,18 @@ TEST(Application, RecordsFailureAndCanRunAgainAfterACallbackException)
 {
   LogCapture capture;
   Jade::Application app(HiddenApplication());
+  app.use<Jade::Renderer::RayTracing>();
   bool fail = true;
   app.on<Jade::FrameUpdate>([&fail] {
-    if (fail) throw std::runtime_error("callback failed");
+    if (fail)
+      throw std::runtime_error("callback failed");
   });
-  EXPECT_THROW(app.Run({1, true}), std::runtime_error);
+  EXPECT_THROW(app.Run({1}), std::runtime_error);
   const auto errors = capture.Records("Application", Jade::Log::Level::Error);
   ASSERT_EQ(errors.size(), 1u);
   EXPECT_TRUE(errors[0].message.starts_with("Run aborted by exception: frames=0 "));
   fail = false;
-  EXPECT_NO_THROW(app.Run({1, true}));
+  EXPECT_NO_THROW(app.Run({1}));
   const auto lifecycle = capture.Records("Application", Jade::Log::Level::Info);
   ASSERT_EQ(lifecycle.size(), 4u);
   EXPECT_TRUE(lifecycle.back().message.ends_with("reason=frame_limit"));
@@ -247,9 +253,10 @@ TEST(Application, PreservesExplicitLogThresholdAndRecordsRequestedStop)
 {
   LogCapture capture(Jade::Log::Level::Info);
   Jade::Application app(HiddenApplication());
+  app.use<Jade::Renderer::RayTracing>();
   EXPECT_FALSE(Jade::Log::Enabled(Jade::Log::Level::Debug));
   app.on<Jade::FrameUpdate>([&app] { app.stop(); });
-  EXPECT_NO_THROW(app.Run({3, true}));
+  EXPECT_NO_THROW(app.Run({3}));
   const auto lifecycle = capture.Records("Application", Jade::Log::Level::Info);
   ASSERT_EQ(lifecycle.size(), 3u);
   EXPECT_EQ(lifecycle[1].message, "Run started");

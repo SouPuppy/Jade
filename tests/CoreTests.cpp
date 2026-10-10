@@ -1,7 +1,8 @@
 #include <Jade/Core/Scene.hpp>
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Assets/Assets.hpp>
-#include <Jade/Graphics/MeshRenderer.hpp>
+#include <Jade/Graphics/Geometry.hpp>
+#include <Jade/Graphics/Material.hpp>
 
 #include <gtest/gtest.h>
 
@@ -14,8 +15,12 @@
 #include <vector>
 
 namespace {
-struct Counter { int value = 0; };
-struct Label { int value = 0; };
+struct Counter {
+  int value = 0;
+};
+struct Label {
+  int value = 0;
+};
 struct Owned {
   std::unique_ptr<int> value;
   explicit Owned(int initial) : value(std::make_unique<int>(initial)) {}
@@ -25,7 +30,9 @@ struct OnDestroy {
   explicit OnDestroy(std::function<void()> fn) : callback(std::move(fn)) {}
   ~OnDestroy() { callback(); }
 };
-struct Throws { Throws() { throw std::runtime_error("constructor"); } };
+struct Throws {
+  Throws() { throw std::runtime_error("constructor"); }
+};
 } // namespace
 
 TEST(Scene, EmptyIdentitiesAcceptPlainAndNoncopyableComponents)
@@ -101,8 +108,8 @@ TEST(Scene, ComponentReferencesRemainStableAcrossPoolAndEntityGrowth)
 {
   Jade::Scene scene;
   auto first = scene.create();
-  auto& counter = first.add<Counter>(9);
-  const auto* address = &counter;
+  auto &counter = first.add<Counter>(9);
+  const auto *address = &counter;
   for (int index = 0; index < 1024; ++index) {
     auto next = scene.create();
     next.add<Counter>(index);
@@ -118,7 +125,8 @@ TEST(Scene, QueriesSnapshotMatchesSkipRemovalsAndDeferNewMatches)
   const auto first = scene.create(), erased = scene.create(), stripped = scene.create();
   const auto missing = scene.create();
   for (auto entity : {first, erased, stripped}) {
-    entity.add<Counter>(); entity.add<Label>();
+    entity.add<Counter>();
+    entity.add<Label>();
   }
   missing.add<Counter>();
   Jade::Entity created;
@@ -130,12 +138,14 @@ TEST(Scene, QueriesSnapshotMatchesSkipRemovalsAndDeferNewMatches)
       stripped.remove<Label>();
       missing.add<Label>();
       created = scene.create(); // May reuse erased's slot, with a different generation.
-      created.add<Counter>(); created.add<Label>();
+      created.add<Counter>();
+      created.add<Label>();
     }
   }
   EXPECT_EQ(visited, (std::vector<Jade::Entity>{first}));
   visited.clear();
-  for (const auto entity : scene.view<Counter, Label>()) visited.push_back(entity);
+  for (const auto entity : scene.view<Counter, Label>())
+    visited.push_back(entity);
   ASSERT_EQ(visited.size(), 3u);
   EXPECT_NE(std::find(visited.begin(), visited.end(), created), visited.end());
   EXPECT_NE(std::find(visited.begin(), visited.end(), missing), visited.end());
@@ -171,7 +181,8 @@ TEST(Scene, ConstructorDestroyingItsEntityCannotAttachToAReusedIdentity)
   EXPECT_THROW(entity.add<DuringConstruction>([&] {
     scene.destroy(entity);
     next = scene.create();
-  }), std::logic_error);
+  }),
+               std::logic_error);
   EXPECT_TRUE(next.valid());
   EXPECT_FALSE(next.has<DuringConstruction>());
 }
@@ -184,16 +195,18 @@ TEST(Assets, SharedImmutableMeshesKeepIndependentEntityState)
   const auto first = scene.create(), second = scene.create();
   first.add<Jade::Transform>().position = {-2, 0, 0};
   second.add<Jade::Transform>().position = {2, 0, 0};
-  first.add<Jade::MeshRenderer>(mesh, Jade::Color{1, 0, 0, 1});
-  second.add<Jade::MeshRenderer>(mesh, Jade::Color{0, 0, 1, 1});
-  static_assert(std::is_same_v<decltype(assets.get(mesh)), const Jade::Mesh&>);
-  EXPECT_EQ(&assets.get(first.get<Jade::MeshRenderer>().mesh),
-    &assets.get(second.get<Jade::MeshRenderer>().mesh));
+  first.add<Jade::Geometry>(mesh);
+  first.add<Jade::Material>().baseColor = {1, 0, 0};
+  second.add<Jade::Geometry>(mesh);
+  second.add<Jade::Material>().baseColor = {0, 0, 1};
+  static_assert(std::is_same_v<decltype(assets.get(mesh)), const Jade::Mesh &>);
+  EXPECT_EQ(&assets.get(first.get<Jade::Geometry>().mesh), &assets.get(second.get<Jade::Geometry>().mesh));
   first.get<Jade::Transform>().position.x = -3;
   EXPECT_FLOAT_EQ(second.get<Jade::Transform>().position.x, 2);
-  EXPECT_FLOAT_EQ(second.get<Jade::MeshRenderer>().color.blue, 1);
-  const auto* address = &assets.get(mesh);
-  for (int index = 0; index < 128; ++index) assets.add(Counter{index});
+  EXPECT_FLOAT_EQ(second.get<Jade::Material>().baseColor.b, 1);
+  const auto *address = &assets.get(mesh);
+  for (int index = 0; index < 128; ++index)
+    assets.add(Counter{index});
   EXPECT_EQ(&assets.get(mesh), address);
   scene.destroy(first);
   EXPECT_TRUE(mesh.valid());

@@ -17,11 +17,7 @@ add_library(Jade STATIC
   src/internal/Platform/GLFW/GlfwWindow.cpp
   src/internal/Platform/Window.cpp
   src/internal/Renderer/OpenGL/OpenGLContext.cpp
-  src/internal/Renderer/OpenGL/OpenGLMeshRenderer.cpp
   src/internal/Renderer/OpenGL/OpenGLProgram.cpp
-  src/internal/Renderer/OpenGL/OpenGLRenderer.cpp
-  src/internal/Renderer/Renderer.cpp
-  src/internal/Renderer/RenderSystem.cpp
   src/Math/Matrix4.cpp
   src/Math/Quaternion.cpp
   src/Module/CameraControl.cpp
@@ -41,7 +37,6 @@ add_library(Jade STATIC
   include/Jade/Events/MouseScrolled.hpp
   include/Jade/Graphics/Camera.hpp
   include/Jade/Graphics/Mesh.hpp
-  include/Jade/Graphics/MeshRenderer.hpp
   include/Jade/Graphics/Motion.hpp
   include/Jade/Graphics/Vertex.hpp
   include/Jade/Input/Key.hpp
@@ -75,17 +70,39 @@ add_library(Jade STATIC
   src/internal/Platform/GLFW/GlfwRuntime.hpp
   src/internal/Platform/GLFW/GlfwWindow.hpp
   src/internal/Platform/Window.hpp
-  src/internal/Renderer/DrawParameters.hpp
   src/internal/Renderer/OpenGL/OpenGLContext.hpp
-  src/internal/Renderer/OpenGL/OpenGLMeshRenderer.hpp
   src/internal/Renderer/OpenGL/OpenGLProgram.hpp
-  src/internal/Renderer/OpenGL/OpenGLRenderer.hpp
-  src/internal/Renderer/Renderer.hpp
-  src/internal/Renderer/SceneTransforms.hpp
-  src/internal/Renderer/RenderSystem.hpp
   src/Math/Matrix4.hpp
   src/Math/Quaternion.hpp
   src/Module/CameraControl.hpp
+  include/Jade/Graphics/Geometry.hpp
+  include/Jade/Graphics/Material.hpp
+  include/Jade/Renderer/BSDF.hpp
+  include/Jade/Renderer/Backend.hpp
+  include/Jade/Renderer/CameraFrame.hpp
+  include/Jade/Renderer/Image.hpp
+  include/Jade/Renderer/Integrator.hpp
+  include/Jade/Renderer/LinearRGB.hpp
+  include/Jade/Renderer/Ray.hpp
+  include/Jade/Renderer/RayTracing.hpp
+  include/Jade/Renderer/RenderScene.hpp
+  include/Jade/Renderer/Sampler.hpp
+  src/Renderer/BSDF.cpp
+  src/Renderer/BSDF.hpp
+  src/Renderer/Image.cpp
+  src/Renderer/Image.hpp
+  src/Renderer/Integrator.cpp
+  src/Renderer/Integrator.hpp
+  src/Renderer/Math.hpp
+  src/Renderer/RayTracing.cpp
+  src/Renderer/RayTracing.hpp
+  src/Renderer/RenderScene.cpp
+  src/Renderer/RenderScene.hpp
+  src/internal/Core/SceneTransforms.hpp
+  src/internal/Renderer/OpenGL/OpenGLDisplay.cpp
+  src/internal/Renderer/OpenGL/OpenGLDisplay.hpp
+  src/internal/Renderer/RenderSession.cpp
+  src/internal/Renderer/RenderSession.hpp
 )
 add_library(Jade::Jade ALIAS Jade)
 target_include_directories(Jade PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

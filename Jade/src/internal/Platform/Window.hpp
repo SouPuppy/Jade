@@ -15,7 +15,7 @@ struct FramebufferSize {
   int height = 0;
 };
 
-class Renderer;
+namespace Detail { class OpenGLDisplay; }
 
 // Internal window facade. All operations belong to the main thread.
 class Window final {
@@ -35,7 +35,7 @@ public:
   FramebufferSize GetFramebufferSize() const;
 
 private:
-  friend class Renderer;
+  friend class Detail::OpenGLDisplay;
   void* NativeHandle() const;
 
   struct Impl;

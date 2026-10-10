@@ -61,6 +61,13 @@ const void* Assets::Get(const std::weak_ptr<Detail::AssetStore>& owner, std::uin
   return entry.resource.get();
 }
 
+std::shared_ptr<const void> Assets::Share(const std::weak_ptr<Detail::AssetStore>& owner,
+  std::uint64_t id, std::type_index type) const
+{
+  (void)Get(owner, id, type);
+  return m_Store->entries[static_cast<std::size_t>(id - 1)].resource;
+}
+
 MeshHandle Assets::LoadMesh(const std::filesystem::path& path)
 try
 {

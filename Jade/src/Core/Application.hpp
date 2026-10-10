@@ -4,14 +4,14 @@
 
 #include "../internal/Platform/Window.hpp"
 #include "../internal/Events/EventDispatcher.hpp"
-#include "../internal/Renderer/Renderer.hpp"
+#include "../internal/Renderer/RenderSession.hpp"
+#include "../internal/Renderer/OpenGL/OpenGLDisplay.hpp"
 
 #include <optional>
 
 namespace Jade {
 
 struct Application::Impl {
-  Color clearColor;
   std::uint32_t frameLimits;
   bool logPerformance;
   bool debug;
@@ -24,17 +24,15 @@ struct Application::Impl {
   std::shared_ptr<Scene> scene;
   std::optional<std::shared_ptr<Scene>> pendingScene;
   Window window;
-  Renderer renderer;
+  bool wireframe = false;
+  Detail::OpenGLDisplay display;
+  Detail::RenderSession rendering;
 
-  explicit Impl(const ApplicationConfig& config)
-    : clearColor(config.clearColor),
-      frameLimits(config.frameLimits),
-      logPerformance(config.logPerformance),
-      debug(config.debug),
-      axisGizmo(config.axisGizmo),
-      window(config.window),
-      renderer(window, config.vsync)
-  {}
+  explicit Impl(const ApplicationConfig &config)
+      : frameLimits(config.frameLimits), logPerformance(config.logPerformance), debug(config.debug),
+        axisGizmo(config.axisGizmo), window(config.window), display(window, config.vsync)
+  {
+  }
 };
 
 } // namespace Jade
