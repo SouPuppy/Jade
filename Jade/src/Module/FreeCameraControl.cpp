@@ -1,4 +1,4 @@
-#include "CameraControl.hpp"
+#include "FreeCameraControl.hpp"
 
 #include <Jade/Core/Scene.hpp>
 #include <Jade/Graphics/Motion.hpp>
@@ -81,7 +81,7 @@ void BindMotion(Scene &scene, const std::shared_ptr<ControlState> &state, Action
 
 } // namespace
 
-void CameraControl::attach(Scene &scene)
+void FreeCameraControl::attach(Scene &scene)
 {
   auto state = std::make_shared<ControlState>(scene);
   BindMotion<"w">(scene, state, Motion::forward, 3.0f);

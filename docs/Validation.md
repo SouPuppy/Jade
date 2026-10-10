@@ -1,5 +1,11 @@
 # Windows x64 validation
 
+## Camera control split (2026-10-10)
+
+Debug and Release GoogleTest both passed 167/167 tests across 40 suites after replacing CameraControl with FreeCameraControl and FPSCameraControl. The added checks cover mutually exclusive installation and dependency rollback, horizontal movement at full speed while pitched, continuous mouse look and +/-89-degree pitch limits, absent roll/flight bindings, stationary quaternion stability, external pose edits, camera replacement/removal, cursor capture, scene/focus transitions and subscription ownership. Free flight and existing application/input/rendering regressions also passed.
+
+The new public module headers and Jade.hpp passed standalone MSVC C++20 /W4 /WX compilation. Release engine, Demo and tests built successfully. Debug engine and tests built successfully; an already running JadeDemo.exe prevented overwriting its output, so the updated Debug Demo was linked separately as build/windows-debug/bin/JadeCameraControlDemo.exe. The running process was retained. These checks do not implement or validate jumping, gravity or collision.
+
 Validated on 2026-10-10 with MSVC 19.51, C++20, CMake/Ninja and Mesa 26.2.4 llvmpipe for window/display checks. Path tracing runs on CPU workers and needs no graphics context.
 
 | Check | Result |
@@ -37,7 +43,7 @@ RenderMode tests invoke real GLFW callbacks. I works with debug disabled, respec
 
 The wheel regression drives perspective and orthographic lenses beyond their interactive bounds and reverses the same gesture, restoring the initial lens and pose. Zoom scales tan(FOV/2), limits interactive perspective zoom to 120 degrees and retains the accumulated gesture. The original angular scaling could reach 179 degrees and discard scroll at the clamp.
 
-Real OpenGL readback verifies sRGB image orientation and bytes, unlit triangle edges and unit RGB axes. Existing Scene, hierarchy, Assets, mesh/OBJ, math, CameraControl, module rollback, event dispatch, input ordering, timing and logger suites remain maintained. Automated callback/readback checks do not establish manual keyboard/mouse behavior or realtime rendering performance.
+Real OpenGL readback verifies sRGB image orientation and bytes, unlit triangle edges and unit RGB axes. Existing Scene, hierarchy, Assets, mesh/OBJ, math, FreeCameraControl, module rollback, event dispatch, input ordering, timing and logger suites remain maintained. Automated callback/readback checks do not establish manual keyboard/mouse behavior or realtime rendering performance.
 
 ## Demo and exported output
 

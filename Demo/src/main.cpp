@@ -16,7 +16,7 @@ std::shared_ptr<Jade::Scene> CreateScene(Jade::Vec3 eye)
   Jade::Motion::lookAt(pose, {0, 0, 0});
   camera.add<Jade::Camera>();
   scene->setCamera(camera);
-  scene->use<Jade::Module::CameraControl>();
+  scene->use<Jade::Module::FreeCameraControl>();
   return scene;
 }
 

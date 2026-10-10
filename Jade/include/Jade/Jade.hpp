@@ -28,7 +28,8 @@
 #include <Jade/Math/Matrix4.hpp>
 #include <Jade/Math/Quaternion.hpp>
 #include <Jade/Math/Vector.hpp>
-#include <Jade/Module/CameraControl.hpp>
+#include <Jade/Module/FreeCameraControl.hpp>
+#include <Jade/Module/FPSCameraControl.hpp>
 #include <Jade/WindowConfig.hpp>
 #include <Jade/Renderer/RayTracing/BSDF.hpp>
 #include <Jade/Renderer/Common/RenderSettings.hpp>

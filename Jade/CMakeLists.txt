@@ -30,7 +30,8 @@ add_library(Jade STATIC
   src/internal/Renderer/Device/OpenGL/OpenGLProgram.cpp
   src/Math/Matrix4.cpp
   src/Math/Quaternion.cpp
-  src/Module/CameraControl.cpp
+  src/Module/FreeCameraControl.cpp
+  src/Module/FPSCameraControl.cpp
   include/Jade/Application.hpp
   include/Jade/Assets/AssetHandle.hpp
   include/Jade/Assets/Assets.hpp
@@ -56,7 +57,8 @@ add_library(Jade STATIC
   include/Jade/Math/Matrix4.hpp
   include/Jade/Math/Quaternion.hpp
   include/Jade/Math/Vector.hpp
-  include/Jade/Module/CameraControl.hpp
+  include/Jade/Module/FreeCameraControl.hpp
+  include/Jade/Module/FPSCameraControl.hpp
   include/Jade/WindowConfig.hpp
   src/Assets/Assets.hpp
   src/Core/Application.hpp
@@ -84,7 +86,8 @@ add_library(Jade STATIC
   src/internal/Renderer/Device/OpenGL/OpenGLProgram.hpp
   src/Math/Matrix4.hpp
   src/Math/Quaternion.hpp
-  src/Module/CameraControl.hpp
+  src/Module/FreeCameraControl.hpp
+  src/Module/FPSCameraControl.hpp
   include/Jade/Graphics/Geometry.hpp
   include/Jade/Materials/Material.hpp
   include/Jade/Renderer/RayTracing/BSDF.hpp

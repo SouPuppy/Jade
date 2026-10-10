@@ -129,6 +129,7 @@ public:
 
 private:
   friend class Application;
+  bool CapturesMouse() const noexcept;
   void InstallModule(std::type_index type, std::function<void()> attach);
   void RequireOwned(Entity entity) const;
   std::vector<Entity> Snapshot(std::initializer_list<std::type_index> types) const;

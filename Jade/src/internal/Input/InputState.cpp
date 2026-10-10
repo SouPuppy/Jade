@@ -2,6 +2,7 @@
 
 #include <utility>
 #include <cmath>
+#include <algorithm>
 
 namespace Jade::Detail {
 
@@ -85,6 +86,12 @@ void InputState::OnCursor(double x, double y)
   m_CursorX = x;
   m_CursorY = y;
   m_CursorInitialized = true;
+}
+
+void InputState::ResetCursor() noexcept
+{
+  m_CursorInitialized = false;
+  std::erase_if(m_Events, [](const auto &event) { return std::holds_alternative<MouseMoved>(event); });
 }
 
 std::vector<InputEvent> InputState::TakeEvents()

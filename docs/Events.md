@@ -9,18 +9,20 @@ Jade::ApplicationConfig config;
 config.debug = true; // F: wireframe, F3: axes, O: projection.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
-scene->use<Jade::Module::CameraControl>();
+scene->use<Jade::Module::FreeCameraControl>();
 ```
 
-Include Jade/Module/CameraControl.hpp or Jade/Jade.hpp. CameraControl installs WASD/arrows, Shift/Ctrl+W, Space/Ctrl+Space, Q/E, left-button drag and wheel zoom. It resolves the selected camera for each event, uses dt for held motion, and resets dragging on camera changes and scene activation/deactivation. Missing components are skipped. Repeated use of the same module type on a Scene is a no-op; subscriptions remain across reactivation and expire with the Scene. See [module contracts and fixed control defaults](../README.md#scene-modules-and-controls).
+Include Jade/Module/FreeCameraControl.hpp or Jade/Jade.hpp. FreeCameraControl installs WASD/arrows, Shift/Ctrl+W, Space/Ctrl+Space, Q/E, left-button drag and wheel zoom. It resolves the selected camera for each event, uses dt for held motion, and resets dragging on camera changes and scene activation/deactivation. Missing components are skipped. Repeated use of the same module type on a Scene is a no-op; subscriptions remain across reactivation and expire with the Scene. See [module contracts and fixed control defaults](../README.md#scene-modules-and-controls).
+
+For first-person controls, include Jade/Module/FPSCameraControl.hpp and use `scene->use<Jade::Module::FPSCameraControl>()` instead. It keeps WASD/arrows and Shift/Ctrl+W on the horizontal plane, captures the cursor for continuous mouse look, clamps pitch to +/-89 degrees and removes roll. Space, Ctrl+Space, Q/E and wheel are unbound; physics and jumping belong to a future character controller. A Scene rejects installing both control types. Both modules use the existing Scene::on events, skip missing components and release subscriptions with their Scene.
 
 Unmodified KeyPressed I switches between RayTracing and Wireframe, including when debug is disabled. Repeats, modified keys and consumed events do not toggle it. F retains the same toggle when debug is enabled.
 
-The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing CameraControl. CameraControl can also be used with debug disabled.
+The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing FreeCameraControl. FreeCameraControl can also be used with debug disabled.
 
 ## Public API
 
-These examples show custom bindings; avoid installing equivalent callbacks alongside CameraControl unless both actions are intended.
+These examples show custom bindings; avoid installing equivalent callbacks alongside FreeCameraControl unless both actions are intended.
 
 ```cpp
 auto scene = app.scene(); // Select a scene and explicit camera first.
@@ -217,6 +219,6 @@ record. Subscription IDs restart with each dispatcher and persist across Runs.
 
 ## Files and extension boundary
 
-Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Module/CameraControl.hpp exposes reusable scene controls; its engine implementation uses Scene::on and Motion. Application.hpp and Core/Scene.hpp adapt typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.
+Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Module/FreeCameraControl.hpp and Module/FPSCameraControl.hpp expose reusable scene controls; their engine implementations use Scene::on and Motion. Application.hpp and Core/Scene.hpp adapt typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.
 
 The current event set is keyboard/button transitions and held events, MouseMoved, MouseScrolled, FrameUpdate and scene-only SceneActivated/SceneDeactivated. Resize and text events can be added as separate event types and backend adapters without changing mesh/component contracts. The current on() reports unsupported event types at compile time.

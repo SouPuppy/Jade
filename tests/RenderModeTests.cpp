@@ -157,7 +157,7 @@ TEST(RenderMode, RealPathTracingAndWheelInputSurviveRepeatedModeChanges)
 {
   Application app(hidden(true));
   auto scene = MakeTestScene(app);
-  scene->use<Module::CameraControl>();
+  scene->use<Module::FreeCameraControl>();
   auto object = scene->create();
   object.add<Geometry>(app.assets().add(MeshData::cube()));
   object.add<Material>(Materials::Gold());

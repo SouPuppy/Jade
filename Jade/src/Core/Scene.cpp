@@ -4,6 +4,8 @@
 #include "../internal/Core/SceneTransforms.hpp"
 
 #include <Jade/Graphics/Camera.hpp>
+#include <Jade/Module/FreeCameraControl.hpp>
+#include <Jade/Module/FPSCameraControl.hpp>
 
 #include <atomic>
 #include <format>
@@ -23,6 +25,10 @@ Scene::~Scene() = default;
 void Scene::InstallModule(std::type_index type, std::function<void()> attach)
 {
   for (const auto& module : m_Impl->modules) {
+    if ((type == typeid(Module::FreeCameraControl) && module.type == typeid(Module::FPSCameraControl)) ||
+        (type == typeid(Module::FPSCameraControl) && module.type == typeid(Module::FreeCameraControl))) {
+      throw std::logic_error("A Scene may use either FreeCameraControl or FPSCameraControl, not both.");
+    }
     if (module.type == type) {
       if (!module.installed) {
         throw std::logic_error("Scene module installation cannot recursively install the same type.");
@@ -43,6 +49,15 @@ void Scene::InstallModule(std::type_index type, std::function<void()> attach)
     while (m_Impl->modules.size() > index) m_Impl->modules.pop_back();
     throw;
   }
+}
+
+bool Scene::CapturesMouse() const noexcept
+{
+  for (const auto& module : m_Impl->modules) {
+    if (module.installed && module.type == typeid(Module::FPSCameraControl))
+      return true;
+  }
+  return false;
 }
 
 bool Scene::owns(Entity entity) const noexcept

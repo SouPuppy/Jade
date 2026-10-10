@@ -55,7 +55,7 @@ int main()
   Jade::Motion::lookAt(pose, {0, 0, 0});
   camera.add<Jade::Camera>();
   scene->setCamera(camera);
-  scene->use<Jade::Module::CameraControl>();
+  scene->use<Jade::Module::FreeCameraControl>();
 
   const auto mesh = app.assets().add(Jade::MeshData::cube(2.0f));
   auto cube = scene->create();
@@ -209,24 +209,30 @@ Perspective makes distant geometry smaller; orthographic keeps its size. FOV con
 
 ## Scene modules and controls
 
-Use an engine module to install the camera controls shown in Demo:
+Choose one camera control module per Scene. Demo uses free flight:
 
 ```cpp
-#include <Jade/Module/CameraControl.hpp>
+#include <Jade/Module/FreeCameraControl.hpp>
 
-scene->use<Jade::Module::CameraControl>();
+scene->use<Jade::Module::FreeCameraControl>();
+
+// In a different Scene, use first-person controls:
+#include <Jade/Module/FPSCameraControl.hpp>
+sandbox->use<Jade::Module::FPSCameraControl>();
 ```
 
-CameraControl always targets `scene->camera()` at event time, so changing the selected camera needs no rebinding. It can be installed before creating a camera and skips missing components. Its scene-owned callbacks reset dragging on scene activation/deactivation, a changed camera and left-button release (including focus loss).
+Both modules target `scene->camera()` at event time, so changing the selected camera needs no rebinding. They can be installed before creating a camera and skip missing components. Scene owns the subscriptions and cancels them on destruction or failed installation. Installing both types in the same Scene throws `std::logic_error`; installing the same type again is a no-op. The former `CameraControl` API has been replaced by `FreeCameraControl`.
 
-| Input | CameraControl action |
-| --- | --- |
-| WASD / arrows | Local forward/back/right/left, 3 parent units/second |
-| Shift+W / Ctrl+W | Forward, 6 / 1 parent units/second |
-| Space / Ctrl+Space | Parent Y up/down, 3 units/second |
-| Q / E | Roll, -60 / +60 degrees/second |
-| Left-button drag | Yaw/pitch, 0.1 degrees/pixel |
-| Wheel | Zoom active lens, one Motion::zoom increment per offset |
+| Input | FreeCameraControl | FPSCameraControl |
+| --- | --- | --- |
+| WASD / arrows | Local forward/back/right/left, 3 units/second | Horizontal forward/back/right/left, 3 units/second |
+| Shift+W / Ctrl+W | Forward, 6 / 1 units/second | Horizontal forward, 6 / 1 units/second |
+| Space / Ctrl+Space | Parent Y up/down, 3 units/second | Unbound; Space is available for a character controller |
+| Q / E | Roll, -60 / +60 degrees/second | Unbound; orientation has no roll |
+| Mouse | Left-button drag, 0.1 degrees/pixel | Captured continuous look, 0.1 degrees/pixel; pitch limited to +/-89 degrees |
+| Wheel | Zoom active lens, one Motion::zoom increment per offset | Unbound |
+
+FreeCameraControl resets dragging on scene activation/deactivation, a changed camera and left-button release (including focus loss). FPSCameraControl captures the cursor when its Scene becomes active; switching to another Scene restores that Scene's cursor mode. Installing FPS controls on an already active Scene applies capture on the next Run processing pass. Cursor mode changes, scene switches and focus changes reset the mouse position baseline to avoid jumps. FPS yaw and horizontal movement use parent Y, which is world Y for root cameras. Looking up or down does not change horizontal movement speed. External orientation edits and camera selection are respected, with pitch clamped and roll removed. Neither module applies gravity or collision; FPS jumping awaits a character controller and physics.
 
 These defaults are fixed in this version. Keyboard modifiers match exactly. Register custom scene events instead when different bindings are needed.
 
@@ -463,4 +469,4 @@ tests/              # ECS, assets, math, input, scheduling and pixel checks
 
 GoogleTest exercises identity generations, ownership, hierarchy, scene switching, component/query mutation, shared immutable resources, OBJ loading, quaternion controls, projections, resize, ray intersections, BSDFs, emissive lighting, deterministic CPU sampling, asynchronous revisions, wireframe, axes and events; OpenGL readback validates presentation/debug output. Tests build independently of Demo. See [Architecture](docs/Architecture.md) for boundaries and [Validation](docs/Validation.md) for recorded checks.
 
-Interactive wheel zoom scales the image-plane span, preserves pose and clip planes, and limits perspective zoom to 1?120 degrees. CameraControl retains scroll beyond the limits so reversing a gesture restores its original projection, including orthographic height. Direct lens edits establish a new zoom reference.
+Interactive wheel zoom scales the image-plane span, preserves pose and clip planes, and limits perspective zoom to 1?120 degrees. FreeCameraControl retains scroll beyond the limits so reversing a gesture restores its original projection, including orthographic height. Direct lens edits establish a new zoom reference.

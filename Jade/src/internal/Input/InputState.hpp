@@ -33,6 +33,7 @@ public:
   void OnMouseButton(MouseButton button, MouseAction action, Modifiers modifiers);
   void OnFocus(bool focused);
   void OnCursor(double x, double y);
+  void ResetCursor() noexcept;
   void OnScroll(double dx, double dy);
   bool IsDown(Key key) const noexcept;
   bool IsDown(MouseButton button) const noexcept;

@@ -84,6 +84,8 @@ bool Application::ApplyPendingScene()
       previous->m_Impl->events.DispatchLifecycle(false);
     }
     m_Impl->scene = next;
+    m_Impl->window.SetMouseCaptured(next && next->CapturesMouse());
+    m_Impl->window.Input().ResetCursor();
     m_Impl->rendering.invalidate();
     if (previous) {
       previous->m_Impl->owner = nullptr;
@@ -195,6 +197,8 @@ void Application::Run(const RunOptions &options)
       break;
     // One processing pass retains the same scene through input, update and present.
     const auto active = m_Impl->scene;
+    // Also covers a module installed after this Scene became active.
+    m_Impl->window.SetMouseCaptured(active && active->CapturesMouse());
     const auto dispatch = [&](auto &&...arguments) {
       const auto flow = m_Impl->events.Dispatch(arguments...);
       if (flow == EventFlow::Stop || !active || m_Impl->stopRequested || m_Impl->window.ShouldClose())

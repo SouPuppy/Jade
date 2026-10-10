@@ -31,6 +31,7 @@ public:
   bool ShouldClose() const;
   void RequestClose();
   void SetTitle(const std::string& title);
+  void SetMouseCaptured(bool captured);
   bool IsKeyPressed(Key key) const;
   Detail::InputState& Input() noexcept;
   FramebufferSize GetFramebufferSize() const;

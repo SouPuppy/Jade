@@ -37,6 +37,17 @@ void Window::RequestClose()
 
 void Window::SetTitle(const std::string& title) { glfwSetWindowTitle(m_Impl->window.Handle(),title.c_str()); }
 
+void Window::SetMouseCaptured(bool captured)
+{
+  const auto window = m_Impl->window.Handle();
+  const int mode = captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL;
+  if (glfwGetInputMode(window, GLFW_CURSOR) == mode)
+    return;
+  glfwSetInputMode(window, GLFW_CURSOR, mode);
+  // Cursor warps during a mode change must not become camera rotation.
+  m_Impl->input.ResetCursor();
+}
+
 bool Window::IsKeyPressed(Key key) const
 {
   return m_Impl->input.IsDown(key);
