@@ -1,0 +1,10 @@
+file(MAKE_DIRECTORY "${JADE_OUTPUT_DIR}")
+file(LOCK "${JADE_OUTPUT_DIR}/.jade-runtime.lock" GUARD PROCESS TIMEOUT 30)
+foreach(dll IN ITEMS opengl32.dll libgallium_wgl.dll)
+  if(JADE_USE_SOFTWARE_RENDERING)
+    file(COPY_FILE "${JADE_MESA_RUNTIME_DIR}/${dll}"
+      "${JADE_OUTPUT_DIR}/${dll}" ONLY_IF_DIFFERENT)
+  else()
+    file(REMOVE "${JADE_OUTPUT_DIR}/${dll}")
+  endif()
+endforeach()

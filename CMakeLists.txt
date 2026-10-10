@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.24)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "Use an out-of-source build: cmake --preset windows-debug")
+endif()
+
+include(cmake/JadeBuildOptions.cmake)
+project(Jade VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
+option(BUILD_TESTING "Build the GoogleTest smoke test" ON)
+option(JADE_BUILD_DEMO "Build the Demo example application" ON)
+include(cmake/JadeDependencies.cmake)
+include(cmake/JadeRuntime.cmake)
+
+add_subdirectory(Jade)
+if(JADE_BUILD_DEMO)
+  add_subdirectory(Demo)
+  set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT JadeDemo)
+endif()
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
