@@ -1,7 +1,7 @@
 #include <Jade/Application.hpp>
 #include <Jade/Color.hpp>
-#include <Jade/Geometry/Line.hpp>
-#include <Jade/Vector.hpp>
+#include <Jade/Core/Transform.hpp>
+#include <Jade/Math/Vector.hpp>
 
 #include "internal/Core/FrameClock.hpp"
 #include "internal/Platform/Window.hpp"
@@ -55,22 +55,6 @@ std::vector<Jade::Detail::FrameStats> ParseFrames(const std::string& output)
   return frames;
 }
 
-bool HasWhiteNear(Jade::Vec2D point, Jade::FramebufferSize size, float viewHeight = 10.0f)
-{
-  const float pixelsPerUnit = static_cast<float>(size.height) / viewHeight;
-  const int x = std::clamp(static_cast<int>(point.x * pixelsPerUnit), 1, size.width - 2);
-  const int y = std::clamp(static_cast<int>(point.y * pixelsPerUnit), 1, size.height - 2);
-  std::array<unsigned char, 3 * 3 * 4> pixels{};
-  glReadBuffer(GL_BACK);
-  glReadPixels(x - 1, y - 1, 3, 3, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-  for (std::size_t offset = 0; offset < pixels.size(); offset += 4) {
-    if (pixels[offset] > 240 && pixels[offset + 1] > 240 && pixels[offset + 2] > 240) {
-      return true;
-    }
-  }
-  return false;
-}
-
 Jade::ApplicationConfig HiddenApplication()
 {
   Jade::ApplicationConfig config;
@@ -90,38 +74,14 @@ TEST(Application, ThreeClearFrames)
   EXPECT_NO_THROW(app.Run({ 3, true }));
 }
 
-TEST(Line, OwnsEndpointsAndRejectsInvalidPositions)
-{
-  Jade::Vec2D start(1.0f, 1.0f);
-  Jade::Line line(start, {4.0f, 5.0f});
-  start.x = 100.0f;
-  EXPECT_FLOAT_EQ(line.Start().x, 1.0f);
-  EXPECT_FLOAT_EQ(line.End().x, 4.0f);
-  EXPECT_FLOAT_EQ(line.End().y, 5.0f);
-  line.setPos({1, 2}, {6, 2});
-
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  const float infinity = std::numeric_limits<float>::infinity();
-  EXPECT_THROW(line.setPos({nan, 1}, {2, 3}), std::invalid_argument);
-  EXPECT_THROW(line.setPos({9, 9}, {2, infinity}), std::invalid_argument);
-  EXPECT_THROW((Jade::Line{{1, 1}, {2, infinity}}), std::invalid_argument);
-  EXPECT_FLOAT_EQ(line.Start().x, 1.0f);
-  EXPECT_FLOAT_EQ(line.Start().y, 2.0f);
-  EXPECT_FLOAT_EQ(line.End().x, 6.0f);
-  EXPECT_FLOAT_EQ(line.End().y, 2.0f);
-}
-
 TEST(Application, RejectsInvalidConfigurationBeforeCreatingAWindow)
 {
   auto config = HiddenApplication();
   config.frameLimits = 0;
   EXPECT_THROW((Jade::Application{config}), std::invalid_argument);
   config.frameLimits = 24;
-  for (const float height : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
-      std::numeric_limits<float>::quiet_NaN()}) {
-    config.viewHeight = height;
-    EXPECT_THROW((Jade::Application{config}), std::invalid_argument);
-  }
+  config.clearColor.red = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_THROW((Jade::Application{config}), std::invalid_argument);
 }
 
 TEST(FrameClock, UsesAbsoluteDeadlinesAndSkipsMissedSlots)
@@ -176,85 +136,17 @@ TEST(FrameClock, MeasuresActualFPSAndResetsSecondCounters)
   EXPECT_DOUBLE_EQ(reset.elapsed, 0.0);
 }
 
-TEST(Renderer, DrawsSegmentsAndTracksWindowSize)
-{
-  Jade::WindowConfig config;
-  config.width = 320;
-  config.height = 240;
-  config.visible = false;
-  Jade::Window window(config);
-  Jade::Renderer renderer(window, false);
-  const Jade::Line diagonal({1, 1}, {4, 5});
-  const Jade::Line horizontal({1, 8}, {6, 8});
-
-  // Landscape and portrait windows must retain identical horizontal/vertical units.
-  for (const Jade::FramebufferSize requested : {Jade::FramebufferSize{320, 240},
-      Jade::FramebufferSize{480, 240}, Jade::FramebufferSize{240, 320}}) {
-    auto* nativeWindow = glfwGetCurrentContext();
-    ASSERT_NE(nativeWindow, nullptr);
-    glfwSetWindowSize(nativeWindow, requested.width, requested.height);
-    window.PollEvents();
-    const auto size = window.GetFramebufferSize();
-    ASSERT_GT(size.width, 2);
-    ASSERT_GT(size.height, 2);
-    ASSERT_TRUE(renderer.BeginFrame(size, {}));
-    ASSERT_TRUE(renderer.ValidateClear({}));
-    renderer.DrawLine(diagonal);
-    renderer.DrawLine(horizontal);
-    EXPECT_TRUE(HasWhiteNear({2.5f, 3.0f}, size));
-    EXPECT_FALSE(HasWhiteNear({5.0f, 3.5f}, size));
-    EXPECT_TRUE(HasWhiteNear({3.0f, 8.0f}, size));
-    EXPECT_FALSE(HasWhiteNear({0.5f, 9.0f}, size));
-    EXPECT_EQ(glGetError(), GL_NO_ERROR);
-    renderer.Present();
-  }
-
-  // Reusing the same renderer must upload moved endpoints on the next draw.
-  auto changed = diagonal;
-  changed.setPos({1, 2}, {6, 2});
-  const auto size = window.GetFramebufferSize();
-  ASSERT_TRUE(renderer.BeginFrame(size, {}));
-  renderer.DrawLine(changed);
-  EXPECT_TRUE(HasWhiteNear({3, 2}, size));
-  EXPECT_FALSE(HasWhiteNear({2.5f, 3.0f}, size));
-  EXPECT_EQ(glGetError(), GL_NO_ERROR);
-}
-
-TEST(Renderer, SkipsDegenerateLinesAndZeroSizedFrames)
-{
-  Jade::WindowConfig config;
-  config.visible = false;
-  config.width = 160;
-  config.height = 120;
-  Jade::Window window(config);
-  Jade::Renderer renderer(window, false);
-  ASSERT_TRUE(renderer.BeginFrame(window.GetFramebufferSize(), {}));
-  renderer.DrawLine(Jade::Line{});
-  renderer.DrawLine(Jade::Line{{1, 1}, {1, 1}});
-  EXPECT_TRUE(renderer.ValidateClear({}));
-  EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  EXPECT_FALSE(renderer.BeginFrame({0, 0}, {}));
-  renderer.DrawLine(Jade::Line{{1, 1}, {4, 5}});
-  EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  EXPECT_THROW((Jade::Renderer{window, false, 0.0f}), std::invalid_argument);
-}
-
-TEST(Application, CreatesStableLinesAndLogsPacedFramesAcrossRuns)
+TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
 {
   auto config = HiddenApplication();
   Jade::Application app(config);
-  auto& line = app.create<Jade::Line>();
-  line.setPos({1, 1}, {4, 5});
-  const auto* firstAddress = &line;
+  auto entity = app.world().create();
+  auto& pose = entity.add<Jade::Transform>();
+  const auto* address = &pose;
   for (int index = 0; index < 64; ++index) {
-    app.create<Jade::Line>();
+    app.world().create().add<Jade::Transform>();
   }
-  auto& segment = app.create<Jade::Line>(Jade::Vec2D{1, 8}, Jade::Vec2D{6, 8});
-  EXPECT_EQ(&line, firstAddress);
-  EXPECT_FLOAT_EQ(line.Start().x, 1.0f);
-  EXPECT_FLOAT_EQ(line.End().x, 4.0f);
-  EXPECT_FLOAT_EQ(segment.Start().y, 8.0f);
-  EXPECT_FLOAT_EQ(segment.End().x, 6.0f);
+  EXPECT_EQ(&entity.get<Jade::Transform>(), address);
 
   LogCapture capture;
   const auto start = std::chrono::steady_clock::now();
@@ -279,7 +171,7 @@ TEST(Application, CreatesStableLinesAndLogsPacedFramesAcrossRuns)
   }
 
   capture.Reset();
-  line.setPos({2, 2}, {5, 4});
+  pose.position = {2, 2, 0};
   ASSERT_NO_THROW(app.Run({2, true}));
   const auto restarted = ParseFrames(capture.Text());
   ASSERT_EQ(restarted.size(), 2u);
@@ -287,6 +179,5 @@ TEST(Application, CreatesStableLinesAndLogsPacedFramesAcrossRuns)
   EXPECT_EQ(restarted.front().second, 1u);
   EXPECT_EQ(restarted.front().frameInSecond, 1u);
   EXPECT_DOUBLE_EQ(restarted.front().fps, 0.0);
-  EXPECT_FLOAT_EQ(line.Start().x, 2.0f);
-  EXPECT_FLOAT_EQ(line.End().x, 5.0f);
+  EXPECT_EQ(pose.position, (Jade::Vec3{2, 2, 0}));
 }

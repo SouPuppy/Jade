@@ -1,5 +1,5 @@
-#include <Jade/Mesh/Mesh.hpp>
-#include <Jade/Objects/Object.hpp>
+#include <Jade/Graphics/Mesh.hpp>
+#include <Jade/Assets/Assets.hpp>
 
 #include <gtest/gtest.h>
 
@@ -48,6 +48,12 @@ private:
   std::filesystem::path m_Directory;
 };
 
+Jade::Mesh LoadMesh(const std::filesystem::path& path)
+{
+  Jade::Assets assets;
+  return assets.get(assets.load<Jade::Mesh>(path));
+}
+
 void ExpectUnit(Jade::Vec3 normal)
 {
   EXPECT_NEAR(Jade::dot(normal, normal), 1.0f, 1e-5f);
@@ -82,13 +88,49 @@ TEST(Mesh, CubeHasRequestedBoundsOutwardWindingAndHardFaceNormals)
   }
 }
 
-TEST(Object, OwnsAMeshSnapshotAndRejectsInvalidReplacementAtomically)
+TEST(Mesh, LineAndTriangleBuildersUseVec3AndValidateTopology)
 {
-  Jade::Object object;
+  Jade::Assets assets;
+  auto line = Jade::Mesh::line({1, 2, 3}, {4, 5, 6});
+  EXPECT_EQ(line.topology, Jade::MeshTopology::Lines);
+  EXPECT_EQ(line.vertices.size(), 2u);
+  EXPECT_EQ(line.indices, (std::vector<std::uint32_t>{0, 1}));
+  EXPECT_EQ(line.vertices[1].position, (Jade::Vec3{4, 5, 6}));
+  EXPECT_NO_THROW(assets.add(line));
+  line.indices.push_back(0);
+  EXPECT_THROW(assets.add(line), std::invalid_argument);
+  auto triangle = Jade::Mesh::triangle({0, 0, 2}, {1, 0, 2}, {0, 1, 2});
+  EXPECT_EQ(triangle.topology, Jade::MeshTopology::Triangles);
+  EXPECT_EQ(triangle.vertices[0].normal, (Jade::Vec3{0, 0, 1}));
+  EXPECT_NO_THROW(assets.add(triangle));
+  triangle.topology = static_cast<Jade::MeshTopology>(123);
+  EXPECT_THROW(assets.add(triangle), std::invalid_argument);
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_THROW(Jade::Mesh::line({nan, 0, 0}, {}), std::invalid_argument);
+  EXPECT_THROW(Jade::Mesh::triangle({}, {1, 1, 1}, {0, nan, 0}), std::invalid_argument);
+}
+
+TEST(Assets, FailedObjLoadsCanBeRetriedAndCachedLoadsRemainImmutable)
+{
+  ObjFixture fixture;
+  Jade::Assets assets;
+  const auto path = fixture.Write("v 0 0 0\nf 0 1 2\n");
+  EXPECT_THROW(assets.load<Jade::Mesh>(path), std::runtime_error);
+  fixture.Write("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+  const auto loaded = assets.load<Jade::Mesh>(path);
+  EXPECT_EQ(assets.get(loaded).vertices.size(), 3u);
+  fixture.Write("invalid replacement\n");
+  EXPECT_EQ(assets.load<Jade::Mesh>(path), loaded);
+  EXPECT_EQ(assets.get(loaded).vertices.size(), 3u);
+}
+
+TEST(Assets, OwnsMeshSnapshotsAndRejectsInvalidRegistration)
+{
+  Jade::Assets assets;
   auto mesh = Jade::Mesh::cube(2);
-  object.setMesh(mesh);
+  const auto handle = assets.add(mesh);
   mesh.vertices[0].position = {100, 100, 100};
-  EXPECT_EQ(object.GetMesh().vertices[0].position, (Jade::Vec3{-1, -1, 1}));
+  EXPECT_EQ(assets.get(handle).vertices[0].position, (Jade::Vec3{-1, -1, 1}));
   for (int kind = 0; kind < 4; ++kind) {
     auto invalid = Jade::Mesh::cube();
     if (kind == 0) {
@@ -100,19 +142,19 @@ TEST(Object, OwnsAMeshSnapshotAndRejectsInvalidReplacementAtomically)
     } else {
       invalid.vertices[0].normal.y = std::numeric_limits<float>::quiet_NaN();
     }
-    EXPECT_THROW(object.setMesh(std::move(invalid)), std::invalid_argument);
-    EXPECT_EQ(object.GetMesh().vertices[0].position, (Jade::Vec3{-1, -1, 1}));
-    EXPECT_EQ(object.GetMesh().indices.size(), 36u);
+    EXPECT_THROW(assets.add(std::move(invalid)), std::invalid_argument);
+    EXPECT_EQ(assets.get(handle).vertices[0].position, (Jade::Vec3{-1, -1, 1}));
+    EXPECT_EQ(assets.get(handle).indices.size(), 36u);
   }
-  object.setMesh({});
-  EXPECT_TRUE(object.GetMesh().vertices.empty());
-  EXPECT_TRUE(object.GetMesh().indices.empty());
+  const auto empty = assets.add(Jade::Mesh{});
+  EXPECT_TRUE(assets.get(empty).vertices.empty());
+  EXPECT_TRUE(assets.get(empty).indices.empty());
 }
 
 TEST(Mesh, ObjGeneratesAreaWeightedNormalsAndSharesPositions)
 {
   ObjFixture fixture;
-  const auto mesh = Jade::Mesh::load(fixture.Write(
+  const auto mesh = LoadMesh(fixture.Write(
     "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 2\nf 1 2 3\nf 1 4 2\n"));
   ASSERT_EQ(mesh.vertices.size(), 4u);
   ASSERT_EQ(mesh.indices.size(), 6u);
@@ -130,7 +172,7 @@ TEST(Mesh, ObjGeneratesAreaWeightedNormalsAndSharesPositions)
 TEST(Mesh, ObjPreservesExplicitNormalsAndSplitsHardEdges)
 {
   ObjFixture fixture;
-  const auto mesh = Jade::Mesh::load(fixture.Write(
+  const auto mesh = LoadMesh(fixture.Write(
     "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 4\nvn 0 0 -2\n"
     "f 1//1 2//1 3//1\nf 1//2 3//2 2//2\n"));
   ASSERT_EQ(mesh.vertices.size(), 6u);
@@ -145,7 +187,7 @@ TEST(Mesh, ObjPreservesExplicitNormalsAndSplitsHardEdges)
 TEST(Mesh, ObjAcceptsNegativeIndicesUvsCommentsAndConvexPolygons)
 {
   ObjFixture fixture;
-  const auto mesh = Jade::Mesh::load(fixture.Write(
+  const auto mesh = LoadMesh(fixture.Write(
     "# unit quad\r\nv 0 0 0\r\nv 1 0 0\r\nv 1 1 0\r\nv 0 1 0\r\n"
     "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\n"
     "o Quad\ng Front\ns 1\nusemtl Ignored\n"
@@ -156,7 +198,7 @@ TEST(Mesh, ObjAcceptsNegativeIndicesUvsCommentsAndConvexPolygons)
   for (const auto& vertex : mesh.vertices) {
     EXPECT_EQ(vertex.normal, (Jade::Vec3{0, 0, 1}));
   }
-  const auto noNormals = Jade::Mesh::load(fixture.Write(
+  const auto noNormals = LoadMesh(fixture.Write(
     "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0\nf 1/1 2/1 3/1\n"));
   for (const auto& vertex : noNormals.vertices) {
     EXPECT_EQ(vertex.normal, (Jade::Vec3{0, 0, 1}));
@@ -172,7 +214,7 @@ TEST(Mesh, ObjReportsMalformedInputWithPathAndLine)
     SCOPED_TRACE(invalid);
     const auto path = fixture.Write(positions + invalid + "\n");
     try {
-      Jade::Mesh::load(path);
+      LoadMesh(path);
       FAIL() << "Accepted malformed OBJ";
     } catch (const std::runtime_error& error) {
       EXPECT_NE(std::string(error.what()).find("mesh.obj' line 4:"), std::string::npos);
@@ -180,14 +222,14 @@ TEST(Mesh, ObjReportsMalformedInputWithPathAndLine)
   }
   for (const auto& contents : {"", "v 0 0 0\n", "v 1 2\n", "v nan 0 0\n",
       "v 1e99 0 0\n", "vn 0 0 0\n"}) {
-    EXPECT_THROW(Jade::Mesh::load(fixture.Write(contents)), std::runtime_error);
+    EXPECT_THROW(LoadMesh(fixture.Write(contents)), std::runtime_error);
   }
-  EXPECT_THROW(Jade::Mesh::load(fixture.Directory() / "missing.obj"), std::runtime_error);
+  EXPECT_THROW(LoadMesh(fixture.Directory() / "missing.obj"), std::runtime_error);
 }
 
 TEST(Mesh, LoadsTheSmallestBundledBunnyAndGeneratesFiniteNormals)
 {
-  const auto mesh = Jade::Mesh::load(std::filesystem::path(JADE_TEST_ASSET_DIR) / "bunny.obj");
+  const auto mesh = LoadMesh(std::filesystem::path(JADE_TEST_ASSET_DIR) / "bunny.obj");
   ASSERT_EQ(mesh.vertices.size(), 453u);
   ASSERT_EQ(mesh.indices.size(), 948u * 3);
   std::size_t nonzeroNormals = 0;

@@ -19,7 +19,7 @@ commercial use requires Stanford's permission. See the source's “Please
 acknowledge” section for its terms. This asset has those terms independently of
 Jade's code.
 
-The Demo applies scale and translation through `Object` so the source coordinates
+The Demo applies scale and translation through `Transform` so the source coordinates
 stay intact. CMake copies `assets/` beside `JadeDemo.exe`; run the Demo from either
-the repository root or its `bin` directory. `Mesh::load()` resolves paths relative
+the repository root or its `bin` directory. `Assets::load<Mesh>()` resolves paths relative
 to the process's working directory.

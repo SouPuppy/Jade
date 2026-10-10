@@ -1,115 +1,83 @@
 # Jade Architecture
 
-## Public and internal boundaries
+## Core model and boundaries
 
-Jade is a C++20 static library exposed as `Jade::Jade`. Windows x64 / MSVC is the validated platform. Consumers receive only `Jade/include/`; GLFW, GLAD and system OpenGL remain private dependencies.
+Entity identifies an existence in World. Components describe its state, systems interpret that state, and Assets owns shareable resources. The current foundation contains World/Entity, Transform, MeshRenderer, Camera and mesh assets. Physics, materials, light, prefabs and a general system scheduler are outside this implementation.
 
-| Public header | Responsibility |
+```mermaid
+flowchart LR
+  Application --> World
+  Application --> Assets
+  World --> Entity
+  Entity --> Transform
+  Entity --> MeshRenderer
+  Entity --> Camera
+  MeshRenderer --> MeshHandle
+  MeshHandle --> Assets
+  Assets --> Mesh
+  World --> RenderSystem
+  Assets --> RenderSystem
+  RenderSystem --> Renderer
+  Renderer --> OpenGL
+```
+
+| Public path | Contract |
 | --- | --- |
-| Application.hpp | ApplicationConfig, RunOptions, ownership, frame loop, active camera, wireframe and axes |
-| Input/Key.hpp | Backend-independent keys, modifier masks and compile-time chord parsing |
-| Input/MouseButton.hpp | Backend-independent buttons and compile-time name parsing |
-| Events/Event.hpp | EventConnection and EventFlow propagation result |
-| Events/Keyboard.hpp | KeyPressed, KeyReleased and KeyHeld string-template events |
-| Events/FrameUpdate.hpp | Per-frame dt, elapsed time and frame index |
-| Events/MouseMoved.hpp | Window cursor position and relative movement |
-| Events/Mouse.hpp | MousePressed, MouseReleased and MouseHeld string-template events |
-| Events/MouseScrolled.hpp | Horizontal and vertical scroll offsets |
-| Vector.hpp | Vec2/Vec3 arithmetic, dot and cross; Vec2D/Vec3D aliases |
-| Objects/Camera.hpp | Perspective/Orthographic modes and look-at settings; inherits Object |
-| Objects/Motion.hpp | Camera translation, yaw/pitch/roll increments and projection zoom |
-| Objects/Object.hpp | Owned mesh, color, position, rotation and scale for 3D objects |
-| Mesh/Mesh.hpp | Indexed CPU triangle mesh, builtin cube and OBJ loading |
-| Mesh/Vertex.hpp | Local position and surface normal |
-| Geometry/Line.hpp | One screen-space segment with two owned 2D endpoints |
-| Geometry/Triangle.hpp | Three owned screen-space 2D vertices and color |
-| Color.hpp | RGBA value |
-| WindowConfig.hpp | Title, dimensions and visibility |
-| Log.hpp | Info and Error logging |
+| Core/Entity.hpp | Copyable identity, component access, validity/generation |
+| Core/World.hpp | Entity/component ownership, destruction and snapshot queries |
+| Core/Transform.hpp | Position, quaternion rotation, scale |
+| Assets/AssetHandle.hpp | Typed weak identity; MeshHandle alias |
+| Assets/Assets.hpp | Immutable resource snapshots and synchronous OBJ cache |
+| Math/Vector.hpp, Math/Quaternion.hpp | Vec2/Vec3 arithmetic and quaternion rotations |
+| Graphics/Mesh.hpp, Graphics/Vertex.hpp | Indexed CPU mesh, topology and builders |
+| Graphics/MeshRenderer.hpp | MeshHandle and per-entity color |
+| Graphics/Camera.hpp | Projection mode, FOV, height and clip planes |
+| Graphics/Motion.hpp | Transform movement/rotation/directions and Camera zoom |
+| Input/, Events/ | Typed input values, events and connection handles |
+| Application.hpp | World/Assets access, active camera and main loop |
+| Color.hpp, WindowConfig.hpp, Log.hpp | Shared values, window configuration and logging |
 | Jade.hpp | Optional includes-only entry point |
 
-Each public header can be included independently. Source files explicitly list their dependencies and include their corresponding `.hpp` first. Vec2 and Vec3 are header-only value types, so they have no redundant implementation files.
+Headers work independently. No folder aggregation header or legacy Object compatibility layer remains. Geometry consists of Mesh builders and Lines/Triangles topologies, all in 3D world space. Window/Renderer/FramebufferSize stay private. Consumer include paths expose neither backend headers nor implementation storage.
 
-```text
-Jade/
-|-- include/Jade/              # Core headers and Jade.hpp
-|   |-- Geometry/              # Line and Triangle
-|   |-- Mesh/                  # Mesh and Vertex data
-|   |-- Input/                 # Key, chord and mouse button contracts
-|   |-- Events/                # Event types and connections
-|   `-- Objects/               # Object, Camera and Motion
-|-- src/Core/                 # Application and Log implementations
-|-- src/Geometry/             # Line and Triangle implementations
-|-- src/Objects/              # Object, Camera and Motion implementations
-|-- src/Mesh/                 # Mesh API and builtins/Cube generation
-`-- src/internal/
-    |-- Core/FrameClock.hpp
-    |-- Events/               # Callback storage and dispatch
-    |-- Input/                # Key/button state and ordered input queue
-    |-- Math/                 # Matrix4 and validation helpers
-    |-- Mesh/                 # OBJ parser and mesh validation contract
-    |-- Platform/             # Window facade and GLFW runtime/window
-    `-- Renderer/             # Renderer facade and OpenGL backend
-```
+Each maintained .cpp includes its corresponding private .hpp first; CMake lists every source explicitly. Data-only headers need no empty .cpp. Core/World.hpp includes no graphics or platform dependency. Public template operations use type-erased bridges implemented in Core and Assets.
 
-Window, FramebufferSize and Renderer are internal. Key and MouseButton are public input values. ApplicationConfig retains a public WindowConfig for application settings. Tests privately opt into the source directory and GLFW/GLAD for pixel readback; those paths are not exported to consumers.
+## World ownership and query semantics
 
-## Ownership and lifetime
+World owns one private Registry with generation-bearing slots, free indices and type-indexed component pools. Entity contains a weak Registry reference plus slot index/generation. Its 64-bit id packs generation above index, unique within its World. Equality includes the owner. Reuse increments generation; exhausted generations retire the slot. Default, destroyed and expired handles cannot access data. Foreign World destruction is rejected.
 
-Application, Window and Renderer use PImpl. All creation, mutations and rendering belong to the main thread. The application owns Window before Renderer, with objects held in separate vectors of `unique_ptr`; references remain stable across subsequent creation.
+world.create() makes an empty identity. Plain user structs and noncopyable components require no base. add<T>(args...) constructs a component; duplicate add throws logic_error, get missing throws out_of_range, and remove absent is a no-op. Invalid entity operations throw logic_error; has returns false. const handles have mutable access, like a const pointer value. All operations use the main thread.
 
-A default Camera is available through `app.camera()`. `create<Camera>()` activates the new camera while retaining previously created cameras. Geometry, Mesh and Objects hold no GPU resources. `create<Object>()` creates a renderable world object; `setMesh()` validates and takes an owned snapshot, and `GetMesh()` returns const access. Empty meshes draw nothing and meshes may be replaced between frames. Camera inherits Object and shares its transform storage; Line and Triangle remain independent 2D geometry. Object has a virtual destructor and virtual `setPos()` so Camera validation applies when moved through an Object reference.
+Component allocations stay in place across unrelated creation/pool growth. Removing a component, destroying its Entity or destroying World invalidates its references. Components are extracted from pools before their user destructors run, permitting ordinary removal/destruction callbacks to mutate World safely. Constructors that destroy/reuse their identity cannot publish into that new generation.
 
-Before GLFW initialization, software rendering builds choose llvmpipe only if the caller has not supplied a nonempty GALLIUM_DRIVER. Hardware builds leave the environment untouched. GLFW requests OpenGL 3.3 Core and a depth buffer. OpenGL resources are created with the context current and released before that context and its window are destroyed. Shader compilation/link failures report driver logs and clean up partial allocations.
+World::each<T...>() snapshots matching identities, then rechecks liveness and component presence before each callback. Callbacks receive Entity and references in template order. New entities and new matches are deferred until the next query. Destruction, slot reuse and missing matches are skipped. Removing/replacing a referenced component during a callback invalidates that reference immediately; callers must stop using it. Nested queries make independent snapshots.
 
-Invalid configuration is rejected before creating a window. Geometry, camera and transform setters validate before replacing state. Positions and rotation must be finite; dimensions, scale, visible heights and near/far distances must be positive; far must exceed near. Color components are finite and in [0, 1]. Computed matrices that exceed float range are rejected before upload.
+## Assets
 
-## Rendering and coordinates
+Assets owns typed immutable CPU allocations, with one-based resource IDs and weak typed handles. get returns const T&; add copies/moves a resource into an immutable snapshot. References survive later registrations. Handles do not extend owner lifetime. There is no unload or hot reload, so a nonempty handle remains valid until owner destruction. Owner identity rejects foreign, empty and expired handles. Generic user resources can be registered; Mesh is the only file-loaded type.
 
-The primitive renderer owns a shader program, VAO and streaming VBO for 2D shapes and world axes. Its vertices contain explicit position/color floats. The mesh renderer owns a separate normal-aware shader, VAO, streaming VBO and index buffer, using `glDrawElements(GL_TRIANGLES, ..., GL_UNSIGNED_INT, ...)`. It explicitly packs position/normal floats; neither renderer assumes C++ struct padding. OpenGLProgram shares shader compilation, linking and cleanup across both implementations. Mesh data is uploaded on each draw; persistent per-mesh GPU caching is a future optimization.
+load<Mesh> resolves a canonical absolute path and synchronously parses OBJ. Repeated paths share one handle/allocation, including normalized relative aliases. Failure publishes neither a resource nor a cache entry; retry is allowed. Files changing after a successful load leave the cached immutable resource intact. Relative paths use the working directory; there are no hidden search paths.
 
-The 2D overlay keeps the lower-left origin and a default visible height of 10 units. Width follows framebuffer aspect ratio. Line draws GL_LINES with two vertices, Triangle draws GL_TRIANGLES with three vertices; coincident lines and collinear triangles are skipped. Depth testing is disabled for overlays.
+Mesh owns vertices (position/normal), uint32 indices and Lines/Triangles topology. Registration checks finite data, index bounds, primitive grouping and supported draw counts. cube(size) emits 24 vertices/36 indices with hard normals; line(a,b) emits two Vec3 vertices; triangle(a,b,c) emits three vertices with a generated normal. Builtin cube generation lives under src/Graphics/builtins. OBJ parsing and mesh validation are internal, preserving positive/negative face references, convex triangulation, supplied normal seams and generated area-weighted normals. UVs, materials and smoothing groups are discarded.
 
-The 3D world is right-handed with Y up. Camera defaults to eye (3, 3, 5), target (0, 0, 0), and up (0, 1, 0). Perspective uses vertical FOV in degrees, default 60; orthographic uses visible height, default 6. Both use near 0.1 and far 100. Orthographic retains size with distance; perspective applies the homogeneous divide. FOV is meaningful in perspective mode, matching [the documented vertical-FOV convention](https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/camera/fieldofview).
+## Rendering and camera
 
-`Mesh::cube(size)` creates 24 vertices and 36 indices for six flat faces centered at the local origin. Size is baked into positions; Object scale, rotation and translation apply once to any mesh. Shared corners have separate face normals. Object color supplies a base tint. The fragment shader applies fixed ambient and directional diffuse lighting; normals use the inverse transpose of the model's linear transform, including nonuniform scale. The vertex shader uses:
+Application owns Assets, World, Window and Renderer, with Renderer destroyed before Window/context. It creates a default camera Entity with Transform at (3,3,5), rotation aimed at the origin, and Camera data: Perspective, vertical FOV 60, orthographic height 6, near 0.1/far 100. Creating Camera components never selects them implicitly. setCamera requires a live own-World identity with both components. A removed/destroyed active camera causes clear/present only, retaining input, callbacks and logs. Selecting a valid camera resumes scene drawing.
 
-```text
-clipPosition = projection * view * model * localPosition
-model = translation * rotationZ * rotationY * rotationX * scale
-```
+RenderSystem is stateless. It queries Transform+MeshRenderer, resolves each mesh through Assets, computes view/projection/model/normal matrices, and submits Mesh plus DrawParameters. It owns no component data. Renderer and OpenGL backend accept neither Entity nor World nor a public immediate-mode scene API. Debug axes use three immutable internal line meshes and no Entities.
 
-Matrices use column-major storage and are uploaded with GL_FALSE, as described by [OpenGL glUniform](https://wikis.khronos.org/opengl/GLAPI/glUniform). View uses an orthonormal look-at basis and rejects coincident eye/target or parallel up. Camera's inherited rotation supplies a local offset from that basis; `lookAt()` resets it. View inverts that rotation and the inherited scale. Projection maps the near/far clip planes to NDC Z [-1, 1].
+World uses right-handed coordinates with Y up. A quaternion maps local axes into world space: +X right, +Y up, -Z front. Transform model is T*R*S; camera view is inverse rigid pose and ignores scale. Projection uses framebuffer aspect and maps clip Z to NDC [-1,1]. Model positions use projection*view*model and homogeneous division; resizing changes horizontal coverage while preserving vertical FOV/height. Normals use rotation*inverseScale, the inverse transpose of the model's linear part.
 
-Every frame clears color and depth, draws Objects with GL_LESS depth testing and writes enabled, then draws the Axis Gizmo, followed by 2D Triangles and Lines. The gizmo consists of three positive XYZ segments at the world origin, each one unit long, colored red/green/blue. It uses the active camera, draws over world objects without writing depth, and restores depth-test/write state. ApplicationConfig::axisGizmo defaults to true; unconsumed bare F3 presses toggle it once and log on/off. Public setter/query methods permit application control.
+Components are data aggregates. Consumers validate when used: finite positions and nonzero finite quaternions, positive model scales and dimensions, color channels in [0,1], FOV strictly (0,180), positive height/clipping planes and far>near. Both stored lens settings must remain valid, regardless of projection mode. Computed matrices outside float range are rejected. Invalid render data propagates an exception from Run, whose guard permits a later corrected Run.
 
-`app.setWireframe()` forwards to the private renderer; each BeginFrame applies GL_LINE or GL_FILL to polygon faces. It defaults to fill, leaves GL_LINES unchanged, and includes each mesh's triangle edges. The viewport and aspect ratio use actual framebuffer size. Resizing keeps vertical FOV or orthographic visible height fixed while adjusting horizontal coverage.
+The OpenGL mesh backend owns one normal-aware shader, VAO, streaming VBO and index buffer. It explicitly packs six position/normal floats per vertex. Indexed GL_LINES uses unlit color; GL_TRIANGLES uses ambient/directional diffuse light. Mesh data is streamed per draw; persistent GPU caching is deferred. BeginFrame clears color/depth, sets GL_LESS with depth writes, viewport and fill/wireframe. Each draw restores prior depth-test/write/function state. Gizmo lines disable depth test/writes to appear over meshes without changing polygon mode. F3 toggles positive unit XYZ axes colored red/green/blue. GL_LINE affects triangle edges only.
 
-## Mesh loading
+Motion operates on Transform; zoom operates on Camera. Translation preserves orientation; forward/right use current local axes and up/down use world Y. lookAt replaces the quaternion using target/up once. Rotation composes normalized quaternion increments about current local axes, with rightward yaw, upward pitch and clockwise roll. There is no pitch clamp or Euler decomposition, so full flips and yaw/pitch after roll remain consistent with view/direction calculations. Zoom bounds the active lens parameter without changing pose/mode/clip planes; changing projection preserves both zoom values.
 
-Mesh exposes vectors of Vertex (position/normal) and uint32 indices. Mesh::load delegates OBJ
-parsing to src/internal/Mesh/ObjLoader; builtin generation lives under src/Mesh/builtins.
-Validation rejects nonfinite vertices, incomplete triangle index groups, out-of-range references
-and counts outside the draw API's limits before Object state changes.
+## Loop, events and build
 
-OBJ supports positive/negative face references and position/UV/normal syntax, triangulates convex
-polygons, normalizes supplied normals and splits vertices at explicit normal seams. Missing normals
-use area-weighted averages across shared source positions; degenerate-only vertices retain zero
-normals and receive ambient light. UV data, smoothing-group directives and materials are discarded.
-Concave polygons require prior triangulation. Errors carry a filename and line number. Mesh::load
-resolves the supplied path from the working directory without hidden search paths.
+The main loop polls and dispatches ordered key/button/cursor/scroll events, applies unconsumed Escape/F3 defaults, waits for steady-clock deadlines, dispatches held keys/buttons and FrameUpdate, then clears, renders, presents and logs. Zero-sized framebuffers keep processing edge input but skip held/update/render/logs; restoration resets dt. FrameClock skips expired slots after overruns. frameLimits defaults to 24 FPS; RunOptions::frameLimit independently caps submitted frames. Each Run retains scene/resources/subscriptions and resets timing. stop allows a later Run; nested Run throws.
 
-assets/bunny.obj preserves the smallest supplied PLY's 453 positions and 948 triangles. Demo
-scales/translates the Object rather than rewriting geometry. Source attribution and terms live
-in [assets/README.md](../assets/README.md). CMake's always-run JadeDemoAssets target copies assets
-beside the executable, independently of engine/tests builds.
+[Events](Events.md) describes propagation, exact modifiers and connection lifetime. CMake explicitly lists source/header pairs. Demo and tests are independently optional. GLFW/GLAD are private static dependencies; GoogleTest is configured only for tests. Windows Debug/Release use matching /MDd and /MD runtimes. Software builds select llvmpipe before GLFW when no nonempty driver override exists, and release GPU resources with the owning context current. Runtime/asset deployment stays shared across target configurations.
 
-## Frame loop and build
-
-The loop polls events, dispatches queued key/button transitions, cursor movement and scroll input in arrival order, handles unconsumed Escape/F3 and close, waits for the next steady-clock deadline, dispatches held keys, held buttons and FrameUpdate, then clears, draws and presents. Zero-sized framebuffers keep processing queued input but skip held/frame callbacks, drawing and logs; restoration starts with zero dt. FrameClock skips expired deadlines after overruns. ApplicationConfig::frameLimits defaults to 24 FPS; RunOptions::frameLimit independently limits total submitted frames. Every Run resets timing statistics and retains objects, cameras and subscriptions. An explicit stop bypasses a bounded run's remaining frame requirement.
-
-CMake explicitly lists source/header pairs. Demo and tests are independently optional. GLAD/GLFW are static and private; GoogleTest is only configured for tests. All targets share /MDd in Debug and /MD in Release. Mesa deployment is shared between Demo and tests and serialized with a file lock.
-
-The event pipeline and callback/lifetime contract are described in [Events](Events.md). Camera setPos translates its look-at target along with the eye; getFront/getRight/getUp derive normalized world axes from the same look-at basis and yaw(Y) * pitch(X) * roll(Z) rotation used by its view transform. This lets roll bank the camera without changing its viewing direction, including after yaw/pitch. Object meshes use rotationZ * rotationY * rotationX. Motion delegates translation to camera axes, except up/down along world Y. Its yaw/roll increments wrap and pitch is limited to [-89, 89] degrees.
-
-Sixty-three GoogleTests cover public data, ownership, camera configuration, mesh validation, OBJ loading, normals, deterministic timing/matrix checks, keyboard/mouse dispatch, Motion and real pixel/depth readback. Mesh pixel checks include indexed selection, geometry replacement, normal-driven lighting and bunny rendering in both projections and wireframe. Axis checks cover unit length, camera changes, resize, depth-state preservation and F3 propagation. Input integration tests invoke installed GLFW adapters on hidden windows. Local screenshots and Demo launch checks remain under ignored build/validation/.
+Tests cover World lifetime/generations and mutation snapshots, Assets sharing/cache/lifetime, quaternion direction/view agreement, camera lifecycle, input ordering, timing and real OpenGL pixels/depth for both topologies, projections, normals, resizing, clipping, wireframe and axes. Local screenshots and Demo launch checks stay under ignored build/validation/.

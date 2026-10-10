@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Jade/Objects/Camera.hpp>
+#include <Jade/Core/World.hpp>
+#include <Jade/Assets/Assets.hpp>
 #include <Jade/Color.hpp>
 #include <Jade/Events/Event.hpp>
 #include <Jade/Events/FrameUpdate.hpp>
@@ -8,9 +9,6 @@
 #include <Jade/Events/Mouse.hpp>
 #include <Jade/Events/MouseMoved.hpp>
 #include <Jade/Events/MouseScrolled.hpp>
-#include <Jade/Objects/Object.hpp>
-#include <Jade/Geometry/Line.hpp>
-#include <Jade/Geometry/Triangle.hpp>
 #include <Jade/WindowConfig.hpp>
 
 #include <cstdint>
@@ -27,8 +25,6 @@ struct ApplicationConfig {
   Color clearColor;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
-  // Visible height of the 2D overlay; the 3D camera has its own projection.
-  float viewHeight = 10.0f;
   bool logFrames = true;
   // Unit XYZ axes at the world origin, visible over objects. F3 toggles them.
   bool axisGizmo = true;
@@ -48,19 +44,13 @@ public:
   Application(const Application&) = delete;
   Application& operator=(const Application&) = delete;
 
-  // Owned references remain valid until destruction. The last created Camera is active.
-  // Creation, mutation and Run() belong to the main thread.
-  template<class T, class... Args>
-  T& create(Args&&... args)
-  {
-    static_assert(std::is_same_v<T, Line> || std::is_same_v<T, Triangle>
-      || std::is_same_v<T, Object> || std::is_same_v<T, Camera>,
-      "Application::create supports Line, Triangle, Object and Camera.");
-    return Register(std::make_unique<T>(std::forward<Args>(args)...));
-  }
-
-  // A default camera is available even before create<Camera>().
-  Camera& camera() noexcept;
+  // World and Assets own data; entity/asset handles do not extend their lifetime.
+  // Scene mutation and Run() belong to the main thread.
+  World& world() noexcept;
+  Assets& assets() noexcept;
+  Entity camera() const noexcept;
+  // Requires a live entity in this World with Transform and Camera.
+  void setCamera(Entity camera);
   // Callbacks run on the main thread in registration order. Ignoring the
   // returned handle keeps the callback; use disconnect() to cancel it.
   template<class Event, class Callback>
@@ -89,7 +79,7 @@ public:
 
   // Ends the current Run(), allowing a later Run() to resume.
   void stop() noexcept;
-  // Applies to polygon faces (Object meshes and Triangle), beginning with the next frame.
+  // Applies to triangle meshes beginning with the next frame.
   void setWireframe(bool enabled) noexcept;
   void setAxisGizmo(bool enabled) noexcept;
   bool axisGizmoEnabled() const noexcept;
@@ -131,10 +121,6 @@ private:
   EventConnection Connect(std::function<EventFlow(const FrameUpdate&)> callback);
   EventConnection Connect(std::function<EventFlow(const MouseMoved&)> callback);
   EventConnection Connect(std::function<EventFlow(const MouseScrolled&)> callback);
-  Line& Register(std::unique_ptr<Line> line);
-  Triangle& Register(std::unique_ptr<Triangle> triangle);
-  Object& Register(std::unique_ptr<Object> object);
-  Camera& Register(std::unique_ptr<Camera> camera);
   struct Impl;
   std::unique_ptr<Impl> m_Impl;
 };

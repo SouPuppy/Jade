@@ -13,78 +13,77 @@ int main()
   config.frameLimits = 24;
   Jade::Application app(config);
 
-  auto& camera = app.create<Jade::Camera>();
-  camera.setPos({4, 3, 8});
-  camera.lookAt({0, 0, 0});
-  camera.setPerspective(60.0f);
-  // Press O to switch between perspective and orthographic projection.
+  auto camera = app.camera();
+  auto& pose = camera.get<Jade::Transform>();
+  auto& lens = camera.get<Jade::Camera>();
+  pose.position = {4, 3, 8};
+  Jade::Motion::lookAt(pose, {0, 0, 0});
 
-  auto& cube = app.create<Jade::Object>();
-  cube.setMesh(Jade::Mesh::cube(2.0f));
-  cube.setPos({-1.5f, 0, 0});
-  cube.setColor({0.45f, 0.75f, 1.0f, 1});
-
-  auto& bunny = app.create<Jade::Object>();
-  bunny.setMesh(Jade::Mesh::load("assets/bunny.obj"));
-  // Stanford's original coordinates are small; keep the file unchanged and scale the object.
-  bunny.setScale({16, 16, 16});
-  bunny.setPos({1.9f, -1.7f, 0});
-  bunny.setColor({1.0f, 0.8f, 0.55f, 1});
+  const auto cubeMesh = app.assets().add(Jade::Mesh::cube(2.0f));
+  const auto bunnyMesh = app.assets().load<Jade::Mesh>("assets/bunny.obj");
+  auto cube = app.world().create();
+  cube.add<Jade::Transform>().position = {-1.5f, 0, 0};
+  cube.add<Jade::MeshRenderer>(cubeMesh, Jade::Color{0.45f, 0.75f, 1.0f, 1});
+  auto bunny = app.world().create();
+  auto& bunnyPose = bunny.add<Jade::Transform>();
+  bunnyPose.scale = {16, 16, 16};
+  bunnyPose.position = {1.9f, -1.7f, 0};
+  bunny.add<Jade::MeshRenderer>(bunnyMesh, Jade::Color{1.0f, 0.8f, 0.55f, 1});
   // Unit XYZ axes at the world origin are enabled by default; F3 toggles them.
 
   bool wireframe = false;
   app.setWireframe(wireframe);
 
   // WASD: speed is world units per second, independent of frameLimits.
-  app.on<Jade::KeyHeld<"w">>([&camera](const auto& event) {
-    Jade::Motion::forward(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"w">>([&pose](const auto& event) {
+    Jade::Motion::forward(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"s">>([&camera](const auto& event) {
-    Jade::Motion::backward(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"s">>([&pose](const auto& event) {
+    Jade::Motion::backward(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"a">>([&camera](const auto& event) {
-    Jade::Motion::left(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"a">>([&pose](const auto& event) {
+    Jade::Motion::left(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"d">>([&camera](const auto& event) {
-    Jade::Motion::right(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"d">>([&pose](const auto& event) {
+    Jade::Motion::right(pose, moveSpeed * event.dt);
   });
 
   // Arrow keys provide the same movement as WASD.
-  app.on<Jade::KeyHeld<"Up">>([&camera](const auto& event) {
-    Jade::Motion::forward(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"Up">>([&pose](const auto& event) {
+    Jade::Motion::forward(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"Down">>([&camera](const auto& event) {
-    Jade::Motion::backward(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"Down">>([&pose](const auto& event) {
+    Jade::Motion::backward(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"Left">>([&camera](const auto& event) {
-    Jade::Motion::left(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"Left">>([&pose](const auto& event) {
+    Jade::Motion::left(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"Right">>([&camera](const auto& event) {
-    Jade::Motion::right(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"Right">>([&pose](const auto& event) {
+    Jade::Motion::right(pose, moveSpeed * event.dt);
   });
 
   // Modifier bindings are exact: Shift+W is fast, Ctrl+W is slow.
-  app.on<Jade::KeyHeld<"S-w">>([&camera](const auto& event) {
-    Jade::Motion::forward(camera, fastMoveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"S-w">>([&pose](const auto& event) {
+    Jade::Motion::forward(pose, fastMoveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"C-w">>([&camera](const auto& event) {
-    Jade::Motion::forward(camera, slowMoveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"C-w">>([&pose](const auto& event) {
+    Jade::Motion::forward(pose, slowMoveSpeed * event.dt);
   });
 
   // Space / Ctrl+Space move along the world Y axis.
-  app.on<Jade::KeyHeld<"Space">>([&camera](const auto& event) {
-    Jade::Motion::up(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"Space">>([&pose](const auto& event) {
+    Jade::Motion::up(pose, moveSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"C-Space">>([&camera](const auto& event) {
-    Jade::Motion::down(camera, moveSpeed * event.dt);
+  app.on<Jade::KeyHeld<"C-Space">>([&pose](const auto& event) {
+    Jade::Motion::down(pose, moveSpeed * event.dt);
   });
 
   // Q / E roll around the viewing direction, in degrees per second.
-  app.on<Jade::KeyHeld<"q">>([&camera](const auto& event) {
-    Jade::Motion::roll(camera, -rollSpeed * event.dt);
+  app.on<Jade::KeyHeld<"q">>([&pose](const auto& event) {
+    Jade::Motion::roll(pose, -rollSpeed * event.dt);
   });
-  app.on<Jade::KeyHeld<"e">>([&camera](const auto& event) {
-    Jade::Motion::roll(camera, rollSpeed * event.dt);
+  app.on<Jade::KeyHeld<"e">>([&pose](const auto& event) {
+    Jade::Motion::roll(pose, rollSpeed * event.dt);
   });
 
   // Rotate only while dragging with the left button. Focus loss also releases it.
@@ -95,21 +94,21 @@ int main()
   app.on<Jade::MouseReleased<"Left">>([&dragging] {
     dragging = false;
   });
-  app.on<Jade::MouseMoved>([&camera, &dragging](const auto& mouse) {
+  app.on<Jade::MouseMoved>([&pose, &dragging](const auto& mouse) {
     if (dragging) {
       // Pixel deltas already describe displacement; do not multiply by dt.
-      Jade::Motion::yaw(camera, mouse.dx * mouseSensitivity);
-      Jade::Motion::pitch(camera, -mouse.dy * mouseSensitivity);
+      Jade::Motion::yaw(pose, mouse.dx * mouseSensitivity);
+      Jade::Motion::pitch(pose, -mouse.dy * mouseSensitivity);
     }
   });
-  app.on<Jade::MouseScrolled>([&camera](const auto& mouse) {
-    Jade::Motion::zoom(camera, mouse.dy * zoomSensitivity);
+  app.on<Jade::MouseScrolled>([&lens](const auto& mouse) {
+    Jade::Motion::zoom(lens, mouse.dy * zoomSensitivity);
   });
 
-  app.on<Jade::KeyPressed<"o">>([&camera] {
-    const auto projection = camera.Mode() == Jade::Projection::Perspective
+  app.on<Jade::KeyPressed<"o">>([&lens] {
+    const auto projection = lens.projection == Jade::Projection::Perspective
       ? Jade::Projection::Orthographic : Jade::Projection::Perspective;
-    camera.setProjection(projection);
+    lens.projection = projection;
     Jade::Log::Info(projection == Jade::Projection::Perspective
       ? "Camera: Perspective" : "Camera: Orthographic");
   });

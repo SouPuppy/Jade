@@ -1,10 +1,9 @@
 #pragma once
 
-#include <Jade/Objects/Camera.hpp>
-#include <Jade/Objects/Object.hpp>
+#include <Jade/Graphics/Mesh.hpp>
+#include "../DrawParameters.hpp"
 
 #include "OpenGLProgram.hpp"
-#include "../../Platform/Window.hpp"
 
 #include <vector>
 
@@ -17,7 +16,7 @@ public:
   OpenGLMeshRenderer(const OpenGLMeshRenderer&) = delete;
   OpenGLMeshRenderer& operator=(const OpenGLMeshRenderer&) = delete;
 
-  void DrawObject(const Object& object, const Camera& camera, FramebufferSize size);
+  void DrawMesh(const Mesh& mesh, const DrawParameters& parameters);
 
 private:
   void Release() noexcept;
@@ -29,6 +28,7 @@ private:
   GLint m_TransformLocation = -1;
   GLint m_NormalLocation = -1;
   GLint m_ColorLocation = -1;
+  GLint m_LitLocation = -1;
   std::vector<float> m_VertexData;
 };
 

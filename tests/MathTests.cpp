@@ -1,12 +1,14 @@
-#include <Jade/Objects/Camera.hpp>
-#include <Jade/Objects/Object.hpp>
-#include <Jade/Vector.hpp>
+#include <Jade/Core/Transform.hpp>
+#include <Jade/Graphics/Camera.hpp>
+#include <Jade/Graphics/Motion.hpp>
+#include <Jade/Math/Vector.hpp>
 
 #include "internal/Math/Matrix4.hpp"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <limits>
 #include <type_traits>
 
 namespace {
@@ -30,6 +32,49 @@ std::array<float, 3> Project(const Jade::Detail::Matrix4& matrix, float x, float
 }
 
 } // namespace
+
+TEST(Quaternion, CompositionNormalizationAndInverseRotateVectors)
+{
+  const auto x = Jade::Quaternion::angleAxis({1, 0, 0}, 90);
+  const auto y = Jade::Quaternion::angleAxis({0, 1, 0}, 90);
+  const auto rotated = (y * x).rotate({0, 0, -1});
+  EXPECT_NEAR(rotated.x, 0, 1e-6);
+  EXPECT_NEAR(rotated.y, 1, 1e-6);
+  EXPECT_NEAR(rotated.z, 0, 1e-6);
+  const auto roundTrip = (y * x).conjugate().rotate(rotated);
+  EXPECT_NEAR(roundTrip.x, 0, 1e-6);
+  EXPECT_NEAR(roundTrip.y, 0, 1e-6);
+  EXPECT_NEAR(roundTrip.z, -1, 1e-6);
+  const Jade::Quaternion nonunit{y.w * 10, y.x * 10, y.y * 10, y.z * 10};
+  EXPECT_NEAR(nonunit.rotate({0, 0, -1}).x, -1, 1e-6);
+  const float huge = std::numeric_limits<float>::max();
+  EXPECT_NO_THROW((Jade::Quaternion{huge, huge, huge, huge}.normalized()));
+  EXPECT_THROW((Jade::Quaternion{0, 0, 0, 0}.normalized()), std::invalid_argument);
+  EXPECT_THROW(Jade::Quaternion::angleAxis({}, 90), std::invalid_argument);
+  EXPECT_THROW(Jade::Quaternion::angleAxis({1, 0, 0}, std::numeric_limits<double>::infinity()), std::invalid_argument);
+}
+
+TEST(Matrix, ViewAndDirectionAgreeAfterRollThenMouseRotationAndFullFlip)
+{
+  Jade::Transform pose;
+  pose.position = {2, -3, 7};
+  Jade::Motion::roll(pose, 65);
+  Jade::Motion::yaw(pose, 35);
+  Jade::Motion::pitch(pose, 190);
+  const auto front = Jade::Motion::getFront(pose);
+  const auto point = pose.position + front * 2;
+  const auto result = Transform(Jade::Detail::ViewMatrix(pose), point.x, point.y, point.z);
+  EXPECT_NEAR(result[0], 0, 2e-6);
+  EXPECT_NEAR(result[1], 0, 2e-6);
+  EXPECT_NEAR(result[2], -2, 2e-6);
+  // Both trace branches around a 180 degree look-at rotation must work.
+  pose.position = {};
+  Jade::Motion::lookAt(pose, {0, 0, 1});
+  EXPECT_NEAR(Jade::Motion::getFront(pose).z, 1, 1e-6);
+  Jade::Motion::lookAt(pose, {0, 1, 0}, {0, 0, 1});
+  EXPECT_NEAR(Jade::Motion::getFront(pose).y, 1, 1e-6);
+  EXPECT_NEAR(Jade::Motion::getUp(pose).z, 1, 1e-6);
+}
 
 TEST(Vector, TwoDimensionalArithmeticAndSignedCross)
 {
@@ -68,14 +113,14 @@ TEST(Vector, ThreeDimensionalArithmeticAndOrthogonalCross)
 
 TEST(Matrix, ViewMapsEyeToOriginAndTargetToNegativeZ)
 {
-  Jade::Camera camera;
-  camera.setPos({0, 0, 5});
-  camera.lookAt({0, 0, 0});
+  Jade::Transform camera;
+  camera.position = {0, 0, 5};
+  Jade::Motion::lookAt(camera, {0, 0, 0});
   auto view = Jade::Detail::ViewMatrix(camera);
   EXPECT_EQ(Transform(view, 0, 0, 5), (std::array<float, 4>{0, 0, 0, 1}));
   EXPECT_EQ(Transform(view, 0, 0, 0), (std::array<float, 4>{0, 0, -5, 1}));
-  camera.setPos({5, 0, 0});
-  camera.lookAt({0, 0, 0});
+  camera.position = {5, 0, 0};
+  Jade::Motion::lookAt(camera, {0, 0, 0});
   view = Jade::Detail::ViewMatrix(camera);
   const auto target = Transform(view, 0, 0, 0);
   EXPECT_NEAR(target[2], -5, 1e-6);
@@ -83,21 +128,21 @@ TEST(Matrix, ViewMapsEyeToOriginAndTargetToNegativeZ)
   EXPECT_NEAR(Transform(view, 0, 0, 1)[0], -1, 1e-6);
 }
 
-TEST(Matrix, CameraObjectTransformChangesTheViewAndLookAtResetsTheRotation)
+TEST(Matrix, CameraViewIgnoresScaleAndLookAtReplacesOrientation)
 {
-  Jade::Camera camera;
-  camera.setPos({0, 0, 5});
-  camera.lookAt({0, 0, 0});
-  camera.setRotation({0, 90, 0});
-  camera.setScale({2, 1, 2});
+  Jade::Transform camera;
+  camera.position = {0, 0, 5};
+  Jade::Motion::lookAt(camera, {0, 0, 0});
+  camera.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, 90);
+  camera.scale = {2, 1, 2};
   const auto view = Jade::Detail::ViewMatrix(camera);
   const auto ahead = Transform(view, -2, 0, 5);
   EXPECT_NEAR(ahead[0], 0, 1e-6);
   EXPECT_NEAR(ahead[1], 0, 1e-6);
-  EXPECT_NEAR(ahead[2], -1, 1e-6);
+  EXPECT_NEAR(ahead[2], -2, 1e-6);
   EXPECT_EQ(Transform(view, 0, 0, 5), (std::array<float, 4>{0, 0, 0, 1}));
-  camera.lookAt({0, 0, 0});
-  camera.setScale({1, 1, 1});
+  Jade::Motion::lookAt(camera, {0, 0, 0});
+  camera.scale = {1, 1, 1};
   EXPECT_EQ(Transform(Jade::Detail::ViewMatrix(camera), 0, 0, 0),
     (std::array<float, 4>{0, 0, -5, 1}));
 }
@@ -105,7 +150,7 @@ TEST(Matrix, CameraObjectTransformChangesTheViewAndLookAtResetsTheRotation)
 TEST(Matrix, ProjectionMapsClipPlanesAndRespectsAspectAndDistance)
 {
   Jade::Camera camera;
-  camera.setPerspective(90, 1, 11);
+  camera.fovDegrees = 90; camera.nearPlane = 1; camera.farPlane = 11;
   auto projection = Jade::Detail::ProjectionMatrix(camera, 2);
   EXPECT_NEAR(Project(projection, 0, 0, -1)[2], -1, 1e-6);
   EXPECT_NEAR(Project(projection, 0, 0, -11)[2], 1, 1e-6);
@@ -115,7 +160,7 @@ TEST(Matrix, ProjectionMapsClipPlanesAndRespectsAspectAndDistance)
   projection = Jade::Detail::ProjectionMatrix(camera, 1);
   EXPECT_NEAR(Project(projection, 2, 1, -1)[0], 2, 1e-6);
 
-  camera.setOrthographic(4, 1, 11);
+  camera.projection = Jade::Projection::Orthographic; camera.viewHeight = 4;
   projection = Jade::Detail::ProjectionMatrix(camera, 2);
   EXPECT_NEAR(Project(projection, 0, 0, -1)[2], -1, 1e-6);
   EXPECT_NEAR(Project(projection, 0, 0, -11)[2], 1, 1e-6);
@@ -127,11 +172,10 @@ TEST(Matrix, ProjectionMapsClipPlanesAndRespectsAspectAndDistance)
 
 TEST(Matrix, ModelAppliesScaleThenRotationThenTranslation)
 {
-  Jade::Object cube;
-  cube.setMesh(Jade::Mesh::cube(2));
-  cube.setPos({3, 4, 5});
-  cube.setRotation({0, 0, 90});
-  cube.setScale({2, 1, 1});
+  Jade::Transform cube;
+  cube.position = {3, 4, 5};
+  cube.rotation = Jade::Quaternion::angleAxis({0, 0, 1}, 90);
+  cube.scale = {2, 1, 1};
   const auto result = Transform(Jade::Detail::ModelMatrix(cube), 1, 0, 0);
   EXPECT_NEAR(result[0], 3, 1e-6);
   EXPECT_NEAR(result[1], 6, 1e-6);
@@ -141,10 +185,11 @@ TEST(Matrix, ModelAppliesScaleThenRotationThenTranslation)
 
 TEST(Matrix, NormalsStayPerpendicularUnderNonuniformScaleAndRotation)
 {
-  Jade::Object object;
-  object.setPos({10, 20, 30});
-  object.setRotation({25, 40, 70});
-  object.setScale({2, 3, 0.5f});
+  Jade::Transform object;
+  object.position = {10, 20, 30};
+  object.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, 40)
+    * Jade::Quaternion::angleAxis({1, 0, 0}, 25) * Jade::Quaternion::angleAxis({0, 0, 1}, 70);
+  object.scale = {2, 3, 0.5f};
   const auto model = Jade::Detail::ModelMatrix(object);
   const auto origin = Transform(model, 0, 0, 0);
   const auto tangent = Transform(model, 1, -1, 0);
@@ -152,6 +197,6 @@ TEST(Matrix, NormalsStayPerpendicularUnderNonuniformScaleAndRotation)
   const Jade::Vec3 worldTangent{tangent[0] - origin[0], tangent[1] - origin[1], tangent[2] - origin[2]};
   EXPECT_NEAR(Jade::dot(worldTangent, {normal[0], normal[1], normal[2]}), 0, 1e-5f);
   // Translation must not affect the normal transform.
-  object.setPos({-30, -20, -10});
+  object.position = {-30, -20, -10};
   EXPECT_EQ(Transform(Jade::Detail::NormalMatrix(object), 1, 1, 0), normal);
 }

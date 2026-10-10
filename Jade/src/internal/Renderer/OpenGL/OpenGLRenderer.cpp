@@ -1,5 +1,4 @@
 #include "OpenGLRenderer.hpp"
-#include "OpenGLPrimitiveRenderer.hpp"
 #include "OpenGLMeshRenderer.hpp"
 
 #include <glad/gl.h>
@@ -9,11 +8,8 @@
 
 namespace Jade::Detail {
 
-OpenGLRenderer::OpenGLRenderer(GLFWwindow* window, bool vsync, float viewHeight)
-  : m_Context(window, vsync),
-    m_Primitives(std::make_unique<OpenGLPrimitiveRenderer>()),
-    m_Meshes(std::make_unique<OpenGLMeshRenderer>()),
-    m_ViewHeight(viewHeight)
+OpenGLRenderer::OpenGLRenderer(GLFWwindow* window, bool vsync)
+  : m_Context(window, vsync), m_Meshes(std::make_unique<OpenGLMeshRenderer>())
 {
 }
 
@@ -21,7 +17,6 @@ OpenGLRenderer::~OpenGLRenderer()
 {
   m_Context.MakeCurrent();
   m_Meshes.reset();
-  m_Primitives.reset();
 }
 
 bool OpenGLRenderer::BeginFrame(FramebufferSize size, const Color& clearColor)
@@ -35,34 +30,19 @@ bool OpenGLRenderer::BeginFrame(FramebufferSize size, const Color& clearColor)
   glViewport(0, 0, size.width, size.height);
   glPolygonMode(GL_FRONT_AND_BACK, m_Wireframe ? GL_LINE : GL_FILL);
   glClearColor(clearColor.red, clearColor.green, clearColor.blue, clearColor.alpha);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
   glDepthMask(GL_TRUE);
   glClearDepth(1.0);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   return true;
 }
 
-void OpenGLRenderer::DrawLine(const Line& line)
+void OpenGLRenderer::DrawMesh(const Mesh& mesh, const DrawParameters& parameters)
 {
+  if (m_Size.width <= 0 || m_Size.height <= 0) return;
   m_Context.MakeCurrent();
-  m_Primitives->DrawLine(line, m_Size, m_ViewHeight);
-}
-
-void OpenGLRenderer::DrawTriangle(const Triangle& triangle)
-{
-  m_Context.MakeCurrent();
-  m_Primitives->DrawTriangle(triangle, m_Size, m_ViewHeight);
-}
-
-void OpenGLRenderer::DrawObject(const Object& object, const Camera& camera)
-{
-  m_Context.MakeCurrent();
-  m_Meshes->DrawObject(object, camera, m_Size);
-}
-
-void OpenGLRenderer::DrawAxisGizmo(const Camera& camera)
-{
-  m_Context.MakeCurrent();
-  m_Primitives->DrawAxisGizmo(camera, m_Size);
+  m_Meshes->DrawMesh(mesh, parameters);
 }
 
 void OpenGLRenderer::Present()

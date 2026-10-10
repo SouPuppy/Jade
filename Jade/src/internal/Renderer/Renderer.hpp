@@ -4,20 +4,16 @@
 
 #include "../Platform/Window.hpp"
 #include "OpenGL/OpenGLRenderer.hpp"
+#include "DrawParameters.hpp"
 
 #include <memory>
 
 namespace Jade {
 
-class Line;
-class Triangle;
-class Object;
-class Camera;
-
 // Internal facade; the window must outlive its renderer.
 class Renderer final {
 public:
-  Renderer(Window& window, bool vsync, float viewHeight = 10.0f);
+  Renderer(Window& window, bool vsync);
   ~Renderer();
 
   Renderer(const Renderer&) = delete;
@@ -25,10 +21,7 @@ public:
 
   void setWireframe(bool enabled) noexcept;
   bool BeginFrame(FramebufferSize size, const Color& clearColor);
-  void DrawLine(const Line& line);
-  void DrawTriangle(const Triangle& triangle);
-  void DrawObject(const Object& object, const Camera& camera);
-  void DrawAxisGizmo(const Camera& camera);
+  void DrawMesh(const Mesh& mesh, const Detail::DrawParameters& parameters);
   void Present();
   bool ValidateClear(const Color& expectedColor) const;
 
@@ -40,8 +33,8 @@ private:
 struct Renderer::Impl {
   Detail::OpenGLRenderer backend;
 
-  Impl(void* nativeWindow, bool vsync, float viewHeight)
-    : backend(static_cast<GLFWwindow*>(nativeWindow), vsync, viewHeight)
+  Impl(void* nativeWindow, bool vsync)
+    : backend(static_cast<GLFWwindow*>(nativeWindow), vsync)
   {
   }
 };

@@ -6,7 +6,9 @@
 #include "../internal/Events/EventDispatcher.hpp"
 #include "../internal/Renderer/Renderer.hpp"
 
-#include <vector>
+#include <Jade/Core/Transform.hpp>
+#include <Jade/Graphics/Camera.hpp>
+#include <Jade/Graphics/Motion.hpp>
 
 namespace Jade {
 
@@ -18,14 +20,11 @@ struct Application::Impl {
   bool running = false;
   bool stopRequested = false;
   Detail::EventDispatcher events;
+  Assets assets;
+  World world;
   Window window;
   Renderer renderer;
-  std::vector<std::unique_ptr<Line>> lines;
-  std::vector<std::unique_ptr<Triangle>> triangles;
-  std::vector<std::unique_ptr<Object>> objects;
-  std::vector<std::unique_ptr<Camera>> cameras;
-  Camera defaultCamera;
-  Camera* activeCamera = &defaultCamera;
+  Entity activeCamera;
 
   explicit Impl(const ApplicationConfig& config)
     : clearColor(config.clearColor),
@@ -33,8 +32,13 @@ struct Application::Impl {
       logFrames(config.logFrames),
       axisGizmo(config.axisGizmo),
       window(config.window),
-      renderer(window, config.vsync, config.viewHeight)
+      renderer(window, config.vsync)
   {
+    activeCamera = world.create();
+    auto& pose = activeCamera.add<Transform>();
+    pose.position = {3, 3, 5};
+    Motion::lookAt(pose, {0, 0, 0});
+    activeCamera.add<Camera>();
   }
 };
 

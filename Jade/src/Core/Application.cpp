@@ -2,6 +2,7 @@
 
 #include "../internal/Core/FrameClock.hpp"
 #include "../internal/Math/Validation.hpp"
+#include "../internal/Renderer/RenderSystem.hpp"
 
 #include <Jade/Log.hpp>
 
@@ -20,47 +21,22 @@ Application::Application(const ApplicationConfig& config)
   if (config.frameLimits == 0) {
     throw std::invalid_argument("Frame limits must be positive.");
   }
-  if (!std::isfinite(config.viewHeight) || config.viewHeight <= 0.0f) {
-    throw std::invalid_argument("View height must be positive and finite.");
-  }
   Detail::Validate(config.clearColor);
   m_Impl = std::make_unique<Impl>(config);
 }
 
 Application::~Application() = default;
 
-Line& Application::Register(std::unique_ptr<Line> line)
-{
-  auto& result = *line;
-  m_Impl->lines.push_back(std::move(line));
-  return result;
-}
+World& Application::world() noexcept { return m_Impl->world; }
+Assets& Application::assets() noexcept { return m_Impl->assets; }
+Entity Application::camera() const noexcept { return m_Impl->activeCamera; }
 
-Triangle& Application::Register(std::unique_ptr<Triangle> triangle)
+void Application::setCamera(Entity camera)
 {
-  auto& result = *triangle;
-  m_Impl->triangles.push_back(std::move(triangle));
-  return result;
-}
-
-Object& Application::Register(std::unique_ptr<Object> object)
-{
-  auto& result = *object;
-  m_Impl->objects.push_back(std::move(object));
-  return result;
-}
-
-Camera& Application::Register(std::unique_ptr<Camera> camera)
-{
-  auto& result = *camera;
-  m_Impl->cameras.push_back(std::move(camera));
-  m_Impl->activeCamera = &result;
-  return result;
-}
-
-Camera& Application::camera() noexcept
-{
-  return *m_Impl->activeCamera;
+  if (!m_Impl->world.owns(camera) || !camera.has<Transform>() || !camera.has<Camera>()) {
+    throw std::invalid_argument("Active camera requires Transform and Camera in this World.");
+  }
+  m_Impl->activeCamera = camera;
 }
 
 void Application::setWireframe(bool enabled) noexcept
@@ -214,18 +190,8 @@ void Application::Run(const RunOptions& options)
       throw std::runtime_error("Framebuffer clear validation failed.");
     }
 
-    for (const auto& object : m_Impl->objects) {
-      m_Impl->renderer.DrawObject(*object, *m_Impl->activeCamera);
-    }
-    if (m_Impl->axisGizmo) {
-      m_Impl->renderer.DrawAxisGizmo(*m_Impl->activeCamera);
-    }
-    for (const auto& triangle : m_Impl->triangles) {
-      m_Impl->renderer.DrawTriangle(*triangle);
-    }
-    for (const auto& line : m_Impl->lines) {
-      m_Impl->renderer.DrawLine(*line);
-    }
+    Detail::RenderSystem::Render(m_Impl->world, m_Impl->assets, m_Impl->activeCamera,
+      m_Impl->renderer, size, m_Impl->axisGizmo);
     m_Impl->renderer.Present();
     const auto stats = frameClock.FinishFrame(Clock::now());
     frames = stats.frame;

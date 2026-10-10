@@ -23,13 +23,14 @@ void main()
 constexpr const char* fragmentSource = R"(#version 330 core
 in vec3 worldNormal;
 uniform vec4 u_Color;
+uniform bool u_Lit;
 out vec4 fragmentColor;
 void main()
 {
   vec3 lightDirection = normalize(vec3(0.3, 0.7, 1.0));
   float diffuse = dot(worldNormal, worldNormal) > 0.0
     ? max(dot(normalize(worldNormal), lightDirection), 0.0) : 0.0;
-  fragmentColor = vec4(u_Color.rgb * (0.25 + 0.75 * diffuse), u_Color.a);
+  fragmentColor = vec4(u_Color.rgb * (u_Lit ? (0.25 + 0.75 * diffuse) : 1.0), u_Color.a);
 }
 )";
 
@@ -40,6 +41,7 @@ OpenGLMeshRenderer::OpenGLMeshRenderer() : m_Program(vertexSource, fragmentSourc
   m_TransformLocation = m_Program.Uniform("u_Transform");
   m_NormalLocation = m_Program.Uniform("u_NormalTransform");
   m_ColorLocation = m_Program.Uniform("u_Color");
+  m_LitLocation = m_Program.Uniform("u_Lit");
   try {
     glGenVertexArrays(1, &m_VertexArray);
     glGenBuffers(1, &m_VertexBuffer);
@@ -81,29 +83,32 @@ void OpenGLMeshRenderer::Release() noexcept
   }
 }
 
-void OpenGLMeshRenderer::DrawObject(const Object& object, const Camera& camera, FramebufferSize size)
+void OpenGLMeshRenderer::DrawMesh(const Mesh& mesh, const DrawParameters& parameters)
 {
-  const auto& mesh = object.GetMesh();
-  if (size.width <= 0 || size.height <= 0 || mesh.indices.empty()) {
+  if (mesh.indices.empty()) {
     return;
   }
-  const auto transform = ProjectionMatrix(camera, static_cast<double>(size.width) / size.height)
-    * ViewMatrix(camera) * ModelMatrix(object);
-  const auto normalTransform = NormalMatrix(object);
   m_VertexData.clear();
   m_VertexData.reserve(mesh.vertices.size() * 6);
   for (const auto& vertex : mesh.vertices) {
     m_VertexData.insert(m_VertexData.end(), {vertex.position.x, vertex.position.y, vertex.position.z,
       vertex.normal.x, vertex.normal.y, vertex.normal.z});
   }
-  const auto color = object.GetColor();
-  glEnable(GL_DEPTH_TEST);
+  const auto color = parameters.color;
+  const auto depthTest = glIsEnabled(GL_DEPTH_TEST);
+  GLboolean depthWrite = GL_TRUE;
+  GLint depthFunction = GL_LESS;
+  glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWrite);
+  glGetIntegerv(GL_DEPTH_FUNC, &depthFunction);
+  if (parameters.depthTest) glEnable(GL_DEPTH_TEST);
+  else glDisable(GL_DEPTH_TEST);
   glDepthFunc(GL_LESS);
-  glDepthMask(GL_TRUE);
+  glDepthMask(parameters.depthWrite ? GL_TRUE : GL_FALSE);
   glUseProgram(m_Program.Handle());
-  glUniformMatrix4fv(m_TransformLocation, 1, GL_FALSE, transform.data());
-  glUniformMatrix4fv(m_NormalLocation, 1, GL_FALSE, normalTransform.data());
+  glUniformMatrix4fv(m_TransformLocation, 1, GL_FALSE, parameters.transform.data());
+  glUniformMatrix4fv(m_NormalLocation, 1, GL_FALSE, parameters.normalTransform.data());
   glUniform4f(m_ColorLocation, color.red, color.green, color.blue, color.alpha);
+  glUniform1i(m_LitLocation, mesh.topology == MeshTopology::Triangles);
   glBindVertexArray(m_VertexArray);
   glBindBuffer(GL_ARRAY_BUFFER, m_VertexBuffer);
   glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_VertexData.size() * sizeof(float)),
@@ -111,10 +116,15 @@ void OpenGLMeshRenderer::DrawObject(const Object& object, const Camera& camera, 
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_IndexBuffer);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(std::uint32_t)),
     mesh.indices.data(), GL_STREAM_DRAW);
-  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_INT, nullptr);
+  glDrawElements(mesh.topology == MeshTopology::Lines ? GL_LINES : GL_TRIANGLES,
+    static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_INT, nullptr);
   glBindVertexArray(0);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glUseProgram(0);
+  if (depthTest) glEnable(GL_DEPTH_TEST);
+  else glDisable(GL_DEPTH_TEST);
+  glDepthMask(depthWrite);
+  glDepthFunc(static_cast<GLenum>(depthFunction));
 }
 
 } // namespace Jade::Detail

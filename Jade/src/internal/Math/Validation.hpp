@@ -1,7 +1,8 @@
 #pragma once
 
 #include <Jade/Color.hpp>
-#include <Jade/Vector.hpp>
+#include <Jade/Graphics/Camera.hpp>
+#include <Jade/Math/Vector.hpp>
 
 #include <cmath>
 #include <initializer_list>
@@ -63,6 +64,18 @@ inline void ValidateCameraFrame(Vec3 position, Vec3 target, Vec3 up)
       || (cx == 0.0 && cy == 0.0 && cz == 0.0)) {
     throw std::invalid_argument("Camera target must differ from position; up must not be parallel to its direction.");
   }
+}
+
+inline void ValidateCamera(const Camera& camera)
+{
+  if (camera.projection != Projection::Perspective && camera.projection != Projection::Orthographic) {
+    throw std::invalid_argument("Unknown camera projection mode.");
+  }
+  if (!std::isfinite(camera.fovDegrees) || camera.fovDegrees <= 0 || camera.fovDegrees >= 180) {
+    throw std::invalid_argument("Perspective FOV must be between zero and 180 degrees.");
+  }
+  ValidatePositive(camera.viewHeight);
+  ValidateClipPlanes(camera.nearPlane, camera.farPlane);
 }
 
 } // namespace Jade::Detail

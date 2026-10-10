@@ -1,16 +1,11 @@
 #include "Renderer.hpp"
 
-#include <cmath>
-#include <stdexcept>
 
 namespace Jade {
 
-Renderer::Renderer(Window& window, bool vsync, float viewHeight)
+Renderer::Renderer(Window& window, bool vsync)
+  : m_Impl(std::make_unique<Impl>(window.NativeHandle(), vsync))
 {
-  if (!std::isfinite(viewHeight) || viewHeight <= 0.0f) {
-    throw std::invalid_argument("View height must be positive and finite.");
-  }
-  m_Impl = std::make_unique<Impl>(window.NativeHandle(), vsync, viewHeight);
 }
 
 Renderer::~Renderer() = default;
@@ -25,24 +20,9 @@ bool Renderer::BeginFrame(FramebufferSize size, const Color& clearColor)
   return m_Impl->backend.BeginFrame(size, clearColor);
 }
 
-void Renderer::DrawLine(const Line& line)
+void Renderer::DrawMesh(const Mesh& mesh, const Detail::DrawParameters& parameters)
 {
-  m_Impl->backend.DrawLine(line);
-}
-
-void Renderer::DrawTriangle(const Triangle& triangle)
-{
-  m_Impl->backend.DrawTriangle(triangle);
-}
-
-void Renderer::DrawObject(const Object& object, const Camera& camera)
-{
-  m_Impl->backend.DrawObject(object, camera);
-}
-
-void Renderer::DrawAxisGizmo(const Camera& camera)
-{
-  m_Impl->backend.DrawAxisGizmo(camera);
+  m_Impl->backend.DrawMesh(mesh, parameters);
 }
 
 void Renderer::Present()

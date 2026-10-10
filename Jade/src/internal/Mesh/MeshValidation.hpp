@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Mesh/Mesh.hpp>
+#include <Jade/Graphics/Mesh.hpp>
 
 namespace Jade::Detail {
 

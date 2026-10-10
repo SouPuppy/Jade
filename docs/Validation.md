@@ -1,12 +1,31 @@
 # Windows x64 Validation
 
-## Current test entry point
+## Current Entity/Assets implementation
 
-Sixty-three GoogleTests live under root-level `tests/` and run directly through `JadeSmokeTests.exe`, without CTest. SmokeTests.cpp covers geometry/timing/application checks; MathTests.cpp checks vectors, matrices and inverse-transpose normals; GeometryTests.cpp covers Camera, Triangle, Object and ownership. MeshTests.cpp checks cube topology, mesh snapshots, OBJ loading/errors and the bundled bunny. RendererTests.cpp checks indexed meshes, lighting, pixels, axes, depth and wireframe. InputTests.cpp covers keyboard/mouse adapters, F3 toggling, subscription dispatch, loop stopping/recovery and Motion controls.
+Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja, C++20 and Mesa 26.2.4 llvmpipe:
 
-Demo creates Camera and generic Objects, assigns Mesh::cube(2) and Mesh::load("assets/bunny.obj"), and initially shows filled faces and unit world axes. WASD/arrows, Space/Ctrl+Space, Shift/Ctrl+W, left-button drag, wheel zoom, Q/E roll, O projection toggle and F wireframe toggle use the event API; F3 uses the default Application action. Timed events use dt. Headers remain split .hpp files, builtin cube generation lives in Mesh/builtins, and OBJ parsing, backends, input state, dispatch, matrices and clock live under src/internal/.
+| Configuration | Engine and Demo | GoogleTest | Demo launched from bin |
+| --- | --- | --- | --- |
+| windows-debug | Passed without compiler warnings | 75/75 passed | Models loaded, frame logs, close exit 0 |
+| windows-release | Passed without compiler warnings | 75/75 passed | Models loaded, frame logs, close exit 0 |
 
-## Mesh and Axis Gizmo validation
+The maintained entry point is JadeSmokeTests.exe. CoreTests checks empty identities, custom/noncopyable components, duplicate/missing operations, generation reuse, foreign/expired owners, destructor reentry, construction failures, stable component references and query mutation snapshots. Asset checks cover immutable snapshots, shared resources with independent entity pose/color, lifetime, canonical path caching, failed-load retry and unchanged successful cache entries after file edits.
+
+ComponentTests checks aggregate data, validation at use and explicit camera selection, including foreign/incomplete/dead cameras, removed components, clear-only operation and recovery. Math/Input tests cover quaternion composition/normalization/inverse, view/direction agreement, look-at cases around 180 degrees, camera scale ignored by view, full pitch flips, local yaw/pitch after roll, six-axis movement, repeated control normalization, lens zoom and O toggling without resetting settings.
+
+MeshTests retains cube topology/normals and OBJ syntax/error coverage, adds Vec3 line/triangle builders and topology validation, and loads the bundled 453-vertex/948-triangle bunny. RendererTests exercises the real World -> RenderSystem -> OpenGL path: shared meshes with independent colors/transforms, index replacement by asset handle, normal lighting, bunny/cube projections and wireframe, landscape/portrait resize, draw-order depth, clipping, lines in front/behind triangles, unit axes and depth/polygon restoration. Invalid or missing active cameras skip world/gizmo drawing and valid replacement resumes it. Resize checks present between simulated frames, matching the application loop.
+
+Scheduling and event assertions remain: absolute deadlines, frame logs/counters, paced repeated Runs, ordered key/button/cursor/scroll queues, quick taps, repeat suppression, focus release, exact modifiers, Held/FrameUpdate dt, propagation, cancellation, stop/resume and exception recovery. Input integration invokes installed GLFW adapters on hidden windows; real mouse/keyboard messages were not injected. The user-reported wheel issue remains unclassified beyond these tested scroll/lens behaviors.
+
+All 25 public headers and Demo passed independent MSVC C++20 syntax checks with /W4 /WX using only the public include directory. An independent CMake consumer linking only Jade::Jade also built and ran three clear-validated frames with custom components and shared meshes. Its compile-time check confirmed GLFW/GLAD include paths are not exported.
+
+All 23 implementation/header pairs include the corresponding header first and are explicitly listed in CMake. Invalid KeyHeld<"Spcae"> and MousePressed<"Lfet"> separately fail compilation with the intended binding diagnostics.
+
+Debug/Release Demo launch checks run from the actual bin directory, verifying copied assets, llvmpipe selection without a driver variable in the launching environment, logs at frameLimits 24 and normal window-close exit 0. The parent environment stays unchanged. The IDE debug button and manual controls were not exercised.
+
+Actual framebuffer previews ecs-perspective.png, ecs-orthographic.png and ecs-wireframe.png were exported under ignored build/validation/ and visually inspected. They show the cube and bunny through component rendering with world axes. GoogleTest XML reports are windows-debug-lines.xml and windows-release-lines.xml in the same directory. The following sections record prior APIs and historical checks, superseded by the Entity/Assets implementation.
+
+## Previous Mesh and Axis Gizmo validation
 
 Validated on 2026-10-10 with MSVC 19.51, CMake/Ninja, C++20 and Mesa llvmpipe:
 

@@ -1,73 +1,80 @@
 add_library(Jade STATIC
+  src/Assets/Assets.cpp
   src/Core/Application.cpp
+  src/Core/Entity.cpp
   src/Core/Log.cpp
-  src/Objects/Camera.cpp
-  src/Objects/Object.cpp
-  src/Mesh/Mesh.cpp
-  src/Mesh/builtins/Cube.cpp
-  src/internal/Mesh/ObjLoader.cpp
-  src/Objects/Motion.cpp
-  src/Geometry/Line.cpp
-  src/Geometry/Triangle.cpp
+  src/Core/World.cpp
+  src/Graphics/builtins/Cube.cpp
+  src/Graphics/Mesh.cpp
+  src/Graphics/Motion.cpp
+  src/internal/Core/Registry.cpp
   src/internal/Events/EventDispatcher.cpp
   src/internal/Input/InputState.cpp
+  src/internal/Mesh/ObjLoader.cpp
   src/internal/Platform/GLFW/GlfwInput.cpp
   src/internal/Platform/GLFW/GlfwRuntime.cpp
   src/internal/Platform/GLFW/GlfwWindow.cpp
   src/internal/Platform/Window.cpp
-  src/internal/Renderer/Renderer.cpp
   src/internal/Renderer/OpenGL/OpenGLContext.cpp
-  src/internal/Renderer/OpenGL/OpenGLRenderer.cpp
-  src/internal/Renderer/OpenGL/OpenGLPrimitiveRenderer.cpp
   src/internal/Renderer/OpenGL/OpenGLMeshRenderer.cpp
   src/internal/Renderer/OpenGL/OpenGLProgram.cpp
+  src/internal/Renderer/OpenGL/OpenGLRenderer.cpp
+  src/internal/Renderer/Renderer.cpp
+  src/internal/Renderer/RenderSystem.cpp
+  src/Math/Quaternion.cpp
   include/Jade/Application.hpp
+  include/Jade/Assets/AssetHandle.hpp
+  include/Jade/Assets/Assets.hpp
+  include/Jade/Color.hpp
+  include/Jade/Core/Entity.hpp
+  include/Jade/Core/Transform.hpp
+  include/Jade/Core/World.hpp
   include/Jade/Events/Event.hpp
   include/Jade/Events/FrameUpdate.hpp
   include/Jade/Events/Keyboard.hpp
   include/Jade/Events/Mouse.hpp
+  include/Jade/Events/MouseMoved.hpp
   include/Jade/Events/MouseScrolled.hpp
+  include/Jade/Graphics/Camera.hpp
+  include/Jade/Graphics/Mesh.hpp
+  include/Jade/Graphics/MeshRenderer.hpp
+  include/Jade/Graphics/Motion.hpp
+  include/Jade/Graphics/Vertex.hpp
   include/Jade/Input/Key.hpp
   include/Jade/Input/MouseButton.hpp
-  include/Jade/Objects/Camera.hpp
-  include/Jade/Objects/Motion.hpp
-  include/Jade/Events/MouseMoved.hpp
-  include/Jade/Color.hpp
-  include/Jade/Mesh/Mesh.hpp
-  include/Jade/Mesh/Vertex.hpp
   include/Jade/Jade.hpp
-  include/Jade/Geometry/Line.hpp
   include/Jade/Log.hpp
-  include/Jade/Objects/Object.hpp
-  include/Jade/Geometry/Triangle.hpp
-  include/Jade/Vector.hpp
+  include/Jade/Math/Quaternion.hpp
+  include/Jade/Math/Vector.hpp
   include/Jade/WindowConfig.hpp
+  src/Assets/Assets.hpp
   src/Core/Application.hpp
+  src/Core/Entity.hpp
   src/Core/Log.hpp
-  src/Objects/Camera.hpp
-  src/Objects/Motion.hpp
-  src/Objects/Object.hpp
-  src/Mesh/Mesh.hpp
-  src/Mesh/builtins/Cube.hpp
-  src/internal/Mesh/ObjLoader.hpp
-  src/internal/Mesh/MeshValidation.hpp
-  src/Geometry/Line.hpp
-  src/Geometry/Triangle.hpp
+  src/Core/World.hpp
+  src/Graphics/builtins/Cube.hpp
+  src/Graphics/Mesh.hpp
+  src/Graphics/Motion.hpp
   src/internal/Core/FrameClock.hpp
+  src/internal/Core/Registry.hpp
   src/internal/Events/EventDispatcher.hpp
   src/internal/Input/InputState.hpp
-  src/internal/Platform/GLFW/GlfwInput.hpp
   src/internal/Math/Matrix4.hpp
   src/internal/Math/Validation.hpp
-  src/internal/Platform/Window.hpp
+  src/internal/Mesh/MeshValidation.hpp
+  src/internal/Mesh/ObjLoader.hpp
+  src/internal/Platform/GLFW/GlfwInput.hpp
   src/internal/Platform/GLFW/GlfwRuntime.hpp
   src/internal/Platform/GLFW/GlfwWindow.hpp
-  src/internal/Renderer/Renderer.hpp
+  src/internal/Platform/Window.hpp
+  src/internal/Renderer/DrawParameters.hpp
   src/internal/Renderer/OpenGL/OpenGLContext.hpp
-  src/internal/Renderer/OpenGL/OpenGLRenderer.hpp
-  src/internal/Renderer/OpenGL/OpenGLPrimitiveRenderer.hpp
   src/internal/Renderer/OpenGL/OpenGLMeshRenderer.hpp
   src/internal/Renderer/OpenGL/OpenGLProgram.hpp
+  src/internal/Renderer/OpenGL/OpenGLRenderer.hpp
+  src/internal/Renderer/Renderer.hpp
+  src/internal/Renderer/RenderSystem.hpp
+  src/Math/Quaternion.hpp
 )
 add_library(Jade::Jade ALIAS Jade)
 target_include_directories(Jade PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

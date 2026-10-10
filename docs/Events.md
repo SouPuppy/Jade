@@ -1,17 +1,21 @@
 # Jade Events
 
-Application owns a main-thread event dispatcher. Keyboard, mouse button, cursor and scroll callbacks collect state and queued input; application callbacks run from Run(), where they can change camera/object state before rendering. This is cooperative event processing, with no user callbacks on another thread.
+Application owns a main-thread event dispatcher. Keyboard, mouse button, cursor and scroll callbacks collect state and queued input; application callbacks run from Run(), where they can change component state before rendering. This is cooperative event processing, with no user callbacks on another thread.
 
 ## Public API
 
 ```cpp
+auto camera = app.camera();
+auto& pose = camera.get<Jade::Transform>();
+auto& lens = camera.get<Jade::Camera>();
+
 app.on<Jade::KeyHeld<"w">>([&] {
-  camera.setPos(camera.getPos() + camera.getFront() * 0.1f);
+  Jade::Motion::forward(pose, 0.1f);
 });
 
 // Prefer seconds for consistent movement at different frame limits.
 app.on<Jade::KeyHeld<"S-w">>([&](const auto& event) {
-  Jade::Motion::forward(camera, 6.0f * event.dt);
+  Jade::Motion::forward(pose, 6.0f * event.dt);
 });
 
 auto connection = app.on<Jade::KeyPressed<"Space">>([] { /* once on press */ });
@@ -29,20 +33,20 @@ app.on<Jade::MouseHeld<"Right">>([](const auto& event) {
 });
 app.on<Jade::MouseMoved>([&](const auto& mouse) {
   if (dragging) {
-    Jade::Motion::yaw(camera, mouse.dx * 0.1);
-    Jade::Motion::pitch(camera, -mouse.dy * 0.1);
+    Jade::Motion::yaw(pose, mouse.dx * 0.1);
+    Jade::Motion::pitch(pose, -mouse.dy * 0.1);
   }
 });
 app.on<Jade::MouseScrolled>([&](const auto& mouse) {
-  Jade::Motion::zoom(camera, mouse.dy);
+  Jade::Motion::zoom(lens, mouse.dy);
 });
 app.on<Jade::KeyPressed<"o">>([&] {
-  camera.setProjection(camera.Mode() == Jade::Projection::Perspective
-    ? Jade::Projection::Orthographic : Jade::Projection::Perspective);
+  lens.projection = lens.projection == Jade::Projection::Perspective
+    ? Jade::Projection::Orthographic : Jade::Projection::Perspective;
 });
 ```
 
-References used by a callback must remain alive until it is disconnected or Application is destroyed. A capture such as `[&]` or `[&camera]` is required to access a local camera. Callbacks may also hold values and move-only captures. Copying internal subscription snapshots preserves the original callback's mutable state.
+References used by a callback must remain alive until it is disconnected or Application is destroyed. Capture pose/lens references only while those components exist. Alternatively capture the Entity by value, check has<T>(), and get<T>() inside the callback; handles do not extend World lifetime. Callbacks may also hold values and move-only captures. Copying internal subscription snapshots preserves the original callback's mutable state.
 
 ## Binding syntax
 
@@ -87,28 +91,28 @@ The backend installs [GLFW key, button, cursor, scroll and focus callbacks](http
 
 ## Motion
 
-Motion is independent of the event dispatcher. Each function takes an explicit Camera, so a callback can control any application-owned camera without global state:
+Motion is independent of the event dispatcher. Translation, rotation and direction functions take Transform; zoom takes Camera data. Helpers have no global state:
 
 ```cpp
-Jade::Motion::forward(camera);  // Default distance: 0.1 world units.
-Jade::Motion::backward(camera, 1.0f);
-Jade::Motion::right(camera, 1.0f);
-Jade::Motion::left(camera, 1.0f);
-Jade::Motion::up(camera, 1.0f);
-Jade::Motion::down(camera, 1.0f);
-Jade::Motion::yaw(camera, 15.0);
-Jade::Motion::pitch(camera, 10.0);
-Jade::Motion::roll(camera, 5.0);
-Jade::Motion::zoom(camera, 1.0); // One positive scroll offset: zoom in.
+Jade::Motion::forward(pose);  // Default distance: 0.1 world units.
+Jade::Motion::backward(pose, 1.0f);
+Jade::Motion::right(pose, 1.0f);
+Jade::Motion::left(pose, 1.0f);
+Jade::Motion::up(pose, 1.0f);
+Jade::Motion::down(pose, 1.0f);
+Jade::Motion::yaw(pose, 15.0);
+Jade::Motion::pitch(pose, 10.0);
+Jade::Motion::roll(pose, 5.0);
+Jade::Motion::zoom(lens, 1.0); // One positive scroll offset: zoom in.
 ```
 
-Forward/backward and right/left use the camera's current unit axes, including rotation and roll. Up/down follow world Y, even after banking. Position updates translate the eye and look-at target together, preserving orientation when passing through the old target.
+Forward/backward and right/left use Transform's current unit axes, including roll. Up/down follow world Y even after banking. Moving position retains quaternion orientation without keeping a look-at target.
 
-Angles are increments in degrees relative to the camera's look-at frame. Positive yaw turns right, positive pitch looks up and positive roll banks clockwise along the viewing direction. Yaw and roll wrap through a full turn. Pitch clamps its local X offset to [-89, 89]. Camera's local orientation is yaw(Y) * pitch(X) * roll(Z), which keeps the viewing direction unchanged when banking after yaw/pitch. Cube keeps its X-then-Y-then-Z transform order. lookAt resets all camera offsets. Mouse Y grows downward, so the example negates dy to make upward mouse movement look up. Distances and angles must be finite; failed updates preserve the previous transform.
+Angles are increments in degrees about the current local axes. Positive yaw turns right, positive pitch looks up and positive roll banks clockwise along front. Every increment composes and normalizes a quaternion; pitch can pass through the poles and complete a flip. Mouse yaw/pitch follows the banked axes after Q/E roll. Motion::lookAt(pose, target, up) replaces rotation once. Mouse Y grows downward, so the example negates dy. Distances/angles must be finite; failed helper updates preserve prior state.
 
 Zoom scales the active projection parameter by exp(-scroll * 0.1), bounding each scroll increment to [-100, 100]. Perspective FOV stays in [1, 179] degrees; orthographic visible height stays in [0.01, 10000] world units. The camera pose, projection mode and near/far planes stay intact. A zero increment leaves the camera unchanged, and nonfinite increments are rejected before mutation.
 
-Demo uses KeyPressed<"o"> to toggle the projection once per press. Camera::setProjection retains the perspective FOV and orthographic view height independently, along with pose and clip planes. It rejects unknown modes without changing the current one.
+Demo uses KeyPressed<"o"> to toggle the projection once per press. Assigning Camera::projection preserves perspective FOV and orthographic height independently, along with pose/clip planes. Invalid component data is rejected when consumed for zoom or rendering.
 
 ## Propagation and stopping
 
@@ -125,7 +129,7 @@ app.on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 
 Unconsumed bare F3 toggles the default unit Axis Gizmo once per press and logs its state. Shift/Ctrl/Alt/Super+F3 does not trigger that default. Returning EventFlow::Stop from an F3 handler or calling app.stop() prevents the toggle. Applications can also use config.axisGizmo, app.setAxisGizmo(bool) and app.axisGizmoEnabled().
 
-Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, objects and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
+Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, World, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
 ## Subscription lifetime and mutation
 
@@ -137,6 +141,6 @@ User callback exceptions propagate from Run; its running-state guard restores th
 
 ## Files and extension boundary
 
-Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Objects/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Application.hpp adapts typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Cameras and geometry depend on no input backend.
+Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Application.hpp adapts typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.
 
-The current event set is keyboard/button transitions and held events, MouseMoved, MouseScrolled and FrameUpdate. Resize and text events can be added as separate event types and backend adapters without changing geometry classes. The current on() reports unsupported event types at compile time.
+The current event set is keyboard/button transitions and held events, MouseMoved, MouseScrolled and FrameUpdate. Resize and text events can be added as separate event types and backend adapters without changing mesh/component contracts. The current on() reports unsupported event types at compile time.
