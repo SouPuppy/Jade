@@ -36,7 +36,7 @@ void ProgressiveSession::bind(Renderer::ProgressiveBackend &backend)
 void ProgressiveSession::start()
 {
   if (!m_Backend)
-    throw std::logic_error("Install a renderer with Application::use before Run.");
+    throw std::logic_error("Bind a progressive backend before starting its session.");
   stop();
   invalidate();
   const auto settings = m_Backend->samplingSettings();

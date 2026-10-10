@@ -30,8 +30,9 @@
 #include <Jade/Math/Vector.hpp>
 #include <Jade/Module/CameraControl.hpp>
 #include <Jade/WindowConfig.hpp>
-#include <Jade/Renderer/Common/Backend.hpp>
 #include <Jade/Renderer/RayTracing/BSDF.hpp>
+#include <Jade/Renderer/Common/RenderSettings.hpp>
+#include <Jade/Renderer/Common/RenderProgress.hpp>
 #include <Jade/Renderer/Common/CameraFrame.hpp>
 #include <Jade/Renderer/Common/Image.hpp>
 #include <Jade/Renderer/RayTracing/Integrator.hpp>
@@ -41,6 +42,4 @@
 #include <Jade/Renderer/RayTracing/RayScene.hpp>
 #include <Jade/Renderer/RayTracing/Sampler.hpp>
 
-#include <Jade/Renderer/Common/FrameBackend.hpp>
 #include <Jade/Renderer/Common/SceneSnapshot.hpp>
-#include <Jade/Renderer/Rasterization/Rasterization.hpp>

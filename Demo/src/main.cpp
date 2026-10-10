@@ -50,18 +50,13 @@ int main(int argc, char **argv)
     config.frameLimits = 24;
     config.debug = true;
     config.axisGizmo = false;
+    config.rayTracing.resolutionScale = 0.5f;
+    config.rayTracing.maxSamples = 0;
+    config.rayTracing.maxBounces = 12;
+    config.rayTracing.rrStartBounce = 4;
+    config.rayTracing.workerCount = 0;
+    config.rayTracing.exposureEV = 0;
     Jade::Application app(config);
-
-    app.use<Jade::Renderer::Rasterization>();
-    Jade::Renderer::RayTracingConfig rendering;
-    rendering.resolutionScale = 0.5f;
-    rendering.maxSamples = 0;
-    rendering.maxBounces = 12;
-    rendering.rrStartBounce = 4;
-    rendering.workerCount = 0;
-    rendering.exposureEV = 0;
-    app.use<Jade::Renderer::RayTracing>(rendering);
-    app.setRenderer<Jade::Renderer::Rasterization>();
 
     const auto cubeMesh = app.assets().add(Jade::MeshData::cube(2));
     const auto sphereMesh = app.assets().add(Jade::MeshData::sphere(1));
@@ -86,7 +81,8 @@ int main(int argc, char **argv)
     Instance(*showroom, sphereMesh, {2.2f, -0.9f, 0}, glass);
     Instance(*showroom, cubeMesh, {0, 4, 0}, lamp, {2, 0.05f, 1.5f});
 
-    // Scene II: the sun is geometry with emission. P freezes the animation.
+    // Scene II: the sun emits light; a fixed area emitter lights the camera-facing planets.
+    // P freezes the animation.
     auto hierarchy = CreateScene({7, 5, 11});
     auto sun = Instance(*hierarchy, sphereMesh, {}, lamp, {0.7f, 0.7f, 0.7f});
     const auto earthMaterial = Jade::Materials::Diffuse({0.1f, 0.35f, 0.8f});
@@ -95,6 +91,7 @@ int main(int argc, char **argv)
     const auto moonMaterial = Jade::Materials::Diffuse({0.6f, 0.6f, 0.6f});
     auto moon = Instance(*hierarchy, sphereMesh, {3, 0, 0}, moonMaterial, {0.35f, 0.35f, 0.35f});
     hierarchy->setParent(moon, earth);
+    Instance(*hierarchy, cubeMesh, {3, 5, 6}, Jade::Materials::Emissive({18, 18, 18}), {2, 0.05f, 1.5f});
     bool animate = true;
     hierarchy->on<Jade::FrameUpdate>([sun, earth, &animate](const auto &frame) {
       if (animate) {

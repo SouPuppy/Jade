@@ -86,7 +86,6 @@ TEST(Application, ThreeClearFrames)
   auto config = HiddenApplication();
   config.logPerformance = false;
   Jade::Application app(config);
-  app.use<Jade::Renderer::RayTracing>();
   EXPECT_NO_THROW(app.Run({3}));
   EXPECT_TRUE(capture.Records("Performance", Jade::Log::Level::Debug).empty());
   EXPECT_TRUE(capture.Records("Frame", Jade::Log::Level::Trace).empty());
@@ -159,7 +158,6 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   LogCapture capture;
   auto config = HiddenApplication();
   Jade::Application app(config);
-  app.use<Jade::Renderer::RayTracing>();
   const auto scene = MakeTestScene(app);
   auto entity = scene->create();
   auto &pose = entity.add<Jade::Transform>();
@@ -217,7 +215,6 @@ TEST(Application, PerFrameTraceRequiresExplicitVerbosity)
 {
   LogCapture capture(Jade::Log::Level::Trace);
   Jade::Application app(HiddenApplication());
-  app.use<Jade::Renderer::RayTracing>();
   app.Run({3});
   const auto records = capture.Records("Frame", Jade::Log::Level::Trace);
   ASSERT_EQ(records.size(), 3u);
@@ -232,7 +229,6 @@ TEST(Application, RecordsFailureAndCanRunAgainAfterACallbackException)
 {
   LogCapture capture;
   Jade::Application app(HiddenApplication());
-  app.use<Jade::Renderer::RayTracing>();
   bool fail = true;
   app.on<Jade::FrameUpdate>([&fail] {
     if (fail)
@@ -253,7 +249,6 @@ TEST(Application, PreservesExplicitLogThresholdAndRecordsRequestedStop)
 {
   LogCapture capture(Jade::Log::Level::Info);
   Jade::Application app(HiddenApplication());
-  app.use<Jade::Renderer::RayTracing>();
   EXPECT_FALSE(Jade::Log::Enabled(Jade::Log::Level::Debug));
   app.on<Jade::FrameUpdate>([&app] { app.stop(); });
   EXPECT_NO_THROW(app.Run({3}));

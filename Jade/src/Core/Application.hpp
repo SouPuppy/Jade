@@ -28,7 +28,8 @@ struct Application::Impl {
 
   explicit Impl(const ApplicationConfig &config)
       : frameLimits(config.frameLimits), logPerformance(config.logPerformance), debug(config.debug),
-        axisGizmo(config.axisGizmo), window(config.window), rendering(window, config.vsync, config.window.title)
+        axisGizmo(config.axisGizmo), window(config.window),
+        rendering(window, config.vsync, config.window.title, config.rayTracing)
   {
   }
 };

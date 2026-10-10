@@ -201,7 +201,6 @@ TEST(Events, RegistrationCancellationAndExceptionsAreSafeDuringDispatch)
 TEST(Application, KeyboardAdapterDispatchesChordsAndFrameBasedMovement)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   auto &camera = app.scene()->camera().get<Jade::Transform>();
@@ -250,7 +249,6 @@ TEST(Application, KeyboardAdapterDispatchesChordsAndFrameBasedMovement)
 TEST(Application, QuickTapsAndConsumedEscapeDispatchBeforeDrawing)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   std::vector<int> order;
@@ -274,7 +272,6 @@ TEST(Application, QuickTapsAndConsumedEscapeDispatchBeforeDrawing)
 TEST(Application, FocusLossStopsHeldCallbacksAndReleasesOnce)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   int held = 0, released = 0;
@@ -302,7 +299,6 @@ TEST(Application, StopAndDisconnectionPermitLaterRunsAndHandlesExpire)
   Jade::EventConnection expired;
   {
     Jade::Application app(HiddenInputApplication());
-    app.use<Jade::Renderer::RayTracing>();
     MakeTestScene(app);
     KeyboardAdapter input;
     int frames = 0;
@@ -325,7 +321,6 @@ TEST(Application, StopAndDisconnectionPermitLaterRunsAndHandlesExpire)
 TEST(Application, CallbackExceptionsAndNestedRunsLeaveTheLoopRecoverable)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   bool fail = true;
   const auto throwing = app.scene()->on<Jade::FrameUpdate>([&] {
@@ -396,7 +391,6 @@ TEST(InputState, MouseDeltasKeepInputOrderAndResetAfterFocusLoss)
 TEST(Application, MouseAdapterDispatchesInOrderAndMotionTurnsTheCamera)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   auto &camera = app.scene()->camera().get<Jade::Transform>();
@@ -587,7 +581,6 @@ TEST(InputState, MouseButtonsAndFractionalScrollShareTheOrderedQueue)
 TEST(Application, LeftDragAndScrollKeepArrivalOrderEvenForATapBetweenFrames)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   auto &lens = app.scene()->camera().get<Jade::Camera>();
@@ -650,7 +643,6 @@ TEST(Application, LeftDragAndScrollKeepArrivalOrderEvenForATapBetweenFrames)
 TEST(Application, MouseHeldSharesFrameDtAndStopsAfterRelease)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   std::vector<float> mouseDt;
@@ -688,7 +680,6 @@ TEST(Application, MouseHeldSharesFrameDtAndStopsAfterRelease)
 TEST(Application, FocusLossReleasesButtonsAndEndsDragBeforeLaterMotion)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   bool dragging = false;
@@ -789,7 +780,6 @@ TEST(Motion, ZoomStaysValidAtExtremesAndRejectsNonfiniteOffsets)
 TEST(Application, OPressSwitchesProjectionOnceAndScrollUsesTheActiveMode)
 {
   Jade::Application app(HiddenInputApplication());
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   KeyboardAdapter input;
   auto &lens = app.scene()->camera().get<Jade::Camera>();
@@ -847,7 +837,6 @@ TEST(Application, AxisGizmoDefaultsOnAndF3TogglesOncePerUnconsumedPress)
     config.debug = true;
     config.axisGizmo = enabled;
     Jade::Application app(config);
-    app.use<Jade::Renderer::RayTracing>();
     MakeTestScene(app);
     KeyboardAdapter input;
     EXPECT_EQ(app.axisGizmoEnabled(), enabled);

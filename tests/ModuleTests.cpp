@@ -125,7 +125,6 @@ TEST(SceneModules, InstallsOncePerSceneAndKeepsSubscriptionsAcrossActivation)
 {
   CounterModule::installs = CounterModule::updates = 0;
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
   a->use<CounterModule>();
   a->use<CounterModule>();
@@ -147,7 +146,6 @@ TEST(SceneModules, FailureCancelsNestedInstallationsAndPreservesExistingSubscrib
   CounterModule::installs = CounterModule::updates = 0;
   OuterModule::fail = true;
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto scene = std::make_shared<Jade::Scene>();
   int existingUpdates = 0;
   const auto existing = scene->on<Jade::FrameUpdate>([&] { ++existingUpdates; });
@@ -176,7 +174,6 @@ TEST(SceneModules, FailureRetainsPreviouslyInstalledDependency)
 {
   CounterModule::installs = CounterModule::updates = 0;
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto scene = std::make_shared<Jade::Scene>();
   scene->use<CounterModule>();
   const auto original = CounterModule::connection;
@@ -208,7 +205,6 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
   EXPECT_FALSE(Jade::ApplicationConfig{}.debug);
   for (const bool debug : {false, true}) {
     Jade::Application app(Hidden(debug));
-    app.use<Jade::Renderer::RayTracing>();
     const auto scene = SelectScene(app);
     auto &lens = scene->camera().get<Jade::Camera>();
     lens.fovDegrees = 47;
@@ -243,7 +239,6 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
 TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
 {
   Jade::Application app(Hidden(true));
-  app.use<Jade::Renderer::RayTracing>();
   const auto scene = SelectScene(app);
   Input input;
   for (const int modifier : {GLFW_MOD_SHIFT, GLFW_MOD_CONTROL, GLFW_MOD_ALT, GLFW_MOD_SUPER}) {
@@ -273,7 +268,6 @@ TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
 TEST(ApplicationDebug, CallbacksRunBeforeDefaultsAndStopCanPreventThem)
 {
   Jade::Application app(Hidden(true));
-  app.use<Jade::Renderer::RayTracing>();
   const auto scene = SelectScene(app);
   std::vector<int> order;
   app.on<Jade::KeyPressed<"f">>([&] {
@@ -298,7 +292,6 @@ TEST(ApplicationDebug, CallbacksRunBeforeDefaultsAndStopCanPreventThem)
 TEST(ApplicationDebug, ProjectionUsesRetainedSceneDuringDeferredSwitch)
 {
   Jade::Application app(Hidden(true));
-  app.use<Jade::Renderer::RayTracing>();
   auto a = SelectScene(app), b = std::make_shared<Jade::Scene>();
   b->setCamera(AddCamera(*b));
   app.on<Jade::KeyPressed<"2">>([&] { app.setScene(b); });
@@ -317,7 +310,6 @@ TEST(ApplicationDebug, ProjectionUsesRetainedSceneDuringDeferredSwitch)
 TEST(ApplicationDebug, MissingCameraAndComponentsAreIgnored)
 {
   Jade::Application app(Hidden(true));
-  app.use<Jade::Renderer::RayTracing>();
   Input input;
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
@@ -343,7 +335,6 @@ TEST(ApplicationDebug, MissingCameraAndComponentsAreIgnored)
 TEST(CameraControl, MovementUsesDtAndExactBindingsWithoutDuplicateInstallation)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   const auto scene = SelectScene(app);
   scene->use<Jade::Module::CameraControl>();
   scene->use<Jade::Module::CameraControl>();
@@ -383,7 +374,6 @@ TEST(CameraControl, MovementUsesDtAndExactBindingsWithoutDuplicateInstallation)
 TEST(CameraControl, FollowsSelectedCameraForMovementRollAndZoom)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   const auto scene = SelectScene(app);
   scene->use<Jade::Module::CameraControl>();
   const auto first = scene->camera(), second = AddCamera(*scene);
@@ -424,7 +414,6 @@ TEST(CameraControl, FollowsSelectedCameraForMovementRollAndZoom)
 TEST(CameraControl, DragUsesPixelDeltasAndResetsOnReleaseFocusAndCameraChange)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   const auto scene = SelectScene(app);
   scene->use<Jade::Module::CameraControl>();
   const auto first = scene->camera(), second = AddCamera(*scene);
@@ -464,7 +453,6 @@ TEST(CameraControl, DragUsesPixelDeltasAndResetsOnReleaseFocusAndCameraChange)
 TEST(CameraControl, SceneReactivationResetsDragAndDoesNotRetainOwner)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = SelectScene(app), b = std::make_shared<Jade::Scene>();
   b->setCamera(AddCamera(*b));
   a->use<Jade::Module::CameraControl>();
@@ -492,7 +480,6 @@ TEST(CameraControl, SceneReactivationResetsDragAndDoesNotRetainOwner)
 TEST(CameraControl, InstallationNeedsNoCameraAndMissingComponentsAreSafe)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto scene = std::make_shared<Jade::Scene>();
   scene->use<Jade::Module::CameraControl>();
   app.setScene(scene);
@@ -521,7 +508,6 @@ TEST(CameraControl, InstallationNeedsNoCameraAndMissingComponentsAreSafe)
 TEST(CameraControl, ScrollOutAndBackPastZoomLimitsRestoresProjectionAndPose)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto scene = std::make_shared<Jade::Scene>();
   const auto camera = AddCamera(*scene);
   scene->setCamera(camera);

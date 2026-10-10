@@ -14,6 +14,8 @@ scene->use<Jade::Module::CameraControl>();
 
 Include Jade/Module/CameraControl.hpp or Jade/Jade.hpp. CameraControl installs WASD/arrows, Shift/Ctrl+W, Space/Ctrl+Space, Q/E, left-button drag and wheel zoom. It resolves the selected camera for each event, uses dt for held motion, and resets dragging on camera changes and scene activation/deactivation. Missing components are skipped. Repeated use of the same module type on a Scene is a no-op; subscriptions remain across reactivation and expire with the Scene. See [module contracts and fixed control defaults](../README.md#scene-modules-and-controls).
 
+Unmodified KeyPressed I switches between RayTracing and Wireframe, including when debug is disabled. Repeats, modified keys and consumed events do not toggle it. F retains the same toggle when debug is enabled.
+
 The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing CameraControl. CameraControl can also be used with debug disabled.
 
 ## Public API

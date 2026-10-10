@@ -8,18 +8,14 @@ Entity identifies an existence in Scene. Components describe its state, systems 
 flowchart LR
   Scene --> Snapshot[Common SceneSnapshot]
   Assets --> Snapshot
-  Snapshot --> Emitters[Shared emitter distribution]
+  Snapshot --> Emitters[Emissive triangle distribution]
   Snapshot --> Compiler[RaySceneCompiler: SAH TLAS]
   Assets --> BLAS[Immutable Mesh SAH BLAS]
   Compiler --> Ray[ProgressiveBackend / RayTracing]
   BLAS --> Ray
   Emitters --> Ray
   Ray --> Film[Linear HDR Film]
-  Snapshot --> Raster[FrameBackend / Rasterization]
-  Emitters --> Raster
-  Raster --> GPU[Area shadows / SSR / probes / glass]
-  Film --> Display[Shared exposure / Reinhard / sRGB]
-  GPU --> Display
+  Film --> Display[Exposure / Reinhard / sRGB image]
   Snapshot --> Debug[Unlit wireframe / axes]
   Debug --> Window
   Display --> Window
@@ -38,10 +34,10 @@ flowchart LR
 | Renderer/RayTracing/Ray.hpp, Renderer/RayTracing/RayScene.hpp | Ray queries, surface hits, immutable scene compilation |
 | Renderer/RayTracing/BSDF.hpp, Renderer/RayTracing/Sampler.hpp, Renderer/RayTracing/Integrator.hpp | Scattering, reproducible samples and light transport |
 | Renderer/Common/Image.hpp, Renderer/Common/CameraFrame.hpp | Linear HDR film, sRGB output and camera ray generation |
-| Renderer/Common/Backend.hpp, Renderer/RayTracing/RayTracing.hpp | Backend interface and multithreaded CPU path tracer |
-| Renderer/Common/FrameBackend.hpp, Renderer/Rasterization/Rasterization.hpp | Frame target and OpenGL raster preview |
+| Renderer/Common/RenderSettings.hpp, Renderer/Common/RenderProgress.hpp | Sampling resolution/exposure and physical sample progress |
+| Renderer/RayTracing/RayTracing.hpp | Multithreaded CPU path tracer |
 | Renderer/RayTracing/ProgressiveBackend.hpp | Headless complete-sample contract |
-| Application.hpp | Window loop, active Scene, events, backend registry and selection |
+| Application.hpp | Window loop, active Scene, events and RayTracing/Wireframe toggle |
 | Module/CameraControl.hpp, Input/, Events/ | Scene-local controls and typed events |
 | Jade.hpp | Optional includes-only entry point |
 
@@ -155,11 +151,11 @@ MeshData owns editable vertices (position/normal) and uint32 triangle indices. M
 
 Scene::setCamera requires a live own-Scene identity with Transform and Camera. Creating Camera components never selects them implicitly. A removed/destroyed active camera causes clear/present only, retaining input and callbacks. Selecting a valid camera resumes geometry and axes.
 
-Application owns an ordered registry keyed by concrete backend type. use<T> inserts or replaces that type outside Run, preserving order and other registrations; the first registration is active. setRenderer<T> selects a registered type, activeRenderer returns its const committed backend, and cycleRenderer follows registration order. During Run, requests are deferred to the next processing boundary, last request wins. Unmodified I cycles independently of ApplicationConfig.debug and respects event consumption. Selection logs and the window title identify the committed mode.
+Application owns one RayTracing instance configured by ApplicationConfig::rayTracing. rayTracing() exposes it for Integrator configuration outside Run. Unmodified I toggles the retained wireframe state independently of ApplicationConfig.debug and respects event consumption, modifiers and repeats. The window title identifies RayTracing or Wireframe.
 
-Backend contains shared settings, execution identity, naming and algorithm locks. ProgressiveBackend receives immutable RayScene plus RenderRequest and commits exactly one Film sample, or cancels without commitment. FrameBackend receives shared SceneSnapshot plus FrameRequest and an opaque FrameTarget; it runs on the context-owning thread. Clear/upload accept linear HDR, with uploads in top-left order. All registered backends are sealed during Run, including inactive backends. There are no old interface aliases.
+ProgressiveBackend defines sampling settings, naming and algorithm locks. It receives immutable RayScene plus RenderRequest and commits exactly one Film sample, or cancels without commitment. RayTracing is the application implementation; custom Integrators change transport behavior without changing the application modes. The application seals its RayTracing algorithms throughout Run, including wireframe frames.
 
-Private RenderHost owns registry, selection, display/diagnostics and an OpenGL device/target. Each progressive registration has a retained ProgressiveSession/compiler; switching stops and joins it before committing selection, rejects stale images and restarts fresh accumulation when returning. Algorithm objects, worker pools, BLAS/TLAS and GPU caches survive selection. Wireframe suspends both contracts; I under wireframe changes only the selected backend. Run guards stop work and release algorithm locks after exceptions.
+Private RenderHost owns one RayTracing, one ProgressiveSession/compiler, presentation and diagnostics. Wireframe stops and joins the session and invalidates published images. Returning to RayTracing starts a fresh Film; starting Run in wireframe never starts a sampling coordinator. Algorithm objects, worker pools and mesh acceleration survive mode changes. Run guards stop work and release algorithm locks after exceptions.
 
 The main thread alone accesses Scene, Entity and Assets and performs OpenGL calls. SceneSnapshot::capture copies resolved transforms, materials and camera pose while retaining immutable meshes. A coordinator compiles snapshots and drives the backend; a persistent worker pool processes 16x16 pixel tiles. Worker sampling depends on seed, pixel, sample and dimension, so thread scheduling does not change results. Integrators used by multiple workers must support concurrent const Li calls.
 
@@ -171,27 +167,21 @@ Film accumulates linear HDR radiance as a running mean. A complete sample round 
 
 Ordinary camera, material or transform changes coalesce pending snapshots: the current sample finishes, then the newest snapshot starts with a fresh Film. The previous completed image stays visible during that transition. Scene changes, resize, missing camera, minimization and wireframe toggles cancel work and invalidate the publication epoch. Completed work from an invalidated epoch cannot publish. Shutdown requests cancellation and joins the coordinator and workers before releasing resources. Worker failures propagate from Run, including finite Runs, and the guard permits recovery after correcting the cause.
 
-F switches to independent unlit triangle-edge drawing and suspends the selected backend. It never invokes the integrator. F again starts a fresh physical accumulation. DebugDraw streams transformed GL_LINES; depth tests compare edges and no physical shading runs. F3 draws positive unit XYZ axes in red/green/blue as a debug overlay. Display begins each frame in GL_FILL and does not use polygon mode as its wireframe implementation.
+I switches between RayTracing and independent unlit triangle-edge drawing; debug F provides the same toggle. It never invokes the integrator. Returning to RayTracing starts a fresh physical accumulation. DebugDraw streams transformed GL_LINES; depth tests compare edges and no physical shading runs. F3 draws positive unit XYZ axes in red/green/blue as a debug overlay. Display begins each frame in GL_FILL and does not use polygon mode as its wireframe implementation.
 
-Coordinates are right-handed with Y up. A quaternion maps local +X right, +Y up and -Z forward into parent coordinates. Local models are T*R*S and world models multiply the full ancestry. Camera position inherits the full parent matrix while orientation composes ancestor quaternions without scale. CameraFrame generates perspective or orthographic rays and supplies matching view/projection matrices for rasterization and diagnostics.
+Coordinates are right-handed with Y up. A quaternion maps local +X right, +Y up and -Z forward into parent coordinates. Local models are T*R*S and world models multiply the full ancestry. Camera position inherits the full parent matrix while orientation composes ancestor quaternions without scale. CameraFrame generates perspective or orthographic rays and supplies matching view/projection matrices for wireframe and diagnostics.
 
 Components are data aggregates and are validated when used: finite positions, nonzero finite quaternions, positive model scales, baseColor channels in [0,1], roughness in [0,1], IOR in [1,10], finite nonnegative HDR emission, FOV strictly (0,180), positive height and clipping planes with far>near. Both stored projection settings must remain valid. Computed matrices outside float range are rejected. Nonempty Geometry requires Material; empty Geometry is skipped.
 
 Motion operates on Transform; zoom operates on Camera. Translation preserves orientation; forward/right use current local axes and up/down use parent Y. lookAt replaces the quaternion using target/up in parent coordinates once. Rotation composes normalized quaternion increments about current local axes, with rightward yaw, upward pitch and clockwise roll. There is no pitch clamp or Euler decomposition, so full flips and yaw/pitch after roll remain consistent with view/direction calculations. Zoom bounds the active lens parameter without changing pose/mode/clip planes; changing projection preserves both zoom values.
 
-### Raster preview and GPU ownership
+### Materials and presentation ownership
 
-Material describes physical values, not shader ownership. Public headers live under Materials/, with validation and preset implementations in src/Materials/. Validation is Jade::validateMaterial and has no backend dependencies. RayTracing constructs its CPU BSDF from the description. Rasterization's private MaterialCompiler maps it to a RasterMaterial closure, uniforms, transmission-pass eligibility and reflection-probe eligibility. Raster enum encoding is explicitly mapped and does not depend on MaterialModel ordinal values. Compiled raster descriptions are retained across camera-only revisions and replaced when the captured instances/materials change. GPU programs are owned by the raster pipeline.
+Material describes physical values. Public headers live under Materials/, with validation and presets in src/Materials/. Jade::validateMaterial has no presentation dependencies. RayTracing evaluates its CPU BSDF from the description; all reflection, refraction and illumination run through the Integrator.
 
-Rasterization/Shaders/Materials/ contains parameter bindings and reusable diffuse, conductor, dielectric and GGX evaluation. Common/ contains frame state, lighting/shadow lookup, screen queries and reflection composition. Geometry/ owns vertex stages; Passes/ owns opaque, shadow, back-surface, reflection, transmission, transmission-shadow, probe-prefilter and BRDF-LUT entry points. A transmission pass requires camera/depth/background buffers, while a dielectric Fresnel module only evaluates material response. Module include guards allow passes to compose shared functions safely; all shader inputs and included modules remain explicit CMake dependencies. Presentation/Debug shaders stay in their respective internal layers. No material-to-GL-program pointer or renderer-specific pipeline name is part of the scene model.
+SceneSnapshot capture belongs to Renderer/Common; emissive-triangle compilation belongs to RayTracing. Presentation/ owns Display.vert and ImageDisplay.frag, which upload and present completed sRGB images without additional tone mapping. Debug/ owns Lines.vert and Lines.frag for unlit triangle edges and axes. OpenGLDevice holds only the context and enforces owner-thread access. Programs and buffers are destroyed while the owning context is current.
 
-SceneSnapshot capture and emitter compilation belong to Renderer/Common; material validation belongs to Materials. None require RayScene compilation. RasterPipeline reads asset bounds and uploads immutable mesh buffers; it never constructs a scene TLAS or runs CPU intersections. The public Rasterization pimpl stores config/identity/statistics; OpenGLDevice owns its GPU pipeline so GL resources are destroyed while their context still exists, even when the backend outlives an Application. Device calls enforce owner-thread access. Sources live under Common/, RayTracing/, Rasterization/, with internal Host/, Device/OpenGL/, Presentation/ and Debug/ layers. GLSL files are explicit CMake inputs, expanded/embedded during the build; no shader files are needed beside the executable.
-
-Emitter triangles are weighted by transformed area and luminance. The fixed 16-sample default stratifies CDF selection and uses low-discrepancy barycentric points. Contributions divide by sample count and world area PDF, multiply both surface cosines and inverse-square distance, and obey emission sidedness. Every sampled area has six shadow-map faces in depth arrays, with PCF and an approximate nearest thin glass transmission layer. Off-camera meshes cast shadows. Only the originating sampled primitive is skipped, preserving the rest of an emitting mesh as an occluder. Ordinary surface-color/camera changes reuse shadow depth; geometry, emission or glass shadow properties invalidate it.
-
-Direct Lambert/GGX/dielectric lighting and emission populate HDR color, world positions, normals and depth. Opaque specular composite traces up to 64 world-space steps with projected depth crossings and refinement. Screen-edge confidence fades toward the closest available reflection probe. Up to four probes are chosen at reflective-object centers by camera distance with stable entity ties, capturing six 128px faces while excluding the owner. Captures use actual scene direct lighting/emission and straight glass transmission; recursive SSR/probe feedback is disabled. GGX mip prefiltering plus a BRDF LUT supports rough reflections. Camera/projection motion retains captures for the same selected set; world/material changes invalidate them. Reflection composite replaces analytic direct specular, rather than adding a second estimate. Disabling reflections retains direct specular.
-
-Glass objects are drawn far to near. Each has an independent back-position/normal/depth pass and a copy of the prior composed HDR background, avoiding texture feedback. Depth writes are enabled **before** clearing the back-face depth buffer. Snell entry and exit searches handle perspective/orthographic rays, Fresnel and TIR; IOR=1 transmits the background unchanged except the explicit surface tint. Misses retain the unshifted background. Output remains linear HDR until shared display tone mapping. The preview does not model diffuse GI, caustics, volumes, nested media, recursive probe bounces or temporal filtering, and finite sample/map/screen coverage produces visible approximation errors.
+The four GLSL files are explicit CMake inputs and are embedded during the build; no shader files are needed beside the executable. Embedded names include their stage, such as DisplayVertex and LinesFragment. The CMake generator rejects unsupported stages, invalid identifiers and duplicate symbols. Source layers are Common/, RayTracing/ and internal Host/, Device/OpenGL/, Presentation/ and Debug/.
 
 Interactive zoom multiplies tan(FOV/2), not the angle, and bounds perspective zoom to 1?120 degrees. CameraControl retains the accumulated wheel gesture relative to a lens reference, including unapplied scroll beyond limits, separately for both projections. Reversing the gesture restores the original lens. External edits or camera replacement establish a new reference. Zoom never changes camera pose or geometry transforms.
 
@@ -201,11 +191,11 @@ Scene::use<T>() invokes static void T::attach(Scene&) once per type and Scene. T
 
 Module::CameraControl lives in the engine and registers scene-local motion, left-button dragging, zoom and lifecycle callbacks. Shared callback state keeps a Scene reference and weak Entity identity without retaining the Scene. Every input resolves the current selected camera and skips missing components. A changed target or activation/deactivation resets drag state. Demo installs this module in each scene and retains only scene construction, animation and scene-selection shortcuts.
 
-ApplicationConfig.debug defaults to false independently of build type and logging. When enabled, unconsumed unmodified Pressed F/F3/O toggle wireframe, axes and the retained scene camera's projection after both dispatcher layers. O checks Transform and Camera and retains pose/zoom/clips. stop or a closed window prevents these actions. Application owns wireframe state, exposed by wireframeEnabled(). Initial axes still follow config.axisGizmo independently of debug.
+ApplicationConfig.debug defaults to false independently of build type and logging. Unconsumed unmodified Pressed I always toggles RayTracing/Wireframe. When debug is enabled, F/F3/O toggle wireframe, axes and the retained scene camera's projection after both dispatcher layers. O checks Transform and Camera and retains pose/zoom/clips. stop or a closed window prevents these actions. Application owns wireframe state, exposed by wireframeEnabled(). Initial axes still follow config.axisGizmo independently of debug.
 
 ## Loop, events and build
 
-After committing any pending scene, the main loop polls and dispatches ordered key/button/cursor/scroll events, applies unconsumed Escape and enabled F/F3/O defaults, waits for steady-clock deadlines, dispatches held keys/buttons and FrameUpdate, then clears, renders, presents and logs. Zero-sized framebuffers keep processing edge input but skip held/update/render/logs; restoration resets dt. FrameClock skips expired slots after overruns. frameLimits defaults to 24 FPS; RunOptions::frameLimit independently caps submitted frames. Each Run retains scene/resources/subscriptions and resets timing. stop allows a later Run; nested Run throws.
+After committing any pending scene, the main loop polls and dispatches ordered key/button/cursor/scroll events, applies unconsumed Escape/I and enabled F/F3/O defaults, waits for steady-clock deadlines, dispatches held keys/buttons and FrameUpdate, then clears, renders, presents and logs. Zero-sized framebuffers keep processing edge input but skip held/update/render/logs; restoration resets dt. FrameClock skips expired slots after overruns. frameLimits defaults to 24 FPS; RunOptions::frameLimit independently caps submitted frames. Each Run retains scene/resources/subscriptions and resets timing. stop allows a later Run; nested Run throws.
 
 [Events](Events.md) describes propagation, exact modifiers and connection lifetime. CMake explicitly lists source/header pairs. Demo and tests are independently optional. GLFW/GLAD are private static dependencies; GoogleTest is configured only for tests. GLAD's fixed OpenGL 3.3 Core C source and licenses live in vendor/glad. Shader include expansion and embedding use cmake/EmbedShaders.cmake. Configuration and compilation require no Python interpreter, virtual environment, pip or generator packages. Windows Debug/Release use matching /MDd and /MD runtimes. Software builds select llvmpipe before GLFW when no nonempty driver override exists, and release GPU resources with the owning context current. Runtime/asset deployment stays shared across target configurations.
 

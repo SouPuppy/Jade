@@ -1,6 +1,6 @@
 # Jade
 
-Jade is a C++20 static engine library validated on Windows x64 / MSVC. Its rendering kernel provides an OpenGL 3.3 raster preview and CPU progressive path tracing over the same immutable meshes, diffuse/metal/dielectric materials and emissive geometry. Ray tracing uses asset-owned SAH BLAS and a scene SAH TLAS. Rasterization derives area lighting, shadows, reflection probes, screen-space reflection and glass refraction from that shared world. Wireframe and axes are independent diagnostics. Scene owns entities, hierarchy, events and camera selection; Assets owns immutable resources. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
+Jade is a C++20 static engine library validated on Windows x64 / MSVC. Its rendering kernel provides CPU progressive path tracing and an unlit wireframe mode over immutable meshes, diffuse/metal/dielectric materials and emissive geometry. Ray tracing uses asset-owned SAH BLAS and a scene SAH TLAS. OpenGL 3.3 presents completed images and draws diagnostic lines. Scene owns entities, hierarchy, events and camera selection; Assets owns immutable resources. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
 
 ## Build
 
@@ -37,7 +37,7 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun; P pauses that animation. Demo starts in Rasterization at full resolution; RayTracing uses resolutionScale 0.5. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, I switches rasterization/path tracing, F toggles unlit wireframe and suspends either backend, F3 toggles axes and Esc exits.
+Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun and a fixed area emitter lighting the camera-facing planets; P pauses that animation. Demo starts in RayTracing with resolutionScale 0.5. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, I switches RayTracing/Wireframe, F also toggles wireframe when debug shortcuts are enabled, F3 toggles axes and Esc exits.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -47,9 +47,6 @@ int main()
   Jade::ApplicationConfig config;
   config.debug = true; // Enable Application F/F3/O shortcuts.
   Jade::Application app(config);
-  app.use<Jade::Renderer::Rasterization>();
-  app.use<Jade::Renderer::RayTracing>();
-  app.setRenderer<Jade::Renderer::Rasterization>();
   auto scene = std::make_shared<Jade::Scene>();
 
   auto camera = scene->create();
@@ -139,9 +136,9 @@ Available presets are `Materials::Diffuse(color)`, `Metal(reflectance, roughness
 
 Materials default to diffuse, baseColor `{0.8, 0.8, 0.8}`, roughness `0.5`, IOR `1.5`, and zero emission. BaseColor/roughness must be finite in [0, 1], IOR in [1, 10], and emission finite/nonnegative. Enabled Geometry requires Material. An empty mesh handle disables that instance; absent Transform supplies identity local pose while retaining ancestor transforms.
 
-Include `<Jade/Materials/Material.hpp>` for the physical description and `<Jade/Materials/Presets.hpp>` for preset factories. Material stores values only. RayTracing builds a CPU BSDF from those values; Rasterization compiles its own closure encoding and pass selection in its private MaterialCompiler. Camera-only changes reuse compiled raster materials; changed material values are compiled on the next frame. The public material owns no shader, program or pipeline identifier.
+Include `<Jade/Materials/Material.hpp>` for the physical description and `<Jade/Materials/Presets.hpp>` for preset factories. Material stores values only. RayTracing builds a CPU BSDF from those values. The public material owns no shader, program or pipeline identifier.
 
-Raster shader sources belong to the renderer. `Shaders/Materials/` contains parameter bindings, Lambert, conductor/dielectric Fresnel and GGX evaluation; `Shaders/Common/` contains frame, lighting, reflection and screen-query helpers. `Shaders/Geometry/` contains vertex stages, and `Shaders/Passes/` contains opaque, shadow, reflection, transmission, transmission-shadow, back-surface, probe-prefilter and BRDF-LUT programs. Multiple passes cooperate to render a dielectric surface; they are renderer execution stages rather than separate Material assets. Display and debug shaders remain in their own internal presentation/debug layers.
+Only four GLSL files remain: Display.vert and ImageDisplay.frag present completed sRGB images; Lines.vert and Lines.frag draw wireframe and axes. They belong to the internal presentation/debug layers and use PascalCase filenames. Embedded C++ names include the stage, such as DisplayVertex and LinesFragment.
 
 `assets.add(MeshData)` validates and compiles geometry plus its SAH BLAS before publishing a MeshHandle. `Mesh::compile(MeshData)` performs the same compilation without Assets; `assets.add<Mesh>(compiled)` registers an already compiled resource. Copies of Mesh share their immutable data and BLAS. Other `assets.add<T>(resource)` calls store immutable CPU snapshots; `get(handle)` returns `const T&`, and `share(handle)` returns an owning `shared_ptr<const T>` for detached snapshots. Acquire on the owning thread; workers use retained immutable resources. Handles themselves remain weak, and empty/expired/foreign handles are rejected. `MeshData` has editable position/normal vertices and uint32 triangle indices; `Mesh::data() const` exposes them read-only after compilation; every three indices form one triangle. Empty and degenerate meshes have no hittable surface. Mesh line/topology APIs have been removed.
 
@@ -151,35 +148,27 @@ OBJ loading parses MeshData, validates it and builds the Mesh BLAS before publis
 
 ## Rendering configuration and extension
 
-Renderer registration is explicit. `Application::use<T>(args...)` owns one backend **per concrete type**, returns its reference, and replaces only an existing registration of that type while preserving registration order. The first backend becomes active. Registration and algorithm changes must occur outside Run; all registered backends stay locked during Run, including inactive ones.
+Application owns one RayTracing instance automatically. Set sampling parameters in ApplicationConfig before construction; use app.rayTracing() to install a custom Integrator outside Run.
 
 ```cpp
-app.use<Jade::Renderer::Rasterization>();
-app.use<Jade::Renderer::RayTracing>();
-app.setRenderer<Jade::Renderer::Rasterization>();
-app.cycleRenderer(); // Registration order; I invokes this by default.
-auto selected = app.activeRenderer(); // const Backend*, nullptr before registration.
+Jade::ApplicationConfig config;
+config.rayTracing.resolutionScale = 1; // Actual framebuffer dimensions.
+config.rayTracing.maxSamples = 0;     // Unlimited; positive stops a static revision.
+config.rayTracing.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
+config.rayTracing.maxBounces = 12;
+config.rayTracing.rrStartBounce = 4;
+config.rayTracing.seed = 0;
+config.rayTracing.exposureEV = 0;
+Jade::Application app(config);
 ```
 
-During Run, selection commits at the next frame boundary; the last request wins. Switching cancels and joins progressive computation, clears stale presentation and starts a fresh Film on return. Backend objects, worker pools, compiled meshes, ray acceleration and raster caches survive selection changes. I is enabled even with debug=false; only unmodified KeyPressed triggers it, after application/scene handlers and their EventFlow::Stop decisions.
-
-```cpp
-Jade::Renderer::RayTracingConfig render;
-render.resolutionScale = 1; // Actual framebuffer dimensions, not fullscreen mode.
-render.maxSamples = 0;     // Unlimited; a positive value stops a static revision.
-render.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
-render.maxBounces = 12;
-render.rrStartBounce = 4;
-render.seed = 0;
-render.exposureEV = 0;
-app.use<Jade::Renderer::RayTracing>(render);
-```
+Unmodified KeyPressed I toggles RayTracing/Wireframe after application and scene handlers. It works with debug=false and respects EventFlow::Stop, modifiers and repeats. Entering wireframe cancels and joins current computation; returning starts a fresh Film. Worker pools and immutable mesh acceleration remain owned by the application. F provides the same toggle when debug shortcuts are enabled.
 
 Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount within [0, 256], maxBounces within [1, 1024], and roulette start positive. Fewer pixels improve CPU preview latency. Full framebuffer rendering is the default; no realtime full-resolution sample rate is promised.
 
 The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
 
-F enables unlit triangle edges and suspends the selected backend. I can change the selection while wireframe remains active; F again resumes that selection, with fresh accumulation for RayTracing. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. `app.renderProgress()` names the selected renderer. Progressive progress has an optional samplesPerPixel plus sample time/inFlight; frame progress has completedFrames and CPU frame work time. Rasterization does not report a sample count. These values are independent of presentation FPS.
+Wireframe draws unlit triangle edges and runs no ray integrator. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.renderProgress() reports RayTracing or Wireframe, the optional completed sample count, sample time and inFlight state. Wireframe reports no physical samples. These values are independent of presentation FPS.
 
 Rendering can also run headlessly through public interfaces:
 
@@ -194,27 +183,9 @@ for (std::uint64_t sample = 0; sample < 64; ++sample) {
 auto image = film.resolve(); // Top-left origin, opaque sRGB RGBA8.
 ```
 
-A custom ProgressiveBackend computes one complete sample round into linear HDR Film, with no window access. A custom FrameBackend receives SceneSnapshot, FrameRequest and a graphics-independent FrameTarget, which can clear or upload top-left linear HDR pixels. Application invokes frame rendering on its context-owning thread. Rasterization requires the private OpenGL target; it does not build a TLAS or run a CPU ray integrator. RenderRequest supplies camera, size, sample index, seed and cancellation token. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with `RayTracing::setIntegrator`. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
+ProgressiveBackend defines a headless sample-round contract over RayScene, RenderRequest and linear HDR Film. Application uses its owned RayTracing; algorithm extension is through Integrator. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with app.rayTracing().setIntegrator or on a headless RayTracing instance. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
 
 PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding once; OpenGL does not repeat color conversion. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
-
-Raster preview settings are independent of ray settings:
-
-```cpp
-Jade::Renderer::RasterizationConfig raster;
-raster.areaSamples = 16; // Fixed low-discrepancy samples from all emissive triangles.
-raster.shadowResolution = 256;
-raster.reflectionProbeResolution = 128;
-raster.maxReflectionProbes = 4;
-raster.reflectionSteps = 64;
-raster.refractionSteps = 64;
-raster.shadows = raster.reflections = raster.refractions = true;
-app.use<Jade::Renderer::Rasterization>(raster);
-```
-
-Emission is the only source of illumination. The raster preview integrates sampled areas using their world-space PDF, emitter/receiver cosines and inverse-square distance, with six-face array shadow maps and PCF. The nearest glass shadow layer adds colored transmission. Metal/glass reflections combine screen-space hits with automatically captured, GGX-prefiltered scene probes. Captures exclude their owner and contain direct lighting/emission without recursive reflections. Reflection replaces analytic direct specular to avoid counting it twice; disabling reflections retains direct specular. Glass uses per-object back-face depth, Snell entry/exit tracing and Fresnel/TIR. A missed refraction uses the unshifted background; IOR=1 stays transparent.
-
-This is a preview approximation: fixed sampling and shadow-map resolution can cause artifacts; SSR/refraction can only see current-camera surfaces; probes have limited spatial coverage. Rasterization has no diffuse GI, caustics, nested media or temporal antialiasing. Path tracing remains the reference for indirect illumination. Both paths resolve linear HDR through the same exposure, Reinhard and sRGB transform once.
 
 ## Camera and transforms
 
@@ -338,9 +309,8 @@ Public interfaces are split by purpose, with one optional includes-only entry po
 | Math/ | Vector (Vec2/Vec3), Quaternion, Matrix4 |
 | Graphics/ | Mesh, Vertex, Geometry, Camera, Motion |
 | Materials/ | Material parameters, validation and diffuse/metal/glass/emissive presets |
-| Renderer/Common/ | Backend, FrameBackend/FrameTarget, shared SceneSnapshot, camera, HDR Film and Image |
+| Renderer/Common/ | RenderSettings, RenderProgress, SceneSnapshot, camera, HDR Film and Image |
 | Renderer/RayTracing/ | ProgressiveBackend, RayTracing, RayScene/Compiler, RayQuery, Integrator, BSDF and Sampler |
-| Renderer/Rasterization/ | Rasterization and independent raster settings |
 | Assets/ | Assets, AssetHandle and MeshHandle |
 | Input/, Events/ | Key/button bindings and event contracts |
 | Application.hpp, Color.hpp, Log.hpp, WindowConfig.hpp | Application loop and value/configuration types |
@@ -484,8 +454,8 @@ Jade/src/Core/       # Application, Entity, Scene, Log
 Jade/src/Math/       # Matrix4, Quaternion
 Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
-Jade/src/Renderer/   # Common/, RayTracing/ and Rasterization/ with embedded GLSL shaders
-Jade/src/internal/   # Registry, ProgressiveSession, OpenGL display, platform and input
+Jade/src/Renderer/   # Common/ snapshots/images and RayTracing/ transport
+Jade/src/internal/   # Registry, ProgressiveSession, display/line shaders, platform and input
 Demo/               # Two scenes, cube/bunny and animated hierarchy
 assets/             # Bunny OBJ and attribution
 tests/              # ECS, assets, math, input, scheduling and pixel checks

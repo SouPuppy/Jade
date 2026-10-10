@@ -1,5 +1,5 @@
 #include "Emitters.hpp"
-#include "Math.hpp"
+#include "../Common/Math.hpp"
 #include "../../internal/Acceleration/BVH.hpp"
 namespace Jade::Detail {
 namespace Math = Renderer::Math;

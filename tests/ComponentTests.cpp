@@ -65,7 +65,6 @@ TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
   config.window.width = 160;
   config.window.height = 120;
   Jade::Application app(config);
-  app.use<Jade::Renderer::RayTracing>();
   MakeTestScene(app);
   const auto initial = app.scene()->camera();
   EXPECT_TRUE(initial.has<Jade::Transform>());

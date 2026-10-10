@@ -10,8 +10,7 @@ namespace Jade::Detail {
 OpenGLDisplay::OpenGLDisplay(OpenGLDevice &device) : m_Device(device)
 {
   device.current();
-  m_ImageProgram = std::make_unique<OpenGLProgram>(Shaders::display_vert, Shaders::image_frag);
-  m_HdrProgram = std::make_unique<OpenGLProgram>(Shaders::display_vert, Shaders::hdr_frag);
+  m_ImageProgram = std::make_unique<OpenGLProgram>(Shaders::DisplayVertex, Shaders::ImageDisplayFragment);
   glGenVertexArrays(1, &m_Vao);
   glGenTextures(1, &m_Texture);
   glBindTexture(GL_TEXTURE_2D, m_Texture);
@@ -24,7 +23,7 @@ OpenGLDisplay::~OpenGLDisplay()
 {
   m_Device.current();
   m_ImageProgram.reset();
-  m_HdrProgram.reset();
+
   glDeleteTextures(1, &m_Texture);
   glDeleteVertexArrays(1, &m_Vao);
 }
@@ -61,20 +60,6 @@ void OpenGLDisplay::image(const Renderer::Image &image)
   } else
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image.size.width, image.size.height, GL_RGBA, GL_UNSIGNED_BYTE,
                     image.pixels.data());
-  glDrawArrays(GL_TRIANGLES, 0, 3);
-}
-void OpenGLDisplay::hdr(GLuint color, float exposure)
-{
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  glDisable(GL_DEPTH_TEST);
-  glDisable(GL_BLEND);
-  glDisable(GL_CULL_FACE);
-  glUseProgram(m_HdrProgram->Handle());
-  glBindVertexArray(m_Vao);
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, color);
-  glUniform1i(m_HdrProgram->Uniform("u_Image"), 0);
-  glUniform1f(m_HdrProgram->Uniform("u_Exposure"), exposure);
   glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 void OpenGLDisplay::present()

@@ -1,6 +1,6 @@
 #include "RayScene.hpp"
 #include "../Common/Math.hpp"
-#include "../Common/Emitters.hpp"
+#include "Emitters.hpp"
 
 #include <Jade/Graphics/Geometry.hpp>
 #include <Jade/Renderer/RayTracing/BSDF.hpp>

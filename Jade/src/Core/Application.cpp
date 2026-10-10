@@ -47,16 +47,7 @@ Application::~Application()
 Assets &Application::assets() noexcept { return m_Impl->assets; }
 std::shared_ptr<Scene> Application::scene() const noexcept { return m_Impl->scene; }
 
-void Application::InstallRenderer(std::type_index type, std::unique_ptr<Renderer::Backend> backend)
-{
-  if (m_Impl->running || m_Impl->switching)
-    throw std::logic_error("Renderer installation must occur outside Run and lifecycle callbacks.");
-  m_Impl->rendering.install(type, std::move(backend));
-}
-
-void Application::SelectRenderer(std::type_index type) { m_Impl->rendering.select(type); }
-const Renderer::Backend* Application::activeRenderer() const noexcept { return m_Impl->rendering.active(); }
-void Application::cycleRenderer() { m_Impl->rendering.cycle(); }
+Renderer::RayTracing &Application::rayTracing() noexcept { return m_Impl->rendering.rayTracing(); }
 Renderer::RenderProgress Application::renderProgress() const { return m_Impl->rendering.progress(); }
 
 void Application::setScene(std::shared_ptr<Scene> scene)
@@ -159,7 +150,7 @@ void Application::Run(const RunOptions &options)
   if (m_Impl->running || m_Impl->switching) {
     throw std::logic_error("Application::Run cannot be called from an event callback.");
   }
-  m_Impl->rendering.start();
+  m_Impl->rendering.start(m_Impl->wireframe);
   m_Impl->running = true;
   m_Impl->stopRequested = false;
   using Clock = Detail::FrameClock::Clock;
@@ -195,7 +186,6 @@ void Application::Run(const RunOptions &options)
   Renderer::ImageSize previousSize;
 
   while (!m_Impl->window.ShouldClose() && !m_Impl->stopRequested) {
-    m_Impl->rendering.applyPending();
     if (ApplyPendingScene()) {
       previousFrame.reset();
       diagnostics.Resume();
@@ -221,7 +211,8 @@ void Application::Run(const RunOptions &options)
         }
         if (key->action == KeyAction::Pressed && key->event.key == Key::I &&
             key->event.modifiers == Modifiers::None && flow == EventFlow::Continue &&
-            !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) cycleRenderer();
+            !m_Impl->stopRequested && !m_Impl->window.ShouldClose())
+          setWireframe(!wireframeEnabled());
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
           if (key->event.key == Key::F) {
@@ -340,9 +331,6 @@ void Application::Run(const RunOptions &options)
           rayLog << Log::debug("revision={} spp={} size={}x{} sample_ms={:.2f}", progress.revision,
                                *progress.samplesPerPixel, progress.size.width, progress.size.height,
                                progress.sampleMilliseconds);
-        else if (progress.completedFrames != 0)
-          performanceLog << Log::debug("renderer={} frames={} size={}x{} cpu_frame_ms={:.2f}",
-              progress.rendererName, progress.completedFrames, progress.size.width, progress.size.height, progress.frameMilliseconds);
       }
     }
     if (options.frameLimit != 0 && frames >= options.frameLimit) {

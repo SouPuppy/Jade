@@ -10,22 +10,22 @@
 #include <Jade/Events/MouseMoved.hpp>
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/WindowConfig.hpp>
-#include <Jade/Renderer/Common/Backend.hpp>
+#include <Jade/Renderer/RayTracing/RayTracing.hpp>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <type_traits>
 #include <utility>
-#include <typeindex>
 
 namespace Jade {
 
 struct ApplicationConfig {
   WindowConfig window;
+  Renderer::RayTracingConfig rayTracing;
   bool vsync = false;
   // Built-in F/F3/O shortcuts, independent of logging and build type.
-  // Unmodified I cycles registered renderers even with debug disabled.
+  // Unmodified I toggles RayTracing/Wireframe even with debug disabled.
   bool debug = false;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
@@ -51,19 +51,8 @@ public:
 
   // Assets are shared across scenes. Selection is deferred while Run is active.
   Assets &assets() noexcept;
-  // Register one owned backend per concrete type. Configure outside Run.
-  template <class TRenderer, class... Args> TRenderer &use(Args &&...args)
-  {
-    static_assert(std::is_base_of_v<Renderer::Backend, TRenderer>,
-                  "Application::use requires a Renderer::Backend.");
-    auto backend = std::make_unique<TRenderer>(std::forward<Args>(args)...);
-    auto &result = *backend;
-    InstallRenderer(typeid(TRenderer), std::move(backend));
-    return result;
-  }
-  template <class TRenderer> void setRenderer() { SelectRenderer(typeid(TRenderer)); }
-  const Renderer::Backend *activeRenderer() const noexcept;
-  void cycleRenderer();
+  // The owned path tracer is always available. Configure its integrator outside Run.
+  Renderer::RayTracing &rayTracing() noexcept;
   Renderer::RenderProgress renderProgress() const;
   // Returns the committed selection, including nullptr when no scene is active.
   std::shared_ptr<Scene> scene() const noexcept;
@@ -95,7 +84,7 @@ public:
 
   // Ends the current Run(), allowing a later Run() to resume.
   void stop() noexcept;
-  // Wireframe bypasses the computational backend and draws diagnostic edges.
+  // Wireframe suspends path tracing and draws diagnostic edges.
   void setWireframe(bool enabled) noexcept;
   bool wireframeEnabled() const noexcept;
   void setAxisGizmo(bool enabled) noexcept;
@@ -103,8 +92,6 @@ public:
   void Run(const RunOptions &options = {});
 
 private:
-  void InstallRenderer(std::type_index type, std::unique_ptr<Renderer::Backend> backend);
-  void SelectRenderer(std::type_index type);
   EventConnection Connect(KeyAction action, KeyChord chord,
                           std::function<EventFlow(const KeyEvent &)> callback);
   EventConnection Connect(MouseAction action, MouseButton button,

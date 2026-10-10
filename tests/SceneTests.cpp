@@ -262,7 +262,6 @@ TEST(Hierarchy, CameraUsesInheritedPositionAndRotationWhileIgnoringItsScale)
 TEST(SceneSwitching, EmptyApplicationAndExplicitSelectionWorkWithoutACamera)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   EXPECT_FALSE(app.scene());
   EXPECT_NO_THROW(app.Run({1}));
   auto scene = std::make_shared<Jade::Scene>();
@@ -278,7 +277,6 @@ TEST(SceneSwitching, EmptyApplicationAndExplicitSelectionWorkWithoutACamera)
 TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
   const auto entity = a->create();
   entity.add<Value>(7);
@@ -322,7 +320,6 @@ TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
 TEST(SceneSwitching, LastRequestWinsAndSelectingTheSameSceneDoesNotNotify)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>(),
        c = std::make_shared<Jade::Scene>();
   int exits = 0, bEnters = 0, cEnters = 0;
@@ -350,7 +347,6 @@ TEST(SceneSwitching, LastRequestWinsAndSelectingTheSameSceneDoesNotNotify)
 TEST(SceneSwitching, LifecycleReentryIsDeferredAndConsumptionDoesNotCancelSwitching)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
   int enterA = 0, enterB = 0, skipped = 0;
   a->on<Jade::SceneActivated>([&] {
@@ -374,7 +370,6 @@ TEST(SceneSwitching, LifecycleReentryIsDeferredAndConsumptionDoesNotCancelSwitch
 TEST(SceneSwitching, LifecycleExceptionsLeaveSelectionAtTheCompletedPhase)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
   bool failExit = true, failEnter = true;
   a->on<Jade::SceneDeactivated>([&] {
@@ -400,7 +395,6 @@ TEST(SceneSwitching, LifecycleExceptionsLeaveSelectionAtTheCompletedPhase)
 TEST(SceneSwitching, CallbackFailureDiscardsQueuedSwitchAndRunCanRecover)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
   bool fail = true;
   a->on<Jade::FrameUpdate>([&] {
@@ -425,8 +419,6 @@ TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwner
   const auto connection = scene->on<Jade::FrameUpdate>([] {});
   {
     Jade::Application first(Hidden()), second(Hidden());
-    first.use<Jade::Renderer::RayTracing>();
-    second.use<Jade::Renderer::RayTracing>();
     first.setScene(scene);
     EXPECT_THROW(second.setScene(scene), std::invalid_argument);
     EXPECT_FALSE(second.scene());
@@ -439,7 +431,6 @@ TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwner
   // Application destruction released the activation reservation.
   {
     Jade::Application app(Hidden());
-    app.use<Jade::Renderer::RayTracing>();
     EXPECT_NO_THROW(app.setScene(scene));
   }
   scene.reset();
@@ -450,8 +441,6 @@ TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwner
 TEST(SceneSwitching, LifecycleReservesTargetAndFailedActivationDiscardsReentrantSelection)
 {
   Jade::Application app(Hidden()), other(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
-  other.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>();
   auto b = std::make_shared<Jade::Scene>();
   auto c = std::make_shared<Jade::Scene>();
@@ -493,7 +482,6 @@ TEST(SceneSwitching, LifecycleReservesTargetAndFailedActivationDiscardsReentrant
 TEST(SceneSwitching, GlobalAndSceneEventsPreservePropagationAndPhysicalHeldState)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
   int pressedA = 0, heldA = 0, pressedB = 0, heldB = 0, swallowed = 0;
   std::vector<int> order;
@@ -529,7 +517,6 @@ TEST(SceneSwitching, GlobalAndSceneEventsPreservePropagationAndPhysicalHeldState
 TEST(SceneSwitching, SceneConsumptionPreventsDefaultEscapeAndGlobalUpdateStillRuns)
 {
   Jade::Application app(Hidden());
-  app.use<Jade::Renderer::RayTracing>();
   auto scene = std::make_shared<Jade::Scene>();
   int globalUpdates = 0, sceneUpdates = 0, laterUpdates = 0;
   app.on<Jade::FrameUpdate>([&] { ++globalUpdates; });

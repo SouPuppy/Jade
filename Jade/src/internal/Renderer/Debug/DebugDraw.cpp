@@ -5,7 +5,7 @@ namespace Jade::Detail {
 DebugDraw::DebugDraw(OpenGLDevice &device) : m_Device(device)
 {
   device.current();
-  m_LineProgram = std::make_unique<OpenGLProgram>(Shaders::lines_vert, Shaders::lines_frag);
+  m_LineProgram = std::make_unique<OpenGLProgram>(Shaders::LinesVertex, Shaders::LinesFragment);
   glGenVertexArrays(1, &m_Vao);
   glGenBuffers(1, &m_Buffer);
   glBindVertexArray(m_Vao);

@@ -556,9 +556,21 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   config.axisGizmo = false;
   config.logPerformance = false;
   config.debug = true;
+  config.rayTracing.workerCount = 1;
+  config.rayTracing.maxSamples = 1;
   Application app(config);
   auto control = std::make_shared<Control>();
-  app.use<RecordingBackend>(control, 0);
+  class CountingIntegrator final : public Integrator {
+  public:
+    explicit CountingIntegrator(std::shared_ptr<Control> control) : control(std::move(control)) {}
+    LinearRGB Li(const Ray &, const RayScene &, Sampler &) const override
+    {
+      ++control->calls;
+      return {1, 0, 0};
+    }
+    std::shared_ptr<Control> control;
+  };
+  app.rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(control));
   auto scene = std::make_shared<Scene>();
   auto camera = scene->create();
   camera.add<Transform>().position = {0, 0, 5};
@@ -593,18 +605,23 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   EXPECT_FALSE(app.wireframeEnabled());
 }
 
-TEST(ApplicationRendering, RequiresExplicitBackendAndRejectsReplacementDuringRun)
+TEST(ApplicationRendering, OwnsDefaultRayTracingAndLocksIntegratorDuringRun)
 {
   ApplicationConfig config;
   config.window.visible = false;
   config.window.width = 64;
   config.window.height = 64;
+  config.rayTracing.workerCount = 1;
   Application app(config);
-  EXPECT_THROW(app.Run({1}), std::logic_error);
-  auto control = std::make_shared<Control>();
-  app.use<RecordingBackend>(control);
-  app.on<FrameUpdate>([&] { EXPECT_THROW(app.use<RecordingBackend>(control), std::logic_error); });
+  EXPECT_EQ(app.rayTracing().name(), "RayTracing");
+  EXPECT_FALSE(app.wireframeEnabled());
+  app.on<FrameUpdate>([&] {
+    EXPECT_THROW(app.rayTracing().setIntegrator(std::make_unique<PathIntegrator>()), std::logic_error);
+  });
   EXPECT_NO_THROW(app.Run({1}));
+  app.setWireframe(true);
+  EXPECT_NO_THROW(app.Run({1}));
+  EXPECT_NO_THROW(app.rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
 }
 
 TEST(PathTracing, DiffuseWallReturnsIndirectColoredLight)
@@ -739,7 +756,7 @@ TEST(RayTracing, CustomIntegratorWorksHeadlesslyAndLocksDuringApplicationRun)
   config.window.width = 64;
   config.window.height = 64;
   Application app(config);
-  auto &registered = app.use<RayTracing>();
+  auto &registered = app.rayTracing();
   app.on<FrameUpdate>(
       [&] { EXPECT_THROW(registered.setIntegrator(std::make_unique<Constant>()), std::logic_error); });
   app.Run({1});

@@ -5,8 +5,8 @@ add_executable(JadeSmokeTests
   ComponentTests.cpp
   MeshTests.cpp
   RendererTests.cpp
-  RasterizationTests.cpp
-  RendererSwitchTests.cpp
+
+  RenderModeTests.cpp
   SahTests.cpp
   InputTests.cpp
   LogTests.cpp
