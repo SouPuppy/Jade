@@ -30,7 +30,7 @@ struct Fixture {
     camera.add<Camera>();
     scene.setCamera(camera);
   }
-  Entity add(Mesh mesh, Material material = {}, Vec3 position = {}, Vec3 scale = {1, 1, 1})
+  Entity add(MeshData mesh, Material material = {}, Vec3 position = {}, Vec3 scale = {1, 1, 1})
   {
     const auto entity = scene.create();
     auto &pose = entity.add<Transform>();
@@ -52,9 +52,9 @@ SurfaceHit flatHit(bool front = true)
   return hit;
 }
 
-Mesh quad(float half, float z, bool upward = true, int divisions = 1)
+MeshData quad(float half, float z, bool upward = true, int divisions = 1)
 {
-  Mesh mesh;
+  MeshData mesh;
   for (int y = 0; y < divisions; ++y)
     for (int x = 0; x < divisions; ++x) {
       const float left = -half + 2 * half * x / divisions, right = -half + 2 * half * (x + 1) / divisions;
@@ -141,7 +141,7 @@ private:
 TEST(RayGeometry, NearestHitClippingBackFacesAndSharedResources)
 {
   Fixture f;
-  const auto first = f.add(Mesh::cube(2));
+  const auto first = f.add(MeshData::cube(2));
   const auto second = f.scene.create();
   second.add<Transform>().position = {0, 0, -4};
   second.add<Geometry>(first.get<Geometry>().mesh);
@@ -169,20 +169,20 @@ TEST(RayGeometry, HierarchyShearAndNonuniformScaleMatchWorldGeometry)
   auto &pose = parent.add<Transform>();
   pose.scale = {2, 1, 0.75f};
   pose.rotation = Quaternion::angleAxis({0, 1, 0}, 25);
-  const auto object = f.add(Mesh::cube(2), {}, {0.3f, 0, 0}, {0.8f, 1.2f, 0.6f});
+  const auto object = f.add(MeshData::cube(2), {}, {0.3f, 0, 0}, {0.8f, 1.2f, 0.6f});
   object.get<Transform>().rotation = Quaternion::angleAxis({0, 0, 1}, 35);
   f.scene.setParent(object, parent);
   const auto source = f.snapshot();
   const auto accelerated = RenderScene::build(source);
   auto baked = source;
-  Mesh mesh = *source.instances[0].mesh;
+  MeshData mesh = source.instances[0].mesh->data();
   const auto model = source.instances[0].objectToWorld;
   const auto inverse = Jade::Renderer::Math::inverseAffine(model);
   for (auto &vertex : mesh.vertices) {
     vertex.position = Jade::Renderer::Math::point(model, vertex.position);
     vertex.normal = Jade::Renderer::Math::normal(inverse, vertex.normal);
   }
-  baked.instances[0].mesh = std::make_shared<const Mesh>(std::move(mesh));
+  baked.instances[0].mesh = std::make_shared<const Mesh>(Mesh::compile(std::move(mesh)));
   baked.instances[0].objectToWorld = Matrix4::Identity();
   const auto reference = RenderScene::build(baked);
   IndependentSampler sampler;
@@ -209,7 +209,7 @@ TEST(RayGeometry, SnapshotsRetainMeshesAndIgnoreLaterEdits)
   SceneSnapshot snapshot;
   {
     Fixture f;
-    auto entity = f.add(Mesh::cube(2));
+    auto entity = f.add(MeshData::cube(2));
     snapshot = f.snapshot();
     entity.get<Transform>().position = {100, 0, 0};
     entity.get<Material>().emission = {10, 0, 0};
@@ -224,7 +224,7 @@ TEST(RayGeometry, SnapshotsRetainMeshesAndIgnoreLaterEdits)
 TEST(RayGeometry, DegenerateTrianglesAndInvalidBindings)
 {
   Fixture f;
-  auto object = f.add(Mesh::triangle({}, {1, 1, 1}, {2, 2, 2}));
+  auto object = f.add(MeshData::triangle({}, {1, 1, 1}, {2, 2, 2}));
   SurfaceHit hit;
   EXPECT_FALSE(RenderScene::build(f.snapshot()).intersect({{0, 0, 5}, {0, 0, -1}}, hit));
   auto invalid = f.snapshot();
@@ -237,7 +237,7 @@ TEST(RayGeometry, DegenerateTrianglesAndInvalidBindings)
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
   object.add<Material>();
   Assets other;
-  object.get<Geometry>().mesh = other.add(Mesh::cube());
+  object.get<Geometry>().mesh = other.add(MeshData::cube());
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
   object.get<Geometry>().mesh = {};
   EXPECT_TRUE(f.snapshot().instances.empty());
@@ -338,7 +338,7 @@ TEST(BSDF, GlassTransmissionTotalInternalReflectionAndEqualIor)
 TEST(PathTracing, NoEmittersMeansBlackAndEmissionIsDirectionalHdr)
 {
   Fixture f;
-  auto object = f.add(Mesh::cube(2));
+  auto object = f.add(MeshData::cube(2));
   IndependentSampler sampler;
   PathIntegrator integrator;
   const Ray ray{{0, 0, 5}, {0, 0, -1}};
@@ -398,7 +398,7 @@ TEST(RayTracing, HeadlessRenderingIsDeterministicAcrossWorkerCounts)
   Material light;
   light.emission = {4, 2, 1};
   light.baseColor = {0, 0, 0};
-  f.add(Mesh::sphere(1, 16, 8), light);
+  f.add(MeshData::sphere(1, 16, 8), light);
   const auto snapshot = f.snapshot();
   const auto scene = RenderScene::build(snapshot);
   RayTracingConfig one;
@@ -562,7 +562,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   scene->setCamera(camera);
   auto object = scene->create();
   object.add<Transform>();
-  object.add<Geometry>(app.assets().add(Mesh::cube(2)));
+  object.add<Geometry>(app.assets().add(MeshData::cube(2)));
   object.add<Material>();
   app.setScene(scene);
   int pausedCalls = 0;
@@ -613,7 +613,7 @@ TEST(PathTracing, DiffuseWallReturnsIndirectColoredLight)
   f.add(quad(.75f, 3, false), light);
   Material red;
   red.baseColor = {.9f, 0, 0};
-  Mesh wall;
+  MeshData wall;
   wall.vertices = {
       {{2, -2, 0}, {-1, 0, 0}}, {{2, -2, 3}, {-1, 0, 0}}, {{2, 2, 3}, {-1, 0, 0}}, {{2, 2, 0}, {-1, 0, 0}}};
   wall.indices = {0, 1, 2, 0, 2, 3};
@@ -634,11 +634,11 @@ TEST(PathTracing, DiffuseWallReturnsIndirectColoredLight)
   EXPECT_NEAR(db.b, da.b, 1e-6);
 }
 
-TEST(RayGeometry, MedianBvhAgreesWithIndependentBruteForce)
+TEST(RayGeometry, SahBvhAgreesWithIndependentBruteForce)
 {
   Fixture f;
   for (int i = 0; i < 24; ++i)
-    f.add(Mesh::cube(1), {},
+    f.add(MeshData::cube(1), {},
           {static_cast<float>((i % 6) - 3) * 1.5f, static_cast<float>(i / 6 - 2) * 1.5f,
            -static_cast<float>(i % 3)});
   const auto snapshot = f.snapshot();
@@ -650,7 +650,7 @@ TEST(RayGeometry, MedianBvhAgreesWithIndependentBruteForce)
     Ray ray{{0, 0, 8}, unit({(uv.x - .5f) * 12, (uv.y - .5f) * 9, -8})};
     double nearest = INFINITY;
     for (const auto &instance : snapshot.instances) {
-      const auto &mesh = *instance.mesh;
+      const auto &mesh = instance.mesh->data();
       for (std::size_t p = 0; p < mesh.indices.size(); p += 3) {
         const auto a =
             Jade::Renderer::Math::point(instance.objectToWorld, mesh.vertices[mesh.indices[p]].position);
@@ -681,7 +681,7 @@ TEST(RayGeometry, MedianBvhAgreesWithIndependentBruteForce)
 TEST(OpenGLDisplay, WireframeAndAxesAreIndependentUnlitDiagnostics)
 {
   Fixture f;
-  f.add(Mesh::cube(2));
+  f.add(MeshData::cube(2));
   const auto snapshot = f.snapshot();
   WindowConfig config;
   config.visible = false;
@@ -741,7 +741,7 @@ TEST(RayTracing, CustomIntegratorWorksHeadlesslyAndLocksDuringApplicationRun)
 TEST(RendererTests, CancelledSceneCompilationCanBeRetried)
 {
   Fixture fixture;
-  fixture.add(Mesh::cube());
+  fixture.add(MeshData::cube());
   SceneCompiler compiler;
   std::stop_source cancellation;
   cancellation.request_stop();

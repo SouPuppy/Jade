@@ -16,6 +16,8 @@
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/Graphics/Camera.hpp>
 #include <Jade/Graphics/Mesh.hpp>
+#include <Jade/Graphics/MeshData.hpp>
+#include <Jade/Graphics/Materials.hpp>
 #include <Jade/Graphics/Geometry.hpp>
 #include <Jade/Graphics/Material.hpp>
 #include <Jade/Graphics/Motion.hpp>

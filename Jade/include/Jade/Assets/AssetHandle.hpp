@@ -6,7 +6,7 @@
 namespace Jade {
 namespace Detail { class AssetStore; }
 class Assets;
-struct Mesh;
+class Mesh;
 
 // Identity within one Assets owner. Keeping a handle does not keep resources alive.
 template<class T>

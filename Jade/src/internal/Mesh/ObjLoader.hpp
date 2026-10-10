@@ -1,11 +1,11 @@
 #pragma once
 
-#include <Jade/Graphics/Mesh.hpp>
+#include <Jade/Graphics/MeshData.hpp>
 
 #include <filesystem>
 
 namespace Jade::Detail {
 
-Mesh LoadObj(const std::filesystem::path& path);
+MeshData LoadObj(const std::filesystem::path& path);
 
 } // namespace Jade::Detail

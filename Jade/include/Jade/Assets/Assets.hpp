@@ -19,12 +19,12 @@ public:
   Assets(const Assets &) = delete;
   Assets &operator=(const Assets &) = delete;
 
+  MeshHandle add(MeshData data);
+
   template <class T> AssetHandle<T> add(T resource)
   {
     static_assert(std::is_same_v<T, std::remove_cvref_t<T>>, "Assets require unqualified object types.");
-    if constexpr (std::is_same_v<T, Mesh>) {
-      ValidateMesh(resource);
-    }
+    static_assert(!std::is_same_v<T, MeshData>, "Register MeshData through the compiling add overload.");
     auto stored = std::make_shared<const T>(std::move(resource));
     return AssetHandle<T>(m_Store, Add(typeid(T), std::move(stored)));
   }
@@ -50,7 +50,6 @@ public:
   }
 
 private:
-  static void ValidateMesh(const Mesh &mesh);
   std::uint64_t Add(std::type_index type, std::shared_ptr<const void> resource);
   const void *Get(const std::weak_ptr<Detail::AssetStore> &owner, std::uint64_t id,
                   std::type_index type) const;

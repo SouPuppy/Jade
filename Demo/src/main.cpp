@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     Jade::Application app(config);
 
     Jade::Renderer::RayTracingConfig rendering;
-    rendering.resolutionScale = 1.0f;
+    rendering.resolutionScale = 0.5f;
     rendering.maxSamples = 0;
     rendering.maxBounces = 12;
     rendering.rrStartBounce = 4;
@@ -61,30 +61,19 @@ int main(int argc, char **argv)
     rendering.exposureEV = 0;
     app.use<Jade::Renderer::RayTracing>(rendering);
 
-    const auto cubeMesh = app.assets().add(Jade::Mesh::cube(2));
-    const auto sphereMesh = app.assets().add(Jade::Mesh::sphere(1));
+    const auto cubeMesh = app.assets().add(Jade::MeshData::cube(2));
+    const auto sphereMesh = app.assets().add(Jade::MeshData::sphere(1));
     const auto bunnyMesh = app.assets().load<Jade::Mesh>("assets/bunny.obj");
 
-    Jade::Material floor;
-    floor.baseColor = {0.65f, 0.65f, 0.65f};
-    Jade::Material diffuse;
-    diffuse.baseColor = {0.8f, 0.28f, 0.12f};
-    Jade::Material metal;
-    metal.model = Jade::MaterialModel::Metal;
-    metal.baseColor = {0.95f, 0.7f, 0.3f};
-    metal.roughness = 0.18f;
-    Jade::Material glass;
-    glass.model = Jade::MaterialModel::Dielectric;
-    glass.baseColor = {1, 1, 1};
-    glass.roughness = 0;
-    glass.ior = 1.5f;
-    Jade::Material lamp;
-    lamp.baseColor = {0, 0, 0};
-    lamp.emission = {14, 12, 10};
+    const auto floor = Jade::Materials::Diffuse({0.65f, 0.65f, 0.65f});
+    const auto diffuse = Jade::Materials::Diffuse({0.8f, 0.28f, 0.12f});
+    const auto metal = Jade::Materials::Gold();
+    const auto glass = Jade::Materials::Glass();
+    const auto lamp = Jade::Materials::Emissive({14, 12, 10});
 
     // Scene I: illumination comes exclusively from the ceiling mesh.
     auto showroom = CreateScene({4, 3.5f, 12});
-    const auto &bunnyVertices = app.assets().get(bunnyMesh).vertices;
+    const auto &bunnyVertices = app.assets().get(bunnyMesh).data().vertices;
     const float bunnyBottom =
         std::min_element(bunnyVertices.begin(), bunnyVertices.end(), [](const auto &a, const auto &b) {
           return a.position.y < b.position.y;
@@ -98,12 +87,10 @@ int main(int argc, char **argv)
     // Scene II: the sun is geometry with emission. P freezes the animation.
     auto hierarchy = CreateScene({7, 5, 11});
     auto sun = Instance(*hierarchy, sphereMesh, {}, lamp, {0.7f, 0.7f, 0.7f});
-    Jade::Material earthMaterial;
-    earthMaterial.baseColor = {0.1f, 0.35f, 0.8f};
+    const auto earthMaterial = Jade::Materials::Diffuse({0.1f, 0.35f, 0.8f});
     auto earth = Instance(*hierarchy, sphereMesh, {4, 0, 0}, earthMaterial, {0.5f, 0.5f, 0.5f});
     hierarchy->setParent(earth, sun);
-    Jade::Material moonMaterial;
-    moonMaterial.baseColor = {0.6f, 0.6f, 0.6f};
+    const auto moonMaterial = Jade::Materials::Diffuse({0.6f, 0.6f, 0.6f});
     auto moon = Instance(*hierarchy, sphereMesh, {3, 0, 0}, moonMaterial, {0.35f, 0.35f, 0.35f});
     hierarchy->setParent(moon, earth);
     bool animate = true;

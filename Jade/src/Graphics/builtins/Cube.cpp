@@ -6,7 +6,7 @@
 
 namespace Jade {
 
-Mesh Mesh::cube(float size)
+MeshData MeshData::cube(float size)
 {
   Detail::ValidatePositive(size);
   const float h = size / 2.0f;
@@ -24,7 +24,7 @@ Mesh Mesh::cube(float size)
   constexpr std::array<Vec3, 6> normals{{
     {0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}
   }};
-  Mesh mesh;
+  MeshData mesh;
   mesh.vertices.reserve(24);
   mesh.indices.reserve(36);
   for (std::size_t face = 0; face < faces.size(); ++face) {

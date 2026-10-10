@@ -9,7 +9,7 @@
 
 namespace Jade {
 
-Mesh Mesh::sphere(float radius, std::uint32_t segments, std::uint32_t rings)
+MeshData MeshData::sphere(float radius, std::uint32_t segments, std::uint32_t rings)
 {
   Detail::ValidatePositive(radius);
   if (segments < 3 || rings < 2) {
@@ -22,7 +22,7 @@ Mesh Mesh::sphere(float radius, std::uint32_t segments, std::uint32_t rings)
     throw std::invalid_argument("Sphere exceeds the supported vertex or index count.");
   }
 
-  Mesh mesh;
+  MeshData mesh;
   mesh.vertices.reserve(static_cast<std::size_t>(ringVertices + 2));
   mesh.indices.reserve(static_cast<std::size_t>(6 * ringVertices));
   mesh.vertices.push_back({{0, radius, 0}, {0, 1, 0}});

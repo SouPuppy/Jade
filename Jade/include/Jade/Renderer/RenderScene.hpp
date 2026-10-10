@@ -10,6 +10,8 @@
 #include <stop_token>
 #include <vector>
 
+namespace Jade::Detail { struct RenderSceneAccess; }
+
 namespace Jade::Renderer {
 
 struct RenderInstance {
@@ -57,18 +59,19 @@ public:
 
 private:
   friend class SceneCompiler;
+  friend struct Jade::Detail::RenderSceneAccess;
   struct Impl;
   std::shared_ptr<const Impl> m_Impl;
 };
 
-// Reuses mesh BVHs across scene revisions and rebuilds only changed geometry.
+// Consumes precompiled meshes. Reuses, refits or SAH-rebuilds immutable instance TLAS.
 class SceneCompiler final {
 public:
   SceneCompiler();
   ~SceneCompiler();
   SceneCompiler(const SceneCompiler &) = delete;
   SceneCompiler &operator=(const SceneCompiler &) = delete;
-  // Cancellation returns an empty scene; completed cached mesh BVHs remain reusable.
+  // Cancellation returns an empty scene without changing the last successful compilation.
   RenderScene compile(const SceneSnapshot &snapshot, std::stop_token cancellation = {});
 
 private:

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <Jade/Graphics/Mesh.hpp>
+#include <Jade/Graphics/MeshData.hpp>
 
 namespace Jade::Detail {
 
-void ValidateMesh(const Mesh& mesh);
+void ValidateMesh(const MeshData& mesh);
 
 } // namespace Jade::Detail

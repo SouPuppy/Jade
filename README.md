@@ -58,20 +58,18 @@ int main()
   scene->setCamera(camera);
   scene->use<Jade::Module::CameraControl>();
 
-  const auto mesh = app.assets().add(Jade::Mesh::cube(2.0f));
+  const auto mesh = app.assets().add(Jade::MeshData::cube(2.0f));
   auto cube = scene->create();
   cube.add<Jade::Transform>();
   cube.add<Jade::Geometry>(mesh);
-  cube.add<Jade::Material>();
+  cube.add<Jade::Material>(Jade::Materials::Gold());
 
   auto lamp = scene->create();
   auto& lampPose = lamp.add<Jade::Transform>();
   lampPose.position = {0, 4, 0};
   lampPose.scale = {1.5f, 0.05f, 1.5f};
   lamp.add<Jade::Geometry>(mesh);
-  auto& emission = lamp.add<Jade::Material>();
-  emission.baseColor = {0, 0, 0};
-  emission.emission = {14, 12, 10};
+  lamp.add<Jade::Material>(Jade::Materials::Emissive({14, 12, 10}));
 
   app.setScene(scene);
   app.Run();
@@ -107,48 +105,43 @@ auto matrix = scene->worldMatrix(child); // Jade::Matrix4, column-major.
 scene->setParent(child);                 // Detach, retaining local TRS.
 ```
 
-Hierarchy belongs to Scene; Transform contains local position, rotation and scale. `parent(entity)` returns an empty Entity for a root; `children(entity)` returns an attachment-order snapshot. Self-parenting, cycles and foreign/dead entities are rejected before changing links. Removing Transform preserves links and makes that entity an identity group. Reparenting retains local TRS, so world pose can change. Full parent × local matrices preserve shear from nonuniform scale and rotation.
+Hierarchy belongs to Scene; Transform contains local position, rotation and scale. `parent(entity)` returns an empty Entity for a root; `children(entity)` returns an attachment-order snapshot. Self-parenting, cycles and foreign/dead entities are rejected before changing links. Removing Transform preserves links and makes that entity an identity group. Reparenting retains local TRS, so world pose can change. Full parent Ã— local matrices preserve shear from nonuniform scale and rotation.
 
 The World type/header, `Application::world()/camera()/setCamera()` and callback-based `each()` are removed. Use Scene directly; there are no compatibility aliases.
 
 ## Meshes, instances and materials
 
-Every physical object is a triangle Mesh instance. Geometry references an immutable mesh resource; Material describes scattering and emission independently:
+Every physical object is an instance of an immutable compiled triangle Mesh. Geometry references an immutable mesh resource; Material describes scattering and emission independently:
 
 ```cpp
 const auto bunnyMesh = app.assets().load<Jade::Mesh>("assets/bunny.obj");
 auto bunny = scene->create();
 bunny.add<Jade::Transform>().scale = {16, 16, 16};
 bunny.add<Jade::Geometry>(bunnyMesh);
-bunny.add<Jade::Material>().baseColor = {0.8f, 0.28f, 0.12f};
+bunny.add<Jade::Material>(Jade::Materials::Gold());
 
-Jade::Material metal;
-metal.model = Jade::MaterialModel::Metal;
-metal.baseColor = {0.95f, 0.7f, 0.3f};
-metal.roughness = 0.18f;
+auto metal = Jade::Materials::Gold();
+auto glass = Jade::Materials::Glass();
+auto lamp = Jade::Materials::Emissive({14, 12, 10});
 
-Jade::Material glass;
-glass.model = Jade::MaterialModel::Dielectric;
-glass.baseColor = {1, 1, 1};
-glass.roughness = 0;
-glass.ior = 1.5f;
-
-Jade::Material lamp;
-lamp.baseColor = {0, 0, 0};
-lamp.emission = {14, 12, 10}; // Linear HDR radiance, allowed to exceed 1.
+// Presets return independent values and can be adjusted per entity.
+auto copper = Jade::Materials::Copper();
+copper.roughness = 0.35f;
 ```
 
 All illumination comes from emission on actual geometry. There are no point/directional light entities, ambient term or background illumination. Escaped rays return black. A scene without emissive geometry produces a black physical image; optional axes and wireframe are separate diagnostics.
 
 Diffuse uses Lambert scattering, metal uses GGX with colored normal-incidence Fresnel reflectance, and glass supports smooth or GGX reflection/transmission with dielectric Fresnel and total internal reflection. Glass assumes closed, outward-wound meshes with air outside. Its baseColor is a surface transmission tint; volumetric absorption and nested media are not implemented. Emission is additive to any material model and defaults to one-sided; `twoSidedEmission` enables both sides.
 
+Available presets are `Materials::Diffuse(color)`, `Metal(reflectance, roughness)`, `Gold(roughness)`, `Silver(roughness)`, `Copper(roughness)`, `Glass(roughness, ior, tint)` and `Emissive(radiance, twoSided)`. Named metal defaults use roughness 0.18 and artist-facing linear RGB reflectance approximations; glass defaults to smooth white transmission with IOR 1.5. Emissive defaults to one-sided `{10,10,10}` emission and zero diffuse reflectance. All presets return plain Material values and use the same validation-at-use contract as manually authored materials.
+
 Materials default to diffuse, baseColor `{0.8, 0.8, 0.8}`, roughness `0.5`, IOR `1.5`, and zero emission. BaseColor/roughness must be finite in [0, 1], IOR in [1, 10], and emission finite/nonnegative. Enabled Geometry requires Material. An empty mesh handle disables that instance; absent Transform supplies identity local pose while retaining ancestor transforms.
 
-`assets.add<T>(resource)` stores an immutable CPU snapshot, `get(handle)` returns `const T&`, and `share(handle)` returns an owning `shared_ptr<const T>` for detached snapshots. Acquire on the owning thread; workers use retained immutable resources. Handles themselves remain weak, and empty/expired/foreign handles are rejected. Meshes have position/normal vertices and uint32 triangle indices; every three indices form one triangle. Empty and degenerate meshes have no hittable surface. Mesh line/topology APIs have been removed.
+`assets.add(MeshData)` validates and compiles geometry plus its SAH BLAS before publishing a MeshHandle. `Mesh::compile(MeshData)` performs the same compilation without Assets; `assets.add<Mesh>(compiled)` registers an already compiled resource. Copies of Mesh share their immutable data and BLAS. Other `assets.add<T>(resource)` calls store immutable CPU snapshots; `get(handle)` returns `const T&`, and `share(handle)` returns an owning `shared_ptr<const T>` for detached snapshots. Acquire on the owning thread; workers use retained immutable resources. Handles themselves remain weak, and empty/expired/foreign handles are rejected. `MeshData` has editable position/normal vertices and uint32 triangle indices; `Mesh::data() const` exposes them read-only after compilation; every three indices form one triangle. Empty and degenerate meshes have no hittable surface. Mesh line/topology APIs have been removed.
 
-`Mesh::cube(size)`, `Mesh::sphere(radius, segments, rings)` and `Mesh::triangle(a, b, c)` remain triangle builders. Sphere defaults to radius 0.5, 32 segments, 16 rings and produces a closed mesh with 482 vertices and 960 triangles. Shared mesh instances have independent Transform and Material without copying vertex data. Each unique mesh receives a local BVH, with another BVH over world-space instances.
+`MeshData::cube(size)`, `MeshData::sphere(radius, segments, rings)` and `MeshData::triangle(a, b, c)` remain triangle builders. Sphere defaults to radius 0.5, 32 segments, 16 rings and produces a closed mesh with 482 vertices and 960 triangles. Shared mesh instances have independent Transform and Material without copying vertex data. Each compiled mesh owns its local BLAS. Scene compilation creates a separate TLAS over world-space instances; both use 16-bin SAH across all three axes.
 
-OBJ loading supports positive/negative indices, common face forms, triangles and convex polygons. Explicit normals are normalized; absent normals use area-weighted smoothing. UVs, materials and smoothing groups are not retained. Triangulate concave polygons before loading. Canonical paths share a cache entry; parse/file errors include path and line. The bundled bunny has 453 vertices and 948 triangles; see [asset terms](assets/README.md).
+OBJ loading parses MeshData, validates it and builds the Mesh BLAS before publishing the asset and canonical-path cache entry. Loading failures publish neither. OBJ parsing supports positive/negative indices, common face forms, triangles and convex polygons. Explicit normals are normalized; absent normals use area-weighted smoothing. UVs, materials and smoothing groups are not retained. Triangulate concave polygons before loading. Canonical paths share a cache entry; parse/file errors include path and line. The bundled bunny has 453 vertices and 948 triangles; see [asset terms](assets/README.md).
 
 ## Rendering configuration and extension
 
@@ -168,7 +161,7 @@ app.use<Jade::Renderer::RayTracing>(render);
 
 Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount within [0, 256], maxBounces within [1, 1024], and roulette start positive. Fewer pixels improve CPU preview latency. Full framebuffer rendering is the default; no realtime full-resolution sample rate is promised.
 
-The window thread captures immutable scene/camera state. A coordinator builds/reuses BVHs and schedules 16x16 tiles on persistent CPU workers. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
+The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
 
 F enables unlit triangle edges and cancels ray computation; switching back begins fresh accumulation. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. `app.renderProgress()` returns revision, samplesPerPixel, render dimensions, sample time and inFlight; these are independent of presentation FPS.
 
@@ -454,7 +447,7 @@ Jade/src/Core/       # Application, Entity, Scene, Log
 Jade/src/Math/       # Matrix4, Quaternion
 Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
-Jade/src/Renderer/   # CPU BVH, BSDF, path integration, sampling and Film
+Jade/src/Renderer/   # Scene TLAS compilation, BSDF, path integration and Film
 Jade/src/internal/   # Registry, RenderSession, OpenGL display, platform and input
 Demo/               # Two scenes, cube/bunny and animated hierarchy
 assets/             # Bunny OBJ and attribution

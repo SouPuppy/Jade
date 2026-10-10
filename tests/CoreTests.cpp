@@ -191,7 +191,7 @@ TEST(Assets, SharedImmutableMeshesKeepIndependentEntityState)
 {
   Jade::Assets assets;
   Jade::Scene scene;
-  const auto mesh = assets.add(Jade::Mesh::cube());
+  const auto mesh = assets.add(Jade::MeshData::cube());
   const auto first = scene.create(), second = scene.create();
   first.add<Jade::Transform>().position = {-2, 0, 0};
   second.add<Jade::Transform>().position = {2, 0, 0};
@@ -210,7 +210,7 @@ TEST(Assets, SharedImmutableMeshesKeepIndependentEntityState)
   EXPECT_EQ(&assets.get(mesh), address);
   scene.destroy(first);
   EXPECT_TRUE(mesh.valid());
-  EXPECT_EQ(assets.get(mesh).indices.size(), 36u);
+  EXPECT_EQ(assets.get(mesh).data().indices.size(), 36u);
 }
 
 TEST(Assets, RejectsForeignEmptyAndExpiredHandles)
@@ -221,7 +221,7 @@ TEST(Assets, RejectsForeignEmptyAndExpiredHandles)
   EXPECT_THROW(assets.get(expired), std::invalid_argument);
   {
     Jade::Assets other;
-    expired = other.add(Jade::Mesh::cube());
+    expired = other.add(Jade::MeshData::cube());
     EXPECT_THROW(assets.get(expired), std::invalid_argument);
     EXPECT_TRUE(expired.valid());
   }

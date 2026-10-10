@@ -135,7 +135,7 @@ void OpenGLDisplay::wireframe(const Renderer::SceneSnapshot &snapshot, Renderer:
   const auto projection = snapshot.camera->viewProjection(size);
   std::vector<Vec3> edges;
   for (const auto &instance : snapshot.instances) {
-    const auto &mesh = *instance.mesh;
+    const auto &mesh = instance.mesh->data();
     edges.clear();
     edges.reserve(mesh.indices.size() * 2);
     for (std::size_t index = 0; index < mesh.indices.size(); index += 3) {

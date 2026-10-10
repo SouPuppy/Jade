@@ -1,6 +1,5 @@
 #include "Assets.hpp"
 
-#include "../internal/Mesh/MeshValidation.hpp"
 #include "../internal/Mesh/ObjLoader.hpp"
 
 #include <Jade/Log.hpp>
@@ -34,9 +33,9 @@ public:
 Assets::Assets() : m_Store(std::make_shared<Detail::AssetStore>()) {}
 Assets::~Assets() = default;
 
-void Assets::ValidateMesh(const Mesh& mesh)
+MeshHandle Assets::add(MeshData data)
 {
-  Detail::ValidateMesh(mesh);
+  return add<Mesh>(Mesh::compile(std::move(data)));
 }
 
 std::uint64_t Assets::Add(std::type_index type, std::shared_ptr<const void> resource)
@@ -85,7 +84,7 @@ try
   const auto [entry, inserted] = m_Store->meshes.emplace(canonical, MeshHandle{});
   (void)inserted;
   try {
-    entry->second = add<Mesh>(std::move(mesh));
+    entry->second = add(std::move(mesh));
   } catch (...) {
     m_Store->meshes.erase(entry);
     throw;

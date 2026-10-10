@@ -1,4 +1,12 @@
 add_library(Jade STATIC
+  include/Jade/Graphics/MeshData.hpp
+  include/Jade/Graphics/Materials.hpp
+  src/Graphics/Materials.cpp
+  src/Graphics/Materials.hpp
+  src/internal/Acceleration/BVH.cpp
+  src/internal/Acceleration/BVH.hpp
+  src/internal/Mesh/MeshAccess.hpp
+  src/internal/Renderer/RenderSceneAccess.hpp
   src/Assets/Assets.cpp
   src/Core/Application.cpp
   src/Core/Entity.cpp

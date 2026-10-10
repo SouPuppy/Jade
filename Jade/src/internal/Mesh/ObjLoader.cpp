@@ -34,7 +34,7 @@ class ObjReader {
 public:
   explicit ObjReader(const std::filesystem::path& path) : m_Path(path) {}
 
-  Mesh Read()
+  MeshData Read()
   {
     std::ifstream input(m_Path);
     input.imbue(std::locale::classic());
@@ -164,7 +164,7 @@ private:
       Fail("a face needs at least three vertices");
     }
     for (std::size_t corner = 1; corner + 1 < face.size(); ++corner) {
-      if (m_Mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) - 3) {
+      if (m_Mesh.indices.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) * 3 - 3) {
         Fail("too many triangle indices");
       }
       m_Mesh.indices.insert(m_Mesh.indices.end(), {face[0], face[corner], face[corner + 1]});
@@ -206,12 +206,12 @@ private:
   std::map<std::pair<std::size_t, std::int64_t>, std::uint32_t> m_VertexLookup;
   std::vector<std::size_t> m_SourcePositions;
   std::vector<bool> m_MissingNormals;
-  Mesh m_Mesh;
+  MeshData m_Mesh;
 };
 
 } // namespace
 
-Mesh LoadObj(const std::filesystem::path& path)
+MeshData LoadObj(const std::filesystem::path& path)
 {
   return ObjReader(path).Read();
 }
