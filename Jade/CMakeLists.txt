@@ -1,25 +1,82 @@
 add_library(Jade STATIC
   src/Core/Application.cpp
   src/Core/Log.cpp
-  src/Platform/GLFW/GlfwRuntime.cpp
-  src/Platform/GLFW/GlfwWindow.cpp
-  src/Platform/Window.cpp
-  src/Renderer/Renderer.cpp
-  src/Renderer/OpenGL/OpenGLContext.cpp
-  src/Renderer/OpenGL/OpenGLRenderer.cpp
-  include/Jade/Jade.h
-  include/Jade/Core/Application.h
-  include/Jade/Core/Log.h
-  include/Jade/Platform/Window.h
-  include/Jade/Renderer/Renderer.h
-  src/Platform/GLFW/GlfwRuntime.h
-  src/Platform/GLFW/GlfwWindow.h
-  src/Renderer/OpenGL/OpenGLContext.h
-  src/Renderer/OpenGL/OpenGLRenderer.h
+  src/Objects/Camera.cpp
+  src/Objects/Object.cpp
+  src/Mesh/Mesh.cpp
+  src/Mesh/builtins/Cube.cpp
+  src/internal/Mesh/ObjLoader.cpp
+  src/Objects/Motion.cpp
+  src/Geometry/Line.cpp
+  src/Geometry/Triangle.cpp
+  src/internal/Events/EventDispatcher.cpp
+  src/internal/Input/InputState.cpp
+  src/internal/Platform/GLFW/GlfwInput.cpp
+  src/internal/Platform/GLFW/GlfwRuntime.cpp
+  src/internal/Platform/GLFW/GlfwWindow.cpp
+  src/internal/Platform/Window.cpp
+  src/internal/Renderer/Renderer.cpp
+  src/internal/Renderer/OpenGL/OpenGLContext.cpp
+  src/internal/Renderer/OpenGL/OpenGLRenderer.cpp
+  src/internal/Renderer/OpenGL/OpenGLPrimitiveRenderer.cpp
+  src/internal/Renderer/OpenGL/OpenGLMeshRenderer.cpp
+  src/internal/Renderer/OpenGL/OpenGLProgram.cpp
+  include/Jade/Application.hpp
+  include/Jade/Events/Event.hpp
+  include/Jade/Events/FrameUpdate.hpp
+  include/Jade/Events/Keyboard.hpp
+  include/Jade/Events/Mouse.hpp
+  include/Jade/Events/MouseScrolled.hpp
+  include/Jade/Input/Key.hpp
+  include/Jade/Input/MouseButton.hpp
+  include/Jade/Objects/Camera.hpp
+  include/Jade/Objects/Motion.hpp
+  include/Jade/Events/MouseMoved.hpp
+  include/Jade/Color.hpp
+  include/Jade/Mesh/Mesh.hpp
+  include/Jade/Mesh/Vertex.hpp
+  include/Jade/Jade.hpp
+  include/Jade/Geometry/Line.hpp
+  include/Jade/Log.hpp
+  include/Jade/Objects/Object.hpp
+  include/Jade/Geometry/Triangle.hpp
+  include/Jade/Vector.hpp
+  include/Jade/WindowConfig.hpp
+  src/Core/Application.hpp
+  src/Core/Log.hpp
+  src/Objects/Camera.hpp
+  src/Objects/Motion.hpp
+  src/Objects/Object.hpp
+  src/Mesh/Mesh.hpp
+  src/Mesh/builtins/Cube.hpp
+  src/internal/Mesh/ObjLoader.hpp
+  src/internal/Mesh/MeshValidation.hpp
+  src/Geometry/Line.hpp
+  src/Geometry/Triangle.hpp
+  src/internal/Core/FrameClock.hpp
+  src/internal/Events/EventDispatcher.hpp
+  src/internal/Input/InputState.hpp
+  src/internal/Platform/GLFW/GlfwInput.hpp
+  src/internal/Math/Matrix4.hpp
+  src/internal/Math/Validation.hpp
+  src/internal/Platform/Window.hpp
+  src/internal/Platform/GLFW/GlfwRuntime.hpp
+  src/internal/Platform/GLFW/GlfwWindow.hpp
+  src/internal/Renderer/Renderer.hpp
+  src/internal/Renderer/OpenGL/OpenGLContext.hpp
+  src/internal/Renderer/OpenGL/OpenGLRenderer.hpp
+  src/internal/Renderer/OpenGL/OpenGLPrimitiveRenderer.hpp
+  src/internal/Renderer/OpenGL/OpenGLMeshRenderer.hpp
+  src/internal/Renderer/OpenGL/OpenGLProgram.hpp
 )
 add_library(Jade::Jade ALIAS Jade)
 target_include_directories(Jade PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_compile_definitions(Jade PRIVATE GLFW_INCLUDE_NONE)
+target_compile_definitions(Jade PRIVATE
+  GLFW_INCLUDE_NONE
+  JADE_USE_SOFTWARE_RENDERING=$<BOOL:${JADE_USE_SOFTWARE_RENDERING}>
+  $<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+  $<$<PLATFORM_ID:Windows>:NOMINMAX>
+)
 target_link_libraries(Jade PRIVATE glfw jade_glad OpenGL::GL)
 jade_configure_target(Jade)
 get_target_property(jade_sources Jade SOURCES)

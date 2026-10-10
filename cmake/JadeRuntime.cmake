@@ -33,8 +33,4 @@ function(jade_deploy_runtime target)
   add_dependencies(${target} ${target}Runtime)
   set_property(TARGET ${target} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY
     "$<TARGET_FILE_DIR:${target}>")
-  if(JADE_USE_SOFTWARE_RENDERING)
-    set_property(TARGET ${target} PROPERTY VS_DEBUGGER_ENVIRONMENT
-      "GALLIUM_DRIVER=llvmpipe")
-  endif()
 endfunction()

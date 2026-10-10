@@ -16,4 +16,6 @@ On first configuration, CMake enables `JADE_USE_SOFTWARE_RENDERING` if it detect
 
 Mesa is optional. Machines with a graphics driver supporting OpenGL 3.3 can build and run Demo and the tests without these files. Test code does not reference local DLL paths or force Mesa-specific environment settings.
 
-To select Mesa's llvmpipe software driver when running an executable directly from PowerShell, set `$env:GALLIUM_DRIVER = 'llvmpipe'` in that shell. Visual Studio's debug environment sets this variable when software rendering is enabled. This is a runtime choice and is not part of the test code.
+When `JADE_USE_SOFTWARE_RENDERING` is enabled, Jade selects Mesa's llvmpipe CPU driver before initializing GLFW, unless the process already has a non-empty `GALLIUM_DRIVER` value. This works for direct execution and Visual Studio's Ninja presets without debugger environment configuration. The setting is local to the running process; it does not change the user's or system's environment.
+
+To override the driver for a process launched from PowerShell, set `$env:GALLIUM_DRIVER` in that shell. Disabling software rendering leaves the driver environment untouched and uses the system OpenGL runtime.

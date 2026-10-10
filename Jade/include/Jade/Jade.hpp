@@ -1,0 +1,22 @@
+#pragma once
+
+#include <Jade/Application.hpp>
+#include <Jade/Objects/Camera.hpp>
+#include <Jade/Objects/Motion.hpp>
+#include <Jade/Color.hpp>
+#include <Jade/Events/Event.hpp>
+#include <Jade/Events/FrameUpdate.hpp>
+#include <Jade/Events/Keyboard.hpp>
+#include <Jade/Events/Mouse.hpp>
+#include <Jade/Events/MouseMoved.hpp>
+#include <Jade/Events/MouseScrolled.hpp>
+#include <Jade/Input/Key.hpp>
+#include <Jade/Input/MouseButton.hpp>
+#include <Jade/Mesh/Mesh.hpp>
+#include <Jade/Mesh/Vertex.hpp>
+#include <Jade/Geometry/Line.hpp>
+#include <Jade/Log.hpp>
+#include <Jade/Objects/Object.hpp>
+#include <Jade/Geometry/Triangle.hpp>
+#include <Jade/Vector.hpp>
+#include <Jade/WindowConfig.hpp>
