@@ -1,10 +1,10 @@
 # Jade
 
-Jade is a C++20 static engine library validated on Windows x64 / MSVC. Its rendering kernel uses CPU progressive path tracing with shared triangle meshes, two-level BVHs, diffuse/metal/dielectric BSDFs and emissive geometry. OpenGL 3.3 presents the completed image and draws unlit wireframe/axis diagnostics. Scene owns entities, hierarchy, events and camera selection; Assets owns immutable resources. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
+Jade is a C++20 static engine library validated on Windows x64 / MSVC. Its rendering kernel provides an OpenGL 3.3 raster preview and CPU progressive path tracing over the same immutable meshes, diffuse/metal/dielectric materials and emissive geometry. Ray tracing uses asset-owned SAH BLAS and a scene SAH TLAS. Rasterization derives area lighting, shadows, reflection probes, screen-space reflection and glass refraction from that shared world. Wireframe and axes are independent diagnostics. Scene owns entities, hierarchy, events and camera selection; Assets owns immutable resources. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
 
 ## Build
 
-Install the Visual Studio or Build Tools **Desktop development with C++** workload, including MSVC x64, the Windows SDK, CMake and Ninja. GLAD generation also requires Python 3.9 or newer. The first configuration downloads pinned dependencies; subsequent configurations reuse each build directory's downloads and Python environment.
+Install the Visual Studio or Build Tools **Desktop development with C++** workload, including MSVC x64, the Windows SDK, CMake and Ninja. The first configuration downloads pinned GLFW and GoogleTest dependencies; subsequent configurations reuse each build directory's downloads. The OpenGL loader is included as fixed C source, and shader embedding uses CMake directly. No Python installation or packages are required.
 
 Open the repository folder in Visual Studio to discover the Windows Debug / Release presets and select `JadeDemo.exe` as the startup target. For command-line builds, use an **x64 Native Tools Command Prompt** or an x64 **Developer PowerShell**:
 
@@ -37,7 +37,7 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun; P pauses that animation. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, F switches between path tracing and unlit wireframe, F3 toggles axes and Esc exits.
+Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun; P pauses that animation. Demo starts in Rasterization at full resolution; RayTracing uses resolutionScale 0.5. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, I switches rasterization/path tracing, F toggles unlit wireframe and suspends either backend, F3 toggles axes and Esc exits.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -47,7 +47,9 @@ int main()
   Jade::ApplicationConfig config;
   config.debug = true; // Enable Application F/F3/O shortcuts.
   Jade::Application app(config);
+  app.use<Jade::Renderer::Rasterization>();
   app.use<Jade::Renderer::RayTracing>();
+  app.setRenderer<Jade::Renderer::Rasterization>();
   auto scene = std::make_shared<Jade::Scene>();
 
   auto camera = scene->create();
@@ -105,7 +107,7 @@ auto matrix = scene->worldMatrix(child); // Jade::Matrix4, column-major.
 scene->setParent(child);                 // Detach, retaining local TRS.
 ```
 
-Hierarchy belongs to Scene; Transform contains local position, rotation and scale. `parent(entity)` returns an empty Entity for a root; `children(entity)` returns an attachment-order snapshot. Self-parenting, cycles and foreign/dead entities are rejected before changing links. Removing Transform preserves links and makes that entity an identity group. Reparenting retains local TRS, so world pose can change. Full parent × local matrices preserve shear from nonuniform scale and rotation.
+Hierarchy belongs to Scene; Transform contains local position, rotation and scale. `parent(entity)` returns an empty Entity for a root; `children(entity)` returns an attachment-order snapshot. Self-parenting, cycles and foreign/dead entities are rejected before changing links. Removing Transform preserves links and makes that entity an identity group. Reparenting retains local TRS, so world pose can change. Full parent Ãƒâ€” local matrices preserve shear from nonuniform scale and rotation.
 
 The World type/header, `Application::world()/camera()/setCamera()` and callback-based `each()` are removed. Use Scene directly; there are no compatibility aliases.
 
@@ -145,7 +147,17 @@ OBJ loading parses MeshData, validates it and builds the Mesh BLAS before publis
 
 ## Rendering configuration and extension
 
-Renderer registration is explicit and must occur before Run. `Application::use<T>(args...)` owns one backend, replaces an existing backend and returns its reference. T derives from `Jade::Renderer::Backend`. Replacement and algorithm configuration during Run are rejected.
+Renderer registration is explicit. `Application::use<T>(args...)` owns one backend **per concrete type**, returns its reference, and replaces only an existing registration of that type while preserving registration order. The first backend becomes active. Registration and algorithm changes must occur outside Run; all registered backends stay locked during Run, including inactive ones.
+
+```cpp
+app.use<Jade::Renderer::Rasterization>();
+app.use<Jade::Renderer::RayTracing>();
+app.setRenderer<Jade::Renderer::Rasterization>();
+app.cycleRenderer(); // Registration order; I invokes this by default.
+auto selected = app.activeRenderer(); // const Backend*, nullptr before registration.
+```
+
+During Run, selection commits at the next frame boundary; the last request wins. Switching cancels and joins progressive computation, clears stale presentation and starts a fresh Film on return. Backend objects, worker pools, compiled meshes, ray acceleration and raster caches survive selection changes. I is enabled even with debug=false; only unmodified KeyPressed triggers it, after application/scene handlers and their EventFlow::Stop decisions.
 
 ```cpp
 Jade::Renderer::RayTracingConfig render;
@@ -163,7 +175,7 @@ Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount wit
 
 The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
 
-F enables unlit triangle edges and cancels ray computation; switching back begins fresh accumulation. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. `app.renderProgress()` returns revision, samplesPerPixel, render dimensions, sample time and inFlight; these are independent of presentation FPS.
+F enables unlit triangle edges and suspends the selected backend. I can change the selection while wireframe remains active; F again resumes that selection, with fresh accumulation for RayTracing. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. `app.renderProgress()` names the selected renderer. Progressive progress has an optional samplesPerPixel plus sample time/inFlight; frame progress has completedFrames and CPU frame work time. Rasterization does not report a sample count. These values are independent of presentation FPS.
 
 Rendering can also run headlessly through public interfaces:
 
@@ -178,9 +190,27 @@ for (std::uint64_t sample = 0; sample < 64; ++sample) {
 auto image = film.resolve(); // Top-left origin, opaque sRGB RGBA8.
 ```
 
-Backend computes one sample round into linear HDR Film, with no window access. RenderRequest supplies camera, size, sample index, seed and cancellation token. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with `RayTracing::setIntegrator`. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
+A custom ProgressiveBackend computes one complete sample round into linear HDR Film, with no window access. A custom FrameBackend receives SceneSnapshot, FrameRequest and a graphics-independent FrameTarget, which can clear or upload top-left linear HDR pixels. Application invokes frame rendering on its context-owning thread. Rasterization requires the private OpenGL target; it does not build a TLAS or run a CPU ray integrator. RenderRequest supplies camera, size, sample index, seed and cancellation token. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with `RayTracing::setIntegrator`. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
 
 PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding once; OpenGL does not repeat color conversion. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
+
+Raster preview settings are independent of ray settings:
+
+```cpp
+Jade::Renderer::RasterizationConfig raster;
+raster.areaSamples = 16; // Fixed low-discrepancy samples from all emissive triangles.
+raster.shadowResolution = 256;
+raster.reflectionProbeResolution = 128;
+raster.maxReflectionProbes = 4;
+raster.reflectionSteps = 64;
+raster.refractionSteps = 64;
+raster.shadows = raster.reflections = raster.refractions = true;
+app.use<Jade::Renderer::Rasterization>(raster);
+```
+
+Emission is the only source of illumination. The raster preview integrates sampled areas using their world-space PDF, emitter/receiver cosines and inverse-square distance, with six-face array shadow maps and PCF. The nearest glass shadow layer adds colored transmission. Metal/glass reflections combine screen-space hits with automatically captured, GGX-prefiltered scene probes. Captures exclude their owner and contain direct lighting/emission without recursive reflections. Reflection replaces analytic direct specular to avoid counting it twice; disabling reflections retains direct specular. Glass uses per-object back-face depth, Snell entry/exit tracing and Fresnel/TIR. A missed refraction uses the unshifted background; IOR=1 stays transparent.
+
+This is a preview approximation: fixed sampling and shadow-map resolution can cause artifacts; SSR/refraction can only see current-camera surfaces; probes have limited spatial coverage. Rasterization has no diffuse GI, caustics, nested media or temporal antialiasing. Path tracing remains the reference for indirect illumination. Both paths resolve linear HDR through the same exposure, Reinhard and sRGB transform once.
 
 ## Camera and transforms
 
@@ -303,7 +333,9 @@ Public interfaces are split by purpose, with one optional includes-only entry po
 | Core/ | Scene, SceneView, Entity, Transform |
 | Math/ | Vector (Vec2/Vec3), Quaternion, Matrix4 |
 | Graphics/ | Mesh, Vertex, Geometry, Material, Camera, Motion |
-| Renderer/ | Backend, RayTracing, Integrator, BSDF, RayQuery, snapshots, Sampler, Film and Image |
+| Renderer/Common/ | Backend, FrameBackend/FrameTarget, shared SceneSnapshot, camera, HDR Film and Image |
+| Renderer/RayTracing/ | ProgressiveBackend, RayTracing, RayScene/Compiler, RayQuery, Integrator, BSDF and Sampler |
+| Renderer/Rasterization/ | Rasterization and independent raster settings |
 | Assets/ | Assets, AssetHandle and MeshHandle |
 | Input/, Events/ | Key/button bindings and event contracts |
 | Application.hpp, Color.hpp, Log.hpp, WindowConfig.hpp | Application loop and value/configuration types |
@@ -417,7 +449,7 @@ There are no logging dependencies, worker threads or automatic configuration fil
 
 [FetchContent](https://cmake.org/cmake/help/latest/module/FetchContent.html) downloads GLFW 3.4, GLAD 2.0.8 and, when tests are enabled, GoogleTest 1.17.0. Every archive has a SHA-256 check. Dependency sources stay under each build directory's `_deps/`. All three libraries link statically. GLFW examples, tests, documentation and installation are disabled.
 
-[GLAD's official CMake interface](https://github.com/Dav1dde/glad/blob/v2.0.8/cmake/GladConfig.cmake) generates OpenGL 3.3 Core with `REPRODUCIBLE` and `EXTENSIONS NONE`. Generated files stay under `build/<configuration>/generated/glad/`. The generator uses a separate `python/venv/` with Jinja2 3.1.6 and MarkupSafe 3.0.3. Download, environment creation and package-installation failures include the command output.
+GLAD 2.0.8 OpenGL 3.3 Core output with zero extensions is checked into `vendor/glad/`. Configuration compiles its C source directly and performs no GLAD download or generation. `cmake/EmbedShaders.cmake` embeds GLSL during the build using CMake alone.
 
 The engine, dependencies and consumers share the MSVC dynamic CRT: `/MDd` for Debug and `/MD` for Release. GoogleTest follows the [official shared-CRT configuration](https://google.github.io/googletest/quickstart-cmake.html).
 
@@ -447,7 +479,7 @@ Jade/src/Core/       # Application, Entity, Scene, Log
 Jade/src/Math/       # Matrix4, Quaternion
 Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
-Jade/src/Renderer/   # Scene TLAS compilation, BSDF, path integration and Film
+Jade/src/Renderer/   # Common/, RayTracing/ and Rasterization/ with embedded GLSL shaders
 Jade/src/internal/   # Registry, ProgressiveSession, OpenGL display, platform and input
 Demo/               # Two scenes, cube/bunny and animated hierarchy
 assets/             # Bunny OBJ and attribution
@@ -455,3 +487,5 @@ tests/              # ECS, assets, math, input, scheduling and pixel checks
 ```
 
 GoogleTest exercises identity generations, ownership, hierarchy, scene switching, component/query mutation, shared immutable resources, OBJ loading, quaternion controls, projections, resize, ray intersections, BSDFs, emissive lighting, deterministic CPU sampling, asynchronous revisions, wireframe, axes and events; OpenGL readback validates presentation/debug output. Tests build independently of Demo. See [Architecture](docs/Architecture.md) for boundaries and [Validation](docs/Validation.md) for recorded checks.
+
+Interactive wheel zoom scales the image-plane span, preserves pose and clip planes, and limits perspective zoom to 1?120 degrees. CameraControl retains scroll beyond the limits so reversing a gesture restores its original projection, including orthographic height. Direct lens edits establish a new zoom reference.

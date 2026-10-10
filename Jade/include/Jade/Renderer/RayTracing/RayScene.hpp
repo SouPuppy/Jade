@@ -10,7 +10,9 @@
 #include <stop_token>
 #include <vector>
 
-namespace Jade::Detail { struct RaySceneAccess; }
+namespace Jade::Detail {
+struct RaySceneAccess;
+}
 
 namespace Jade::Renderer {
 

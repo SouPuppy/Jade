@@ -572,8 +572,10 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   int pausedCalls = 0;
   bool resumed = false;
   app.on<FrameUpdate>([&](const auto &frame) {
-    if (frame.frame == 3)
+    if (frame.frame == 3) {
+      ASSERT_TRUE(waitUntil([&] { return control->calls.load() > 0; }));
       app.setWireframe(true);
+    }
     if (frame.frame == 4)
       pausedCalls = control->calls;
     if (frame.frame == 5) {
@@ -583,7 +585,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
     if (frame.frame == 7)
       app.setWireframe(false);
     if (frame.frame == 10)
-      resumed = control->calls > pausedCalls;
+      resumed = waitUntil([&] { return control->calls.load() > pausedCalls; });
   });
   app.Run({10});
   EXPECT_GT(pausedCalls, 0);

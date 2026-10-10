@@ -24,7 +24,8 @@ namespace Jade {
 struct ApplicationConfig {
   WindowConfig window;
   bool vsync = false;
-  // Built-in unmodified F/F3/O shortcuts. I cycles registered renderers independently. Independent of logging and build type.
+  // Built-in F/F3/O shortcuts, independent of logging and build type.
+  // Unmodified I cycles registered renderers even with debug disabled.
   bool debug = false;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
   std::uint32_t frameLimits = 24;
@@ -60,8 +61,8 @@ public:
     InstallRenderer(typeid(TRenderer), std::move(backend));
     return result;
   }
-  template<class TRenderer> void setRenderer() { SelectRenderer(typeid(TRenderer)); }
-  const Renderer::Backend* activeRenderer() const noexcept;
+  template <class TRenderer> void setRenderer() { SelectRenderer(typeid(TRenderer)); }
+  const Renderer::Backend *activeRenderer() const noexcept;
   void cycleRenderer();
   Renderer::RenderProgress renderProgress() const;
   // Returns the committed selection, including nullptr when no scene is active.

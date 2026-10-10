@@ -13,7 +13,7 @@ public:
   ~ProgressiveSession();
   void install(std::unique_ptr<Renderer::ProgressiveBackend> backend);
   bool configured() const noexcept { return static_cast<bool>(m_Backend); }
-  void bind(Renderer::ProgressiveBackend& backend);
+  void bind(Renderer::ProgressiveBackend &backend);
   void start();
   void stop() noexcept;
   void invalidate() noexcept;
@@ -30,7 +30,7 @@ private:
   };
   void run(std::stop_token stop);
   std::unique_ptr<Renderer::ProgressiveBackend> m_Owned;
-  Renderer::ProgressiveBackend* m_Backend = nullptr;
+  Renderer::ProgressiveBackend *m_Backend = nullptr;
   Renderer::ProgressiveSettings m_Settings;
   Renderer::RaySceneCompiler m_Compiler;
   mutable std::mutex m_Mutex;

@@ -5,7 +5,10 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-namespace Jade::Detail { class RenderHost; class ProgressiveSession; }
+namespace Jade::Detail {
+class RenderHost;
+class ProgressiveSession;
+} // namespace Jade::Detail
 namespace Jade::Renderer {
 enum class Execution { Progressive, Frame };
 struct RenderSettings {
@@ -28,11 +31,14 @@ public:
   virtual std::string_view name() const noexcept = 0;
   virtual Execution execution() const noexcept = 0;
   virtual RenderSettings settings() const { return {}; }
+
 protected:
-  void assertConfigurable() const {
+  void assertConfigurable() const
+  {
     if (m_ApplicationActive.load() || m_SessionActive.load())
       throw std::logic_error("Configure renderer algorithms outside Application::Run.");
   }
+
 private:
   friend class Jade::Detail::RenderHost;
   friend class Jade::Detail::ProgressiveSession;

@@ -25,7 +25,7 @@ void ProgressiveSession::install(std::unique_ptr<Renderer::ProgressiveBackend> b
   }
   invalidate();
 }
-void ProgressiveSession::bind(Renderer::ProgressiveBackend& backend)
+void ProgressiveSession::bind(Renderer::ProgressiveBackend &backend)
 {
   stop();
   m_Owned.reset();
@@ -39,6 +39,12 @@ void ProgressiveSession::start()
     throw std::logic_error("Install a renderer with Application::use before Run.");
   stop();
   invalidate();
+  const auto settings = m_Backend->samplingSettings();
+  if (!std::isfinite(settings.resolutionScale) || settings.resolutionScale <= 0 ||
+      settings.resolutionScale > 8 || !std::isfinite(settings.exposureEV) ||
+      std::abs(settings.exposureEV) > 64)
+    throw std::invalid_argument("Invalid renderer resolution scale or exposure.");
+  m_Settings = settings;
   m_Backend->m_SessionActive = true;
   try {
     m_Thread = std::jthread([this](std::stop_token stop) { run(stop); });

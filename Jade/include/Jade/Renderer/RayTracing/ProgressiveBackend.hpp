@@ -20,6 +20,6 @@ public:
   Execution execution() const noexcept final { return Execution::Progressive; }
   RenderSettings settings() const final { return samplingSettings(); }
   virtual ProgressiveSettings samplingSettings() const { return {}; }
-  virtual void render(const RayScene&, const RenderRequest&, Film&) = 0;
+  virtual void render(const RayScene &, const RenderRequest &, Film &) = 0;
 };
 } // namespace Jade::Renderer

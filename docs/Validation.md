@@ -6,12 +6,14 @@ Validated on 2026-10-10 with MSVC 19.51, C++20, CMake/Ninja and Mesa 26.2.4 llvm
 | --- | --- |
 | Windows Debug engine, Demo and tests build | Passed without compiler warnings |
 | Windows Release engine, Demo and tests build | Passed without compiler warnings |
-| Debug GoogleTest | 155/155 passed, 37 suites |
-| Release GoogleTest | 155/155 passed, 37 suites |
-| Standalone public headers | All 41 passed MSVC C++20 /W4 /WX |
+| Debug GoogleTest | 172/172 passed, 39 suites |
+| Release GoogleTest | 172/172 passed, 39 suites |
+| Python-free clean Debug build | Passed with Python/Python3 package discovery disabled; no virtual environment created |
+| Standalone public headers | All 45 passed MSVC C++20 /W4 /WX |
 | External CMake consumer | Built with Demo/tests disabled, linking only Jade::Jade |
 | Headless consumer render | 640x424, 256 SPP, 5 instances, 12 emissive triangles |
-| Debug and Release Demo launches | 240 frames each, 960x640 windows with 480x320 progressive samples, exit 0 and empty stderr |
+| Debug and Release Demo launches | 240 frames each, default 960x640 Rasterization preview, normal frame-limit shutdown and empty stderr |
+| Actual backend/input integration | 240 frames with repeated I switching, F pause/resume and a large reversible wheel gesture |
 | Source/header inventory and first includes | All maintained C++ files explicitly listed; corresponding header included first |
 | Git whitespace check | Passed |
 
@@ -29,18 +31,22 @@ Film checks cover HDR running means, invalid radiance rejection, exposure/tone m
 
 ## Scheduling and debug presentation
 
-Deterministic controlled-backend tests verify coalescing of camera revisions, cancellation during resize/mode changes, rejection of stale images and worker-exception propagation. Application F checks verify that wireframe bypasses the computational backend and returning to physical mode resumes with fresh accumulation. Missing backend registration and replacement during Run are rejected.
+Deterministic controlled-backend tests verify coalescing of camera revisions, cancellation during resize/mode changes, rejection of stale images and worker-exception propagation. Registry tests cover same-type replacement, registration order, last deferred selection winning and locking every registered backend during Run. I works with debug disabled and respects event consumption, modifiers and repeats. Application F checks verify that wireframe bypasses both backends; I changes selection while paused and leaving wireframe resumes the selected backend with fresh work. A 240-frame integration uses real Rasterization and RayTracing backends and GLFW input callbacks. Missing backend registration and replacement during Run are rejected.
+
+The wheel regression drives perspective and orthographic lenses beyond their interactive bounds and reverses the same gesture, restoring the initial lens and pose. GPU readback after perspective FOV changes returns to the original pixels without rebuilding unchanged shadow/probe caches. The original angular FOV scaling could reach 179 degrees and discard scroll at the clamp; the fix scales tan(FOV/2), limits interactive perspective zoom to 120 degrees and retains the accumulated gesture.
 
 Real OpenGL readback verifies sRGB image orientation and bytes, unlit triangle edges and unit RGB axes. Existing Scene, hierarchy, Assets, mesh/OBJ, math, CameraControl, module rollback, event dispatch, input ordering, timing and logger suites remain maintained against the new APIs. Input integration invokes GLFW callbacks on hidden windows; automated tests do not establish manual keyboard/mouse behavior or realtime rendering performance.
 
 ## Demo launches
 
-Both executables were launched from their actual bin directories using --frames 240. Logs confirm deployed bunny loading, llvmpipe presentation, physical 480x320 sample completion, continued accumulation and normal frame-limit shutdown. Demo uses resolutionScale 0.5 for its 960x640 window; the engine default remains 1. Presentation/input pacing and physical sample throughput are separate; these measurements are local observations, not a performance guarantee. The IDE debug button and manual controls were not exercised.
+Both executables were launched from their actual bin directories using --frames 240. Logs confirm deployed bunny loading, llvmpipe presentation, Rasterization selection and normal frame-limit shutdown. Demo starts with the full 960x640 raster preview; I selects RayTracing with resolutionScale 0.5 (480x320). The engine default remains 1. Presentation/input pacing and physical sample throughput are separate; these measurements are local observations, not a performance guarantee. The IDE debug button and manual controls were not exercised.
 
 ## Public consumer and visual output
 
 The standalone-header check exposes only Jade/include. The external CMake consumer additionally rejects leaked GLFW/GLAD include paths at compile time. It captures a SceneSnapshot, compiles RayScene, accumulates Film through RayTracing and exports RGBA8 output without constructing Application or opening a window.
 
-The exported preview was visually inspected. It shows a grounded diffuse bunny, metal cube, closed glass sphere and emissive ceiling mesh. Floor illumination, contact shadows, metal reflections and glass refraction come from the integrator. Low-sample noise remains expected; this version has no denoiser, textures, volumes, nested media or dedicated caustic algorithm.
+Paired Rasterization and RayTracing previews were exported and visually inspected with the same camera and 640x424 resolution; RayTracing used 256 SPP. Both show the diffuse bunny, metal cube, glass sphere and emissive ceiling mesh. On this llvmpipe run, raster initialization took 2027.2 ms, a cached raster frame took 15.1889 ms and the 256-SPP CPU render took 17390.1 ms. These observations have no pass/fail threshold and do not predict hardware GPU performance.
 
-Validation artifacts remain ignored: .temp/sah-debug-tests.xml/.log, .temp/sah-release-tests.xml/.log, .temp/sah-header-checks.log, .temp/ray-consumer/, .temp/sah-consumer.log and .temp/sah-preview.bmp. Demo stdout/stderr are .temp/sah-windows-debug-demo.log/.err and .temp/sah-windows-release-demo.log/.err. The independent consumer build is build/ray-consumer/. These results describe the current ray-based renderer and supersede historical raster-lighting validation.
+RasterizationTests performs actual OpenGL HDR readback. Tests cover no-emitter black output, emission sidedness, shared display encoding, area-PDF normalization against independent numerical integration, off-camera occluders, colored thin glass shadows, reflection probe invalidation/budgets, SSR with perspective and orthographic cameras, IOR=1 transmission, back-face refraction, TIR and missing vertex normals. Raster lighting is an approximation: contact shadows and glass can show map/sample/screen-coverage artifacts, and it has no diffuse GI, caustics or nested media. Path tracing remains the physical reference; low-sample noise remains expected, and there is no denoiser, textures, volumes or dedicated caustic algorithm.
+
+Validation artifacts remain ignored: .temp/no-python-debug-tests.xml/.log, .temp/renderer-release-tests.xml/.log, .temp/renderer-header-checks.log, .temp/ray-consumer/, .temp/renderer-consumer.log and .temp/renderer-preview-{raster,ray}.bmp. Demo stdout/stderr are .temp/renderer-debug-demo.log/.err and .temp/renderer-release-demo.log/.err. Independent builds are build/no-python-debug/, build/renderer-release/ and build/ray-consumer/. GLAD is compiled from checked-in C source and shaders are embedded with CMake; these checks invoke no Python tooling.

@@ -20,6 +20,6 @@ public:
   std::string_view name() const noexcept override { return "Frame"; }
   Execution execution() const noexcept final { return Execution::Frame; }
   // Target is borrowed for this call; implementations run on its owning thread.
-  virtual void render(const SceneSnapshot&, const FrameRequest&, FrameTarget&) = 0;
+  virtual void render(const SceneSnapshot &, const FrameRequest &, FrameTarget &) = 0;
 };
 } // namespace Jade::Renderer

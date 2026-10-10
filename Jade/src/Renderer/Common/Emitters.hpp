@@ -19,6 +19,7 @@ struct EmitterDistribution {
   double totalWeight = 0;
   Renderer::EmitterSample sample(float selection, Vec2 uv) const;
 };
-std::shared_ptr<const EmitterDistribution> compileEmitters(const Renderer::SceneSnapshot&, std::stop_token = {});
-bool sameEmitters(const Renderer::SceneSnapshot&, const Renderer::SceneSnapshot&);
+std::shared_ptr<const EmitterDistribution> compileEmitters(const Renderer::SceneSnapshot &,
+                                                           std::stop_token = {});
+bool sameEmitters(const Renderer::SceneSnapshot &, const Renderer::SceneSnapshot &);
 } // namespace Jade::Detail

@@ -1,24 +1,25 @@
 #include "DebugDraw.hpp"
+#include <JadeShaders.hpp>
 #include <array>
 namespace Jade::Detail {
-namespace {
-constexpr const char *lineVertex = R"(#version 330 core
-layout(location=0) in vec3 a_Position;
-uniform mat4 u_Transform;
-void main() { gl_Position=u_Transform*vec4(a_Position,1.0); }
-)";
-constexpr const char *lineFragment = R"(#version 330 core
-uniform vec3 u_Color;
-out vec4 fragmentColor;
-void main() { fragmentColor=vec4(u_Color,1.0); }
-)";
+DebugDraw::DebugDraw(OpenGLDevice &device) : m_Device(device)
+{
+  device.current();
+  m_LineProgram = std::make_unique<OpenGLProgram>(Shaders::lines_vert, Shaders::lines_frag);
+  glGenVertexArrays(1, &m_Vao);
+  glGenBuffers(1, &m_Buffer);
+  glBindVertexArray(m_Vao);
+  glBindBuffer(GL_ARRAY_BUFFER, m_Buffer);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), nullptr);
 }
-DebugDraw::DebugDraw(OpenGLDevice& device) : m_Device(device) {
-  device.current();m_LineProgram=std::make_unique<OpenGLProgram>(lineVertex,lineFragment);
-  glGenVertexArrays(1,&m_Vao);glGenBuffers(1,&m_Buffer);glBindVertexArray(m_Vao);glBindBuffer(GL_ARRAY_BUFFER,m_Buffer);
-  glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(Vec3),nullptr);
+DebugDraw::~DebugDraw()
+{
+  m_Device.current();
+  m_LineProgram.reset();
+  glDeleteBuffers(1, &m_Buffer);
+  glDeleteVertexArrays(1, &m_Vao);
 }
-DebugDraw::~DebugDraw() { m_Device.current();m_LineProgram.reset();glDeleteBuffers(1,&m_Buffer);glDeleteVertexArrays(1,&m_Vao); }
 void DebugDraw::lines(std::span<const Vec3> points, const Matrix4 &transform, Vec3 color, bool depth)
 {
   if (points.empty())

@@ -35,5 +35,4 @@ SceneSnapshot SceneSnapshot::capture(const Scene &scene, const Assets &assets)
   return result;
 }
 
-
 } // namespace Jade::Renderer

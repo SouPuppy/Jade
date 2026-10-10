@@ -19,8 +19,8 @@ using Jade::Detail::Bounds;
 using Jade::Detail::BuildCancelled;
 using Jade::Detail::BVH;
 using Jade::Detail::CheckCancellation;
-using Jade::Detail::MeshAccess;
 using Jade::Detail::EmitterDistribution;
+using Jade::Detail::MeshAccess;
 
 struct InstanceGeometry {
   std::shared_ptr<const Mesh> mesh;
@@ -186,10 +186,7 @@ bool RayScene::occluded(const Ray &ray) const
   });
 }
 
-const Material &RayScene::material(const SurfaceHit &hit) const
-{
-  return m_Impl->materials.at(hit.instance);
-}
+const Material &RayScene::material(const SurfaceHit &hit) const { return m_Impl->materials.at(hit.instance); }
 std::size_t RayScene::instanceCount() const noexcept { return m_Impl->materials.size(); }
 std::size_t RayScene::emitterCount() const noexcept { return m_Impl->lighting->emitters.size(); }
 std::size_t RayScene::meshCount() const noexcept

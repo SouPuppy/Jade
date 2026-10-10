@@ -8,7 +8,7 @@ namespace {
 
 class Shader final {
 public:
-  Shader(GLenum type, const char* source) : m_Handle(glCreateShader(type))
+  Shader(GLenum type, const char *source) : m_Handle(glCreateShader(type))
   {
     if (m_Handle == 0) {
       throw std::runtime_error("Failed to create an OpenGL shader.");
@@ -31,8 +31,8 @@ public:
     }
   }
   ~Shader() { glDeleteShader(m_Handle); }
-  Shader(const Shader&) = delete;
-  Shader& operator=(const Shader&) = delete;
+  Shader(const Shader &) = delete;
+  Shader &operator=(const Shader &) = delete;
   GLuint Handle() const noexcept { return m_Handle; }
 
 private:
@@ -41,7 +41,7 @@ private:
 
 } // namespace
 
-OpenGLProgram::OpenGLProgram(const char* vertexSource, const char* fragmentSource)
+OpenGLProgram::OpenGLProgram(const char *vertexSource, const char *fragmentSource)
 {
   Shader vertex(GL_VERTEX_SHADER, vertexSource);
   Shader fragment(GL_FRAGMENT_SHADER, fragmentSource);
@@ -68,12 +68,9 @@ OpenGLProgram::OpenGLProgram(const char* vertexSource, const char* fragmentSourc
   }
 }
 
-OpenGLProgram::~OpenGLProgram()
-{
-  glDeleteProgram(m_Handle);
-}
+OpenGLProgram::~OpenGLProgram() { glDeleteProgram(m_Handle); }
 
-GLint OpenGLProgram::Uniform(const char* name) const
+GLint OpenGLProgram::Uniform(const char *name) const
 {
   const auto location = glGetUniformLocation(m_Handle, name);
   if (location < 0) {

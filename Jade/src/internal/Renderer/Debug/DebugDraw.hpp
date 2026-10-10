@@ -5,14 +5,15 @@
 namespace Jade::Detail {
 class DebugDraw final {
 public:
-  explicit DebugDraw(OpenGLDevice&);
+  explicit DebugDraw(OpenGLDevice &);
   ~DebugDraw();
-  void wireframe(const Renderer::SceneSnapshot&, Renderer::ImageSize);
-  void axes(const Renderer::CameraFrame&, Renderer::ImageSize);
+  void wireframe(const Renderer::SceneSnapshot &, Renderer::ImageSize);
+  void axes(const Renderer::CameraFrame &, Renderer::ImageSize);
+
 private:
-  void lines(std::span<const Vec3>, const Matrix4&, Vec3, bool);
-  OpenGLDevice& m_Device;
+  void lines(std::span<const Vec3>, const Matrix4 &, Vec3, bool);
+  OpenGLDevice &m_Device;
   std::unique_ptr<OpenGLProgram> m_LineProgram;
-  GLuint m_Vao=0,m_Buffer=0;
+  GLuint m_Vao = 0, m_Buffer = 0;
 };
 } // namespace Jade::Detail

@@ -1,7 +1,9 @@
 #pragma once
 #include <Jade/Renderer/Common/FrameBackend.hpp>
 #include <memory>
-namespace Jade::Detail { struct RasterizationAccess; }
+namespace Jade::Detail {
+struct RasterizationAccess;
+}
 namespace Jade::Renderer {
 struct RasterizationConfig : RenderSettings {
   std::uint32_t areaSamples = 16;
@@ -18,11 +20,12 @@ class Rasterization final : public FrameBackend {
 public:
   explicit Rasterization(RasterizationConfig config = {});
   ~Rasterization();
-  Rasterization(const Rasterization&) = delete;
-  Rasterization& operator=(const Rasterization&) = delete;
+  Rasterization(const Rasterization &) = delete;
+  Rasterization &operator=(const Rasterization &) = delete;
   std::string_view name() const noexcept override { return "Rasterization"; }
   RenderSettings settings() const override;
-  void render(const SceneSnapshot&, const FrameRequest&, FrameTarget&) override;
+  void render(const SceneSnapshot &, const FrameRequest &, FrameTarget &) override;
+
 private:
   friend struct Jade::Detail::RasterizationAccess;
   struct Impl;

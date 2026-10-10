@@ -517,3 +517,37 @@ TEST(CameraControl, InstallationNeedsNoCameraAndMissingComponentsAreSafe)
   scene->destroy(camera);
   EXPECT_NO_THROW(app.Run({1}));
 }
+
+TEST(CameraControl, ScrollOutAndBackPastZoomLimitsRestoresProjectionAndPose)
+{
+  Jade::Application app(Hidden());
+  app.use<Jade::Renderer::RayTracing>();
+  auto scene = std::make_shared<Jade::Scene>();
+  const auto camera = AddCamera(*scene);
+  scene->setCamera(camera);
+  scene->use<Jade::Module::CameraControl>();
+  app.setScene(scene);
+  Input input;
+  const auto pose = camera.get<Jade::Transform>();
+  for (auto projection : {Jade::Projection::Perspective, Jade::Projection::Orthographic}) {
+    auto &lens = camera.get<Jade::Camera>();
+    lens.projection = projection;
+    lens.fovDegrees = 60;
+    lens.viewHeight = 6;
+    const auto original = lens;
+    for (int i = 0; i < 4; ++i) {
+      input.scroll(input.window, 0, -20);
+      app.Run({1});
+    }
+    if (projection == Jade::Projection::Perspective)
+      EXPECT_LE(lens.fovDegrees, 120);
+    for (int i = 0; i < 4; ++i) {
+      input.scroll(input.window, 0, 20);
+      app.Run({1});
+    }
+    EXPECT_NEAR(lens.fovDegrees, original.fovDegrees, 1e-4);
+    EXPECT_NEAR(lens.viewHeight, original.viewHeight, 1e-4);
+    EXPECT_EQ(camera.get<Jade::Transform>().position, pose.position);
+    EXPECT_EQ(camera.get<Jade::Transform>().rotation, pose.rotation);
+  }
+}

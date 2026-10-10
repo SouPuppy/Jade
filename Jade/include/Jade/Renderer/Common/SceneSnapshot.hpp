@@ -36,5 +36,4 @@ struct EmitterSample {
   bool twoSided = false;
 };
 
-
 } // namespace Jade::Renderer

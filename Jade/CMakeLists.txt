@@ -125,6 +125,11 @@ add_library(Jade STATIC
   src/Renderer/Rasterization/RasterPipeline.hpp
   src/Renderer/Rasterization/Rasterization.cpp
   src/Renderer/Rasterization/Rasterization.hpp
+  src/internal/Renderer/Presentation/Shaders/display.vert
+  src/internal/Renderer/Presentation/Shaders/image.frag
+  src/internal/Renderer/Presentation/Shaders/hdr.frag
+  src/internal/Renderer/Debug/Shaders/lines.vert
+  src/internal/Renderer/Debug/Shaders/lines.frag
   src/Renderer/Rasterization/Shaders/brdf.frag
   src/Renderer/Rasterization/Shaders/final.frag
   src/Renderer/Rasterization/Shaders/forward.frag
@@ -159,17 +164,34 @@ jade_configure_target(Jade)
 get_target_property(jade_sources Jade SOURCES)
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${jade_sources})
 
-set(jade_shader_root "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Rasterization/Shaders")
-set(jade_shader_files mesh.vert full.vert forward.frag shadow.frag glass-shadow.frag normal.frag final.frag glass.frag prefilter.frag brdf.frag)
-set(jade_shader_dependencies "${jade_shader_root}/shared.glsl")
+set(jade_shader_root "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(jade_shader_files
+  Renderer/Rasterization/Shaders/mesh.vert
+  Renderer/Rasterization/Shaders/full.vert
+  Renderer/Rasterization/Shaders/forward.frag
+  Renderer/Rasterization/Shaders/shadow.frag
+  Renderer/Rasterization/Shaders/glass-shadow.frag
+  Renderer/Rasterization/Shaders/normal.frag
+  Renderer/Rasterization/Shaders/final.frag
+  Renderer/Rasterization/Shaders/glass.frag
+  Renderer/Rasterization/Shaders/prefilter.frag
+  Renderer/Rasterization/Shaders/brdf.frag
+  internal/Renderer/Presentation/Shaders/display.vert
+  internal/Renderer/Presentation/Shaders/image.frag
+  internal/Renderer/Presentation/Shaders/hdr.frag
+  internal/Renderer/Debug/Shaders/lines.vert
+  internal/Renderer/Debug/Shaders/lines.frag
+)
+set(jade_shader_dependencies "${jade_shader_root}/Renderer/Rasterization/Shaders/shared.glsl")
 foreach(shader IN LISTS jade_shader_files)
   list(APPEND jade_shader_dependencies "${jade_shader_root}/${shader}")
 endforeach()
 set(jade_shader_header "${CMAKE_CURRENT_BINARY_DIR}/generated/JadeShaders.hpp")
 add_custom_command(OUTPUT "${jade_shader_header}"
-  COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/EmbedShaders.py"
-    "${jade_shader_header}" "${jade_shader_root}" ${jade_shader_files}
-  DEPENDS ${jade_shader_dependencies} "${PROJECT_SOURCE_DIR}/cmake/EmbedShaders.py"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DOUTPUT=${jade_shader_header}" "-DROOT=${jade_shader_root}" "-DSHADERS=${jade_shader_files}"
+    -P "${PROJECT_SOURCE_DIR}/cmake/EmbedShaders.cmake"
+  DEPENDS ${jade_shader_dependencies} "${PROJECT_SOURCE_DIR}/cmake/EmbedShaders.cmake"
   VERBATIM)
 target_sources(Jade PRIVATE "${jade_shader_header}")
 target_include_directories(Jade PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
