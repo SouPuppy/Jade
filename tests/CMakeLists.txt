@@ -1,4 +1,6 @@
 add_executable(JadeSmokeTests
+  JobTests.cpp
+  JobPhysicsTests.cpp
   SmokeTests.cpp
   MathTests.cpp
   CoreTests.cpp

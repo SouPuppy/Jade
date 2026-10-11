@@ -8,7 +8,7 @@
 namespace Jade::Detail {
 class RenderHost final {
 public:
-  RenderHost(Window &, bool vsync, std::string title, Renderer::RayTracingConfig);
+  RenderHost(Window &, JobSystem&, bool vsync, std::string title, Renderer::RayTracingConfig);
   ~RenderHost();
   Renderer::RayTracing &rayTracing() noexcept { return m_RayTracing; }
   void start(bool render);

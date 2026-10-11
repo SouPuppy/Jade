@@ -1,4 +1,5 @@
 #include "Manifold.hpp"
+#include "BroadPhase.hpp"
 
 namespace Jade::Detail {
 namespace {
@@ -174,9 +175,8 @@ std::vector<Manifold> manifolds(const Scene& scene, float distance) {
   if (!std::isfinite(distance) || distance < 0) throw std::invalid_argument("Contact distance must be finite and nonnegative.");
   const auto shapes = Detail::captureColliders(scene);
   std::vector<Manifold> result;
-  for (std::size_t i = 0; i < shapes.size(); ++i)
-    for (std::size_t j = i + 1; j < shapes.size(); ++j)
-      if (auto hit = Detail::collideManifold(shapes[i], shapes[j], distance)) result.push_back(std::move(*hit));
+  for (const auto pair : Detail::broadPhase(shapes, distance))
+    if (auto hit = Detail::collideManifold(shapes[pair.a], shapes[pair.b], distance)) result.push_back(std::move(*hit));
   return result;
 }
 } // namespace Jade::Physics

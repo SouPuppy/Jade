@@ -25,7 +25,7 @@ public:
   bool wireframeEnabled() const noexcept;
 private:
   friend class Jade::Runtime;
-  System(Window&, Config, std::string title);
+  System(Window&, JobSystem&, Config, std::string title);
   void start();
   void stop() noexcept;
   void invalidate() noexcept;

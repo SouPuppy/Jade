@@ -161,9 +161,14 @@ void ProgressiveSession::run(std::stop_token stop)
       m_Progress.inFlight = true;
       lock.unlock();
       if (changed) {
-        scene = m_Compiler.compile(current->snapshot, token);
-        film = std::make_unique<Renderer::Film>(current->size);
+        const auto prepare = [&] {
+          scene = m_Compiler.compile(current->snapshot, token);
+          film = std::make_unique<Renderer::Film>(current->size);
+        };
+        if (m_Jobs) m_Jobs->wait(m_Jobs->submit(prepare, JobCategory::Rendering));
+        else prepare();
       }
+      if (token.stop_requested()) continue;
       const auto start = std::chrono::steady_clock::now();
       const Renderer::RenderRequest request{*current->snapshot.camera, current->size, film->samples(),
                                             m_Settings.seed, token};

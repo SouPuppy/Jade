@@ -5,17 +5,19 @@
 
 #include <memory>
 
+namespace Jade { class JobSystem; }
+
 namespace Jade::Renderer {
 
 struct RayTracingConfig : ProgressiveSettings {
   std::uint32_t maxBounces = 12;
   std::uint32_t rrStartBounce = 4;
-  std::uint32_t workerCount = 0;
 };
 
 class RayTracing final : public ProgressiveBackend {
 public:
   explicit RayTracing(RayTracingConfig config = {});
+  RayTracing(JobSystem& jobs, RayTracingConfig config = {});
   ~RayTracing();
   RayTracing(const RayTracing &) = delete;
   RayTracing &operator=(const RayTracing &) = delete;

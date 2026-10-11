@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Jade/Renderer/RayTracing/ProgressiveBackend.hpp>
+#include <Jade/Core/JobSystem.hpp>
 
 #include <condition_variable>
 #include <mutex>
@@ -10,6 +11,7 @@ namespace Jade::Detail {
 
 class ProgressiveSession final {
 public:
+  explicit ProgressiveSession(JobSystem* jobs = nullptr) : m_Jobs(jobs) {}
   ~ProgressiveSession();
   void install(std::unique_ptr<Renderer::ProgressiveBackend> backend);
   bool configured() const noexcept { return static_cast<bool>(m_Backend); }
@@ -23,6 +25,7 @@ public:
   void rethrowError();
 
 private:
+  JobSystem* m_Jobs;
   struct Input {
     Renderer::SceneSnapshot snapshot;
     Renderer::ImageSize size;

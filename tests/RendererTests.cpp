@@ -15,6 +15,8 @@
 #include <condition_variable>
 #include <fstream>
 #include <mutex>
+#include <latch>
+#include <semaphore>
 #include <thread>
 
 namespace {
@@ -403,10 +405,7 @@ TEST(RayTracing, HeadlessRenderingIsDeterministicAcrossWorkerCounts)
   f.add(MeshData::sphere(1, 16, 8), light);
   const auto snapshot = f.snapshot();
   const auto scene = RayScene::build(snapshot);
-  RayTracingConfig one;
-  one.workerCount = 1;
-  RayTracingConfig many;
-  many.workerCount = 3;
+  Jade::JobSystem one({1}), many({3});
   RayTracing a(one), b(many);
   Film fa({48, 32}), fb({48, 32});
   for (std::uint64_t sample = 0; sample < 4; ++sample) {
@@ -424,6 +423,35 @@ TEST(RayTracing, HeadlessRenderingIsDeterministicAcrossWorkerCounts)
   EXPECT_EQ(fa.samples(), 4u);
   EXPECT_EQ(fa.resolve().pixels, before);
   EXPECT_THROW(a.render(scene, {*snapshot.camera, fa.size(), 0, 0, {}}, fa), std::invalid_argument);
+}
+
+TEST(RayTracing, SharedJobsCancelInFlightTilesAndDrainFailuresBeforeReturning)
+{
+  class Gate final : public Integrator {
+  public:
+    mutable std::latch entered{1};
+    mutable std::binary_semaphore release{0};
+    mutable std::atomic<bool> first = true;
+    bool fail = false;
+    LinearRGB Li(const Ray&, const RayScene&, Sampler&) const override {
+      if (first.exchange(false)) { entered.count_down(); release.acquire(); }
+      if (fail) throw std::runtime_error("transport failure");
+      return {1, 0, 0};
+    }
+  };
+  for (bool failure : {false, true}) {
+    JobSystem jobs({1}); RayTracing renderer(jobs);
+    auto integrator = std::make_unique<Gate>(); auto* gate = integrator.get(); gate->fail = failure;
+    renderer.setIntegrator(std::move(integrator));
+    Film film({32, 32}); std::stop_source cancel;
+    auto render = jobs.submit([&] { renderer.render(RayScene{}, {{}, film.size(), 0, 0, cancel.get_token()}, film); },
+                              JobCategory::RayTracing);
+    gate->entered.wait(); cancel.request_stop(); gate->release.release();
+    if (failure) EXPECT_THROW(jobs.wait(render), std::runtime_error);
+    else EXPECT_NO_THROW(jobs.wait(render));
+    EXPECT_EQ(film.samples(), 0u);
+    jobs.wait(jobs.submit([] {}, JobCategory::Physics));
+  }
 }
 
 TEST(Film, HdrMeanToneMappingAndValidation)
@@ -556,7 +584,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   config.debug.axes = false;
   config.logPerformance = false;
   config.debug.shortcuts = true;
-  config.renderer.rayTracing.workerCount = 1;
+  config.jobs.workerCount = 1;
   config.renderer.rayTracing.maxSamples = 1;
   Application app(config);
   auto control = std::make_shared<Control>();
@@ -611,7 +639,7 @@ TEST(ApplicationRendering, OwnsDefaultRayTracingAndLocksIntegratorDuringRun)
   config.window.visible = false;
   config.window.width = 64;
   config.window.height = 64;
-  config.renderer.rayTracing.workerCount = 1;
+  config.jobs.workerCount = 1;
   Application app(config);
   EXPECT_EQ(app.runtime().renderer().rayTracing().name(), "RayTracing");
   EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());

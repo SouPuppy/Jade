@@ -56,7 +56,7 @@ EngineConfig hidden()
   config.debug.axes = false;
   config.logPerformance = false;
   config.frameLimits = 240;
-  config.renderer.rayTracing.workerCount = 1;
+  config.jobs.workerCount = 1;
   config.renderer.rayTracing.maxSamples = 1;
   return config;
 }
@@ -498,6 +498,36 @@ TEST(CollisionDebug, NearlyParallelBoxesDrawPersistentSolverAnchorsAndImpulses)
   EXPECT_TRUE(Detail::captureCollisionDebug(scene, false, false, true, &simulation).contacts.empty());
   scene.destroy(a);
   EXPECT_TRUE(simulation.contactSnapshot(scene).empty());
+}
+
+TEST(CollisionDebug, RecordedMidEdgeArtifactDoesNotReturnAfterResetOrMicronEdits)
+{
+  Scene scene;
+  const auto a = add(scene, Box{}, {-0.999984801f, 1.49505603f, 0.0000895329431f});
+  const auto b = add(scene, Box{}, {0.000119607488f, 1.49391961f, 0.000273727899f});
+  a.get<Transform>().rotation = {1, -0.00000617850765f, -0.00000348690537f, -0.000050568f};
+  b.get<Transform>().rotation = {1, -0.000175368259f, -0.000144732257f, 0.0000656225675f};
+  a.add<RigidBody>(); b.add<RigidBody>();
+  Physics::Config config; config.gravity = {};
+  Physics::System simulation(config);
+  for (int variant = 0; variant < 5; ++variant) {
+    simulation.reset();
+    b.get<Transform>().position.z = 0.000273727899f + (variant - 2) * 0.000001f;
+    const auto debug = Detail::captureCollisionDebug(scene, false, false, true, &simulation);
+    ASSERT_EQ(debug.contacts.size(), 1u);
+    ASSERT_EQ(debug.contacts.front().points.size(), 4u);
+    for (const auto& point : debug.contacts.front().points) {
+      const float y = (point.pointA.y + point.pointB.y) * 0.5f;
+      EXPECT_TRUE(y < 1.01f || y > 1.98f) << "Unstable mid-edge contact at y=" << y;
+      const auto& ta = a.get<Transform>(); const auto& tb = b.get<Transform>();
+      const auto pa = ta.rotation.conjugate().rotate(point.pointA - ta.position);
+      const auto pb = tb.rotation.conjugate().rotate(point.pointB - tb.position);
+      for (const auto p : {pa, pb}) {
+        EXPECT_LE(std::abs(p.x), 0.500001f); EXPECT_LE(std::abs(p.y), 0.500001f); EXPECT_LE(std::abs(p.z), 0.500001f);
+        EXPECT_NEAR(std::max({std::abs(p.x), std::abs(p.y), std::abs(p.z)}), 0.5f, 1e-6f);
+      }
+    }
+  }
 }
 
 TEST(CollisionDebug, ContactPointsAndNormalsHaveDistinctRedAndGreenPixels)

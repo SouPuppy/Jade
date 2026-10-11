@@ -40,6 +40,18 @@ public:
     : Instance<Collider>(entity, std::forward<Args>(args)...) { entity.add<Collider>(Sphere{1}); }
 };
 
+class DestructionBall : public Instance<Collider, RigidBody> {
+public:
+  template<class... Args> explicit DestructionBall(Entity entity, Args&&... args)
+    : Instance<Collider, RigidBody>(entity, std::forward<Args>(args)...) {
+    entity.add<Collider>(Sphere{1});
+    auto& body = entity.get<RigidBody>();
+    body.mass = 20;
+    body.friction = 0.35f;
+    body.restitution = 0.1f;
+  }
+};
+
 std::shared_ptr<Scene> CreateScene(Vec3 eye)
 {
   auto scene = std::make_shared<Scene>();
@@ -70,6 +82,39 @@ std::shared_ptr<Scene> CreateStack(Runtime& runtime, MeshHandle mesh)
   return scene;
 }
 
+std::shared_ptr<Scene> CreateDestruction(Runtime& runtime, MeshHandle cubeMesh, MeshHandle sphereMesh)
+{
+  constexpr int columns = 10, rows = 10;
+  // Small horizontal gaps keep unconnected columns in separate solver islands.
+  constexpr float columnSpacing = 1.04f;
+  auto scene = CreateScene({10, 7, 20});
+  auto camera = scene->camera();
+  Motion::lookAt(camera.get<Transform>(), {0, 4.6f, 0});
+  scene->create<Cube>(cubeMesh, Vec3{0, -0.5f, 0}, Materials::Diffuse({0.35f, 0.38f, 0.42f}),
+                      Vec3{20, 1, 20});
+  for (int row = 0; row < rows; ++row) {
+    const float gradient = static_cast<float>(row) / (rows - 1);
+    const auto material = Materials::Diffuse({0.85f - 0.35f * gradient, 0.3f + 0.4f * gradient, 0.12f});
+    for (int column = 0; column < columns; ++column)
+      scene->create<StackBox>(cubeMesh,
+        Vec3{(column - (columns - 1) * 0.5f) * columnSpacing, row + 0.5f, 0}, material);
+  }
+  scene->create<Model>(cubeMesh, Vec3{0, 13, 3}, Materials::Emissive({18, 18, 18}), Vec3{10, 0.2f, 5});
+  const auto ball = scene->create<DestructionBall>(sphereMesh, Vec3{0, 3, 6},
+    Materials::Diffuse({0.1f, 0.3f, 0.9f}));
+  ball.get<RigidBody>().velocity = {0, 0, -30};
+  scene->on<KeyPressed<"K">>([scenePtr = scene.get(), ball] {
+    const auto& pose = scenePtr->camera().get<Transform>();
+    const auto direction = Motion::getFront(pose);
+    ball.get<Transform>().position = pose.position + direction * 2.5f;
+    auto& body = ball.get<RigidBody>();
+    body.velocity = direction * 30;
+    body.angularVelocity = {};
+  });
+  scene->on<KeyPressed<"P">>([&runtime] { runtime.setPaused(!runtime.paused()); });
+  return scene;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -77,13 +122,21 @@ int main(int argc, char** argv)
   using namespace Jade;
   try {
     RunOptions run;
-    if (argc == 3 && std::string_view(argv[1]) == "--frames") {
-      const std::string_view count(argv[2]);
-      const auto [end, error] = std::from_chars(count.data(), count.data() + count.size(), run.frameLimit);
-      if (error != std::errc{} || end != count.data() + count.size() || run.frameLimit == 0)
-        throw std::invalid_argument("--frames requires a positive frame count.");
-    } else if (argc != 1)
-      throw std::invalid_argument("Usage: JadeDemo [--frames N]");
+    int initialScene = 3;
+    for (int argument = 1; argument < argc; argument += 2) {
+      const std::string_view option(argv[argument]);
+      if (argument + 1 >= argc) throw std::invalid_argument("Usage: JadeDemo [--frames N] [--scene 1|2|3]");
+      const std::string_view value(argv[argument + 1]);
+      if (option == "--frames") {
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), run.frameLimit);
+        if (error != std::errc{} || end != value.data() + value.size() || run.frameLimit == 0)
+          throw std::invalid_argument("--frames requires a positive frame count.");
+      } else if (option == "--scene") {
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), initialScene);
+        if (error != std::errc{} || end != value.data() + value.size() || initialScene < 1 || initialScene > 3)
+          throw std::invalid_argument("--scene requires 1, 2 or 3.");
+      } else throw std::invalid_argument("Usage: JadeDemo [--frames N] [--scene 1|2|3]");
+    }
 
     EngineConfig config;
     config.debug.shortcuts = true;
@@ -110,30 +163,27 @@ int main(int argc, char** argv)
     showroom->create<Ball>(sphereMesh, Vec3{2.2f, -0.9f, 0}, Materials::Glass());
     showroom->create<Cube>(cubeMesh, Vec3{0, 4, 0}, lamp, Vec3{4, 0.1f, 3});
 
-    auto hierarchy = CreateScene({7, 5, 11});
-    auto sun = hierarchy->create<Ball>(sphereMesh, Vec3{}, lamp, Vec3{0.7f, 0.7f, 0.7f});
-    auto earth = hierarchy->create<Ball>(sphereMesh, Vec3{4, 0, 0}, Materials::Diffuse({0.1f, 0.35f, 0.8f}),
-                                        Vec3{0.5f, 0.5f, 0.5f});
-    auto moon = hierarchy->create<Ball>(sphereMesh, Vec3{3, 0, 0}, Materials::Diffuse({0.6f, 0.6f, 0.6f}),
-                                       Vec3{0.35f, 0.35f, 0.35f});
-    hierarchy->setParent(earth, sun);
-    hierarchy->setParent(moon, earth);
-    hierarchy->create<Cube>(cubeMesh, Vec3{3, 5, 6}, Materials::Emissive({18, 18, 18}), Vec3{4, 0.1f, 3});
-    bool animate = true;
-    hierarchy->on<FrameUpdate>([sun, earth, &animate](const auto& frame) {
-      if (animate) {
-        Motion::yaw(sun.get<Transform>(), 12 * frame.dt);
-        Motion::yaw(earth.get<Transform>(), 35 * frame.dt);
-      }
-    });
-    hierarchy->on<KeyPressed<"P">>([&] { animate = !animate; });
+    std::shared_ptr<Scene> destruction;
     auto stack = CreateStack(runtime, cubeMesh);
     const auto select = [&](const auto& scene) { runtime.setPaused(false); runtime.setScene(scene); return EventFlow::Stop; };
     app.on<KeyPressed<"1">>([&] { return select(showroom); });
-    app.on<KeyPressed<"2">>([&] { return select(hierarchy); });
+    app.on<KeyPressed<"2">>([&] {
+      if (!destruction) destruction = CreateDestruction(runtime, cubeMesh, sphereMesh);
+      return select(destruction);
+    });
     app.on<KeyPressed<"3">>([&] { return select(stack); });
-    app.on<KeyPressed<"R">>([&] { stack = CreateStack(runtime, cubeMesh); return select(stack); });
-    runtime.setScene(stack);
+    app.on<KeyPressed<"R">>([&] {
+      if (destruction && runtime.scene() == destruction) {
+        destruction = CreateDestruction(runtime, cubeMesh, sphereMesh);
+        return select(destruction);
+      }
+      stack = CreateStack(runtime, cubeMesh);
+      return select(stack);
+    });
+    if (initialScene == 2) {
+      destruction = CreateDestruction(runtime, cubeMesh, sphereMesh);
+      runtime.setScene(destruction);
+    } else runtime.setScene(initialScene == 1 ? showroom : stack);
     app.Run(run);
     return 0;
   } catch (const std::exception& error) {

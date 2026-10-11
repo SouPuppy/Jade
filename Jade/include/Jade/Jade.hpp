@@ -4,6 +4,8 @@
 #include <Jade/EngineConfig.hpp>
 #include <Jade/Runtime.hpp>
 #include <Jade/Core/Archetype.hpp>
+#include <Jade/Core/JobSystem.hpp>
+#include <Jade/Core/TaskGraph.hpp>
 #include <Jade/Physics/RigidBody.hpp>
 #include <Jade/Physics/System.hpp>
 #include <Jade/Renderer/System.hpp>

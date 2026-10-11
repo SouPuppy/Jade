@@ -15,6 +15,7 @@ public:
   void setScene(std::shared_ptr<Scene> scene);
   Renderer::System& renderer() noexcept;
   Physics::System& physics() noexcept;
+  JobSystem& jobs() noexcept;
   // Accumulates display dt and executes fixed simulation steps only.
   void tick(float dt);
   unsigned substeps() const noexcept;

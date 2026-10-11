@@ -5,12 +5,12 @@ namespace Jade::Renderer {
 struct System::Impl {
   bool render, wireframe;
   Detail::RenderHost host;
-  Impl(Window& window, Config config, std::string title)
+  Impl(Window& window, JobSystem& jobs, Config config, std::string title)
     : render(config.render), wireframe(config.wireframe),
-      host(window, config.vsync, std::move(title), config.rayTracing) {}
+      host(window, jobs, config.vsync, std::move(title), config.rayTracing) {}
 };
-System::System(Window& window, Config config, std::string title)
-  : m_Impl(std::make_unique<Impl>(window, config, std::move(title))) {}
+System::System(Window& window, JobSystem& jobs, Config config, std::string title)
+  : m_Impl(std::make_unique<Impl>(window, jobs, config, std::move(title))) {}
 System::~System() = default;
 RayTracing& System::rayTracing() noexcept { return m_Impl->host.rayTracing(); }
 RenderProgress System::progress() const {

@@ -1,6 +1,6 @@
 # Jade
 
-Jade is a C++20 static engine library validated on Windows x64 / MSVC. Application owns the window/input loop; Runtime coordinates Scene, Assets, Renderer and Physics. Scene owns component data and signature-indexed entity groups. Physics supports Box/Sphere rigid bodies, gravity, angular motion and persistent multi-point contact solving without a window or GPU. Renderer provides CPU progressive path tracing and unlit wireframe; OpenGL 3.3 presents completed images and debug primitives. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
+Jade is a C++20 static engine library validated on Windows x64 / MSVC. Application owns the window/input loop; Runtime coordinates Scene, Assets, Renderer and Physics through a shared categorized Job System. Scene owns component data and signature-indexed entity groups. Physics supports Box/Sphere rigid bodies, gravity, angular motion and persistent multi-point contact solving without a window or GPU. Renderer provides CPU progressive path tracing and unlit wireframe; OpenGL 3.3 presents completed images and debug primitives. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
 
 ## Build
 
@@ -37,7 +37,9 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with image rendering off and Wireframe on, showing a 5/3/1 pyramid of nine dynamic cubes above a static floor. F toggles Wireframe; I toggles image rendering independently. Both can be enabled for an overlay, or disabled while physics/input/debug continue. Press 3 to return to the pyramid, P to pause/resume physics, R to reset it and K to give its top cube an off-center impulse. F4 toggles cyan AABBs, yellow Collider outlines, red contact markers, green normal arrows and Physics/Debug logging. Press 1 for the bunny/metal/glass showroom or 2 for the animated sphere hierarchy; P pauses the hierarchy animation. Scene selection preserves both render switches. RayTracing uses resolutionScale 0.5; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and Q/E roll. O switches projection, F3 toggles axes and Esc exits. Demo objects use Archetype constructors and share a single unit-cube mesh.
+Demo starts with image rendering off and Wireframe on, showing a 5/3/1 pyramid of nine dynamic cubes above a static floor. F toggles Wireframe; I toggles image rendering independently. Both can be enabled for an overlay, or disabled while physics/input/debug continue. Press 3 to return to the pyramid; K gives its top cube an off-center impulse. Press 1 for the bunny/metal/glass showroom or 2 for the destruction scene: a 10-column, 10-row vertical wall of 100 dynamic cubes and a heavy sphere that automatically strikes the wall. K repositions and fires that sphere from the current camera direction. In both physics scenes, P pauses/resumes and R rebuilds the current scene, including its projectile. Scene2 is created on first selection and retains its state when switching away. Start directly with `JadeDemo --scene 2`; `--frames N` remains available and can be combined with `--scene`.
+
+F4 toggles cyan AABBs, yellow Collider outlines, red contact markers, green normal arrows and Physics/Debug logging. Scene selection preserves both render switches. RayTracing uses resolutionScale 0.5; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and Q/E roll. O switches projection, F3 toggles axes and Esc exits. Demo objects use Archetype constructors and share a single unit-cube mesh.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -142,7 +144,7 @@ Archetype recursively flattens and deduplicates component types in first-appeara
 
 RigidBody uses world-space velocity and angularVelocity (radians/second), mass in kg, friction 0.6 and restitution 0 by default. A Collider without RigidBody, or with mass 0, is static. Positive-mass bodies require a root Transform and Collider; parented dynamic bodies are rejected. Inertia is derived from the scaled Box/Sphere. `runtime.physics().applyImpulse(scene, entity, impulse, worldPoint)` changes both linear and angular velocity for off-center impulses.
 
-The solver uses semi-implicit integration, up to four Box face contacts, speculative contact retention (5 mm), accumulated normal/tangent impulses, warm starting and Coulomb friction. Defaults are 20 velocity iterations, four separate position-correction iterations and 2 mm penetration slop. Restitution applies only above a 1 m/s closing speed. Static/static pairs remain available to geometric queries/debug drawing but do not enter the dynamics solver. No sleeping, CCD, joints, kinematic bodies or physics worker threads are introduced.
+The solver uses semi-implicit integration, up to four Box face contacts, speculative contact retention (5 mm), accumulated normal/tangent impulses, warm starting and Coulomb friction. Defaults are 20 velocity iterations, four separate position-correction iterations and 2 mm penetration slop. Restitution applies only above a 1 m/s closing speed. Static/static pairs remain available to geometric queries/debug drawing but do not enter the dynamics solver. No sleeping, CCD, joints, kinematic bodies or dedicated physics thread are introduced. Runtime Physics uses the shared Job System; independently constructed Physics::System remains serial unless a JobSystem is injected.
 
 ```cpp
 auto root = scene->create(); // An identity group needs no Transform.
@@ -195,6 +197,35 @@ Only four GLSL files remain: Display.vert and ImageDisplay.frag present complete
 
 OBJ loading parses MeshData, validates it and builds the Mesh BLAS before publishing the asset and canonical-path cache entry. Loading failures publish neither. OBJ parsing supports positive/negative indices, common face forms, triangles and convex polygons. Explicit normals are normalized; absent normals use area-weighted smoothing. UVs, materials and smoothing groups are not retained. Triangulate concave polygons before loading. Canonical paths share a cache entry; parse/file errors include path and line. The bundled bunny has 453 vertices and 948 triangles; see [asset terms](assets/README.md).
 
+## Jobs and physics scheduling
+
+Runtime owns a single `JobSystem`, shared by Physics, scene compilation and RayTracing. Set `config.jobs.workerCount` before constructing Application; zero automatically selects logical processors minus one, clamped to 1..256. `runtime.jobs()` exposes the same scheduler. Physics remains synchronous: `step(scene, dt)` returns only after private worker buffers have been committed on the owning thread.
+
+```cpp
+Jade::JobSystem jobs({3}); // Headless, three workers.
+Jade::Physics::System physics(jobs);
+Jade::Renderer::RayTracing rays(jobs);
+std::vector<float> values(10000);
+auto work = jobs.parallelFor(values.size(), [&](std::size_t i) {
+  values[i] = static_cast<float>(i);
+}, {Jade::JobCategory::Gameplay});
+jobs.wait(work);
+
+Jade::TaskGraph graph;
+auto load = graph.add([] { /* Produce private CPU data. */ }, {Jade::JobCategory::Asset});
+auto prepare = graph.add([] { /* Consume that CPU data. */ }, {Jade::JobCategory::Rendering});
+graph.depends(prepare, load);
+jobs.wait(jobs.submit(graph));
+```
+
+Categories identify Physics, Gameplay, Rendering, RayTracing, Asset and General work. Their default priorities are Critical, High, Normal and Background respectively; the last three categories share Background. `JobOptions::priority` overrides the default. `config.jobs.priorityWeights` defaults to `{8, 4, 2, 1}`: worker dispatch uses weighted rotation, with category rotation within a priority. Empty queues are skipped. Weights count dispatched work items, not CPU time, and executing callbacks are never preempted. Higher-priority graph consumers raise their prerequisites' effective priority.
+
+Workers execute local deque tasks and steal from other workers; external submissions enter category queues. Parallel ranges keep bounded fan-out even with `grainSize=1`. Graph parallel nodes can obtain their count from a callback after prerequisites complete. Each graph submission owns an execution snapshot and can be waited independently. Worker waits cooperate with the scheduler; external `wait(handle, WaitMode::Help)` assists only that graph and descendant submissions. External assistance does not consume worker fairness budgets. Exceptions skip unstarted work in the failed group, drain running callbacks and rethrow from wait. Shutdown rejects external submissions, drains accepted work and internal descendants, and joins workers. Callbacks must terminate; a job cannot wait for itself/ancestors or shut down its own scheduler.
+
+Physics uses Integration ? Bounds ? Sweep and Prune ? Narrow Phase ? Islands ? Solve ? Export dependencies. Candidate and contact ordering stays stable. Separate islands solve concurrently, preserving sequential iterations inside an island; shared static bodies are read-only. Contact anchors, warm starting, paused inspection and entity generations retain their existing contracts. Sparse broad phase avoids the full pair scan; dense overlap can still produce quadratic candidates. `statistics().candidatePairs` and `statistics().islands` expose that work.
+
+Scene, Entity, component storage, Assets publication, input and OpenGL remain owning-thread APIs. Categories provide scheduling, not memory exclusion. Jobs must use immutable inputs or disjoint outputs and express data dependencies explicitly. Captures must outlive all handles using them. Injected systems require their JobSystem to outlive them; separate standalone RayTracing instances create their own generic Job Systems unless an external scheduler is supplied. RayTracing no longer has a `workerCount` configuration field. Asset categorization does not add an asynchronous asset-loading API.
+
 ## Rendering configuration and extension
 
 Runtime's Renderer::System owns one RayTracing instance automatically. Set sampling parameters in EngineConfig before construction; use app.runtime().renderer().rayTracing() to install a custom Integrator outside Run.
@@ -203,7 +234,7 @@ Runtime's Renderer::System owns one RayTracing instance automatically. Set sampl
 Jade::EngineConfig config;
 config.renderer.rayTracing.resolutionScale = 1; // Actual framebuffer dimensions.
 config.renderer.rayTracing.maxSamples = 0;     // Unlimited; positive stops a static revision.
-config.renderer.rayTracing.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
+config.jobs.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
 config.renderer.rayTracing.maxBounces = 12;
 config.renderer.rayTracing.rrStartBounce = 4;
 config.renderer.rayTracing.seed = 0;
@@ -211,11 +242,11 @@ config.renderer.rayTracing.exposureEV = 0;
 Jade::Application app(config);
 ```
 
-Unmodified KeyPressed I toggles image rendering and F toggles Wireframe after application and scene handlers. Both work with debug shortcuts disabled and respect EventFlow::Stop, modifiers and repeats. Wireframe overlays the current image without restarting samples. Disabling image rendering cancels/joins computation; re-enabling starts a fresh Film. Worker pools and immutable mesh acceleration remain owned by Renderer::System.
+Unmodified KeyPressed I toggles image rendering and F toggles Wireframe after application and scene handlers. Both work with debug shortcuts disabled and respect EventFlow::Stop, modifiers and repeats. Wireframe overlays the current image without restarting samples. Disabling image rendering cancels/joins computation; re-enabling starts a fresh Film. Runtime owns the shared worker pool; rendering algorithms and immutable mesh acceleration survive render switches.
 
 Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount within [0, 256], maxBounces within [1, 1024], and roulette start positive. Fewer pixels improve CPU preview latency. Full framebuffer rendering is the default; no realtime full-resolution sample rate is promised.
 
-The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and image-render switches reject stale display results.
+The window thread captures immutable scene/camera state. A coordinator submits scene compilation as Rendering work and schedules 16x16 tiles as RayTracing background work on the shared persistent CPU workers. Compilation consumes already compiled meshes and reuses/refits/rebuilds the instance TLAS. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and image-render switches reject stale display results.
 
 Wireframe draws unlit triangle edges, independently of image rendering. F3 axes are composed afterward and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.runtime().renderer().progress() reports RayTracing, RayTracing + Wireframe, Wireframe or Disabled, with optional sample count, sample time and inFlight state. Samples are available whenever image rendering is enabled. These values are independent of presentation FPS.
 
@@ -546,7 +577,7 @@ Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
 Jade/src/Renderer/   # Common/ snapshots/images and RayTracing/ transport
 Jade/src/internal/   # Registry, ProgressiveSession, display/line shaders, platform and input
-Demo/               # Two scenes, cube/bunny and animated hierarchy
+Demo/               # Showroom, 10x10 destruction wall and nine-cube pyramid
 assets/             # Bunny OBJ and attribution
 tests/              # ECS, assets, math, input, scheduling and pixel checks
 ```

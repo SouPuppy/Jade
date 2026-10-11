@@ -2,9 +2,9 @@
 #include "../../Platform/Window.hpp"
 
 namespace Jade::Detail {
-RenderHost::RenderHost(Window &window, bool vsync, std::string title, Renderer::RayTracingConfig config)
+RenderHost::RenderHost(Window &window, JobSystem& jobs, bool vsync, std::string title, Renderer::RayTracingConfig config)
     : m_Window(window), m_Title(std::move(title)), m_Device(window, vsync), m_Display(m_Device),
-      m_Debug(m_Device), m_RayTracing(config)
+      m_Debug(m_Device), m_RayTracing(jobs, config), m_Session(&jobs)
 {
   m_Session.bind(m_RayTracing);
 }

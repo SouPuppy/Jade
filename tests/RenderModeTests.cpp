@@ -22,7 +22,7 @@ EngineConfig hidden(bool debug = false)
   config.logPerformance = false;
   config.frameLimits = 240;
   config.renderer.rayTracing.resolutionScale = .5f;
-  config.renderer.rayTracing.workerCount = 2;
+  config.jobs.workerCount = 2;
   config.renderer.rayTracing.maxSamples = 1;
   return config;
 }

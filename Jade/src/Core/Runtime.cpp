@@ -16,6 +16,7 @@ const Log::Logger sceneLog{"Scene"};
 }
 struct Runtime::Impl {
   Window& window;
+  JobSystem jobs;
   Assets assets;
   std::shared_ptr<Scene> scene;
   std::optional<std::shared_ptr<Scene>> pending;
@@ -25,18 +26,20 @@ struct Runtime::Impl {
   double accumulator = 0, dropped = 0, logElapsed = 0;
   unsigned substeps = 0;
   Impl(Window& w, const EngineConfig& c)
-    : window(w), renderer(w, c.renderer, c.window.title), physics(c.physics), axes(c.debug.axes),
+    : window(w), jobs(c.jobs), renderer(w, jobs, c.renderer, c.window.title), physics(jobs, c.physics), axes(c.debug.axes),
       physicsDebug(c.debug.physics), logNow(c.debug.physics) {}
 };
 Runtime::Runtime(Window& window, const EngineConfig& config) : m_Impl(std::make_unique<Impl>(window, config)) {}
 Runtime::~Runtime() {
   m_Impl->renderer.stop();
+  m_Impl->jobs.shutdown();
   if (m_Impl->scene) m_Impl->scene->m_Impl->owner = nullptr;
 }
 Assets& Runtime::assets() noexcept { return m_Impl->assets; }
 std::shared_ptr<Scene> Runtime::scene() const noexcept { return m_Impl->scene; }
 Renderer::System& Runtime::renderer() noexcept { return m_Impl->renderer; }
 Physics::System& Runtime::physics() noexcept { return m_Impl->physics; }
+JobSystem& Runtime::jobs() noexcept { return m_Impl->jobs; }
 void Runtime::setScene(std::shared_ptr<Scene> scene) {
   if (scene && scene->m_Impl->owner && scene->m_Impl->owner != this)
     throw std::invalid_argument("Scene is already active in another Runtime.");

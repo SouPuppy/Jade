@@ -1,4 +1,10 @@
 add_library(Jade STATIC
+  include/Jade/Core/JobSystem.hpp
+  include/Jade/Core/TaskGraph.hpp
+  src/Core/JobSystem.cpp
+  src/Core/TaskGraph.cpp
+  src/internal/Physics/BroadPhase.hpp
+  src/internal/Physics/BroadPhase.cpp
   include/Jade/Core/Archetype.hpp
   include/Jade/EngineConfig.hpp
   include/Jade/Runtime.hpp

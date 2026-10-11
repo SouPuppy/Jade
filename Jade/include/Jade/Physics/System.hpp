@@ -6,6 +6,8 @@
 #include <span>
 #include <vector>
 
+namespace Jade { class JobSystem; }
+
 namespace Jade::Physics {
 struct Config {
   Vec3 gravity{0, -9.81f, 0};
@@ -29,6 +31,7 @@ struct Manifold {
 };
 struct Statistics {
   std::size_t dynamicBodies = 0, staticBodies = 0, contacts = 0;
+  std::size_t candidatePairs = 0, islands = 0;
   float maximumPenetration = 0;
   std::uint64_t steps = 0;
 };
@@ -38,6 +41,7 @@ std::vector<Manifold> manifolds(const Scene& scene, float distance = 0);
 class System final {
 public:
   explicit System(Config config = {});
+  System(JobSystem& jobs, Config config = {});
   ~System();
   System(const System&) = delete;
   System& operator=(const System&) = delete;

@@ -2,6 +2,7 @@
 
 #include "../internal/Core/SceneTransforms.hpp"
 #include "../internal/Physics/CollisionWorld.hpp"
+#include "../internal/Physics/BroadPhase.hpp"
 
 #include <limits>
 #include <utility>
@@ -273,12 +274,10 @@ std::vector<Contact> detect(const Scene& scene)
 {
   const auto colliders = Detail::captureColliders(scene);
   std::vector<Contact> result;
-  for (std::size_t i = 0; i < colliders.size(); ++i) {
-    for (std::size_t j = i + 1; j < colliders.size(); ++j) {
-      if (auto hit = query(colliders[i], colliders[j]))
-        result.push_back(*hit);
-    }
-  }
+  double margin = 1e-6;
+  for (const auto& collider : colliders) margin = std::max(margin, 1e-6 * collider.size());
+  for (const auto pair : Detail::broadPhase(colliders, margin))
+    if (auto hit = query(colliders[pair.a], colliders[pair.b])) result.push_back(*hit);
   return result;
 }
 

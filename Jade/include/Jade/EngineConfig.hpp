@@ -2,6 +2,7 @@
 #include <Jade/WindowConfig.hpp>
 #include <Jade/Renderer/System.hpp>
 #include <Jade/Physics/System.hpp>
+#include <Jade/Core/JobSystem.hpp>
 #include <cstdint>
 
 namespace Jade {
@@ -14,6 +15,7 @@ struct EngineConfig {
   WindowConfig window;
   Renderer::Config renderer;
   Physics::Config physics;
+  JobSystemConfig jobs;
   DebugConfig debug;
   std::uint32_t frameLimits = 24;
   bool logPerformance = true;
