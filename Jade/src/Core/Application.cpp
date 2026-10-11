@@ -133,17 +133,23 @@ void Application::Run(const RunOptions &options)
             flow == EventFlow::Continue && !m_Impl->stopRequested) {
           m_Impl->window.RequestClose();
         }
-        if (key->action == KeyAction::Pressed && (key->event.key == Key::I || key->event.key == Key::F) &&
+        if (key->action == KeyAction::Pressed && (key->event.key == Key::I || key->event.key == Key::F1) &&
             key->event.modifiers == Modifiers::None && flow == EventFlow::Continue &&
             !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
           auto& renderer = runtime().renderer();
           if (key->event.key == Key::I) {
-            renderer.setRender(!renderer.renderEnabled());
-            applicationLog << Log::info("Render: {}", renderer.renderEnabled() ? "on" : "off");
+            renderer.setRayTracingEnabled(!renderer.rayTracingEnabled());
+            applicationLog << Log::info("Ray tracing: {}", renderer.rayTracingEnabled() ? "on" : "off");
           } else {
             renderer.setWireframe(!renderer.wireframeEnabled());
             applicationLog << Log::info("Wireframe: {}", renderer.wireframeEnabled() ? "on" : "off");
           }
+        }
+        if (key->action == KeyAction::Pressed && key->event.key == Key::P &&
+            key->event.modifiers == Modifiers::None && flow == EventFlow::Continue &&
+            !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
+          runtime().setPaused(!runtime().paused());
+          applicationLog << Log::info("Pause: {}", runtime().paused() ? "on" : "off");
         }
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
@@ -153,6 +159,15 @@ void Application::Run(const RunOptions &options)
             applicationLog << Log::info("Axes/AABB: {}", enabled ? "on" : "off");
           } else if (key->event.key == Key::F4) {
             runtime().setPhysicsDebug(!runtime().physicsDebugEnabled());
+          } else if (key->event.key == Key::F5) {
+            auto& renderer = runtime().renderer();
+            auto settings = renderer.rayTracingSettings();
+            settings.enabled = true;
+            settings.output = settings.output == Renderer::RayOutput::Color
+                                ? Renderer::RayOutput::Normal : Renderer::RayOutput::Color;
+            renderer.setRayTracingSettings(settings);
+            applicationLog << Log::info("Ray output: {}", settings.output == Renderer::RayOutput::Normal
+                                                          ? "Normal" : "Color");
           } else if (key->event.key == Key::O && active) {
             const auto camera = active->camera();
             if (camera.has<Transform>() && camera.has<Camera>()) {
@@ -231,7 +246,7 @@ void Application::Run(const RunOptions &options)
     }
 
     m_Impl->runtime.tick(dt);
-    m_Impl->runtime.render({size.width, size.height});
+    m_Impl->runtime.render({size.width, size.height}, frameClock.RenderDeadline());
     const auto completed = Clock::now();
     const auto stats = frameClock.FinishFrame(completed);
     frames = stats.frame;

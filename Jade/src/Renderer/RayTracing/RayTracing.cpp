@@ -1,4 +1,5 @@
 #include "RayTracing.hpp"
+#include "Settings.hpp"
 
 #include <Jade/Core/JobSystem.hpp>
 #include <mutex>
@@ -6,38 +7,48 @@
 namespace Jade::Renderer {
 namespace {
 
-void validateSettings(const RayTracingConfig &config)
+void validateSettings(const RayTracingSettings &config)
 {
-  if (!std::isfinite(config.resolutionScale) || config.resolutionScale <= 0 || config.resolutionScale > 8)
-    throw std::invalid_argument("Resolution scale must be within (0, 8].");
-  if (!std::isfinite(config.exposureEV) || std::abs(config.exposureEV) > 64)
-    throw std::invalid_argument("Exposure must be within [-64, 64] EV.");
+  Detail::validateRayTracingSettings(config);
+  if (config.device != RayDevice::CPU)
+    throw std::invalid_argument("RayTracing is the CPU backend; use ComputeRayTracer for GPU execution.");
 }
 
 } // namespace
 
 struct RayTracing::Impl {
-  RayTracingConfig config;
+  RayTracingSettings config;
   std::unique_ptr<JobSystem> ownedJobs;
   JobSystem* jobs;
   std::unique_ptr<Integrator> integrator;
   std::mutex renderMutex;
-  Impl(RayTracingConfig input, JobSystem* external)
+  Impl(RayTracingSettings input, JobSystem* external)
       : config(input), ownedJobs(external ? nullptr : std::make_unique<JobSystem>()),
         jobs(external ? external : ownedJobs.get()),
         integrator(std::make_unique<PathIntegrator>(PathIntegratorConfig{input.maxBounces, input.rrStartBounce})) {}
 };
 
-RayTracing::RayTracing(RayTracingConfig config) {
+RayTracing::RayTracing(RayTracingSettings config) {
   validateSettings(config);
   m_Impl = std::make_unique<Impl>(config, nullptr);
 }
-RayTracing::RayTracing(JobSystem& jobs, RayTracingConfig config) {
+RayTracing::RayTracing(JobSystem& jobs, RayTracingSettings config) {
   validateSettings(config);
   m_Impl = std::make_unique<Impl>(config, &jobs);
 }
 RayTracing::~RayTracing() = default;
 ProgressiveSettings RayTracing::samplingSettings() const { return m_Impl->config; }
+ImageEncoding RayTracing::imageEncoding() const noexcept {
+  return m_Impl->config.output == RayOutput::Normal ? ImageEncoding::LinearData : ImageEncoding::Radiance;
+}
+void RayTracing::configure(const RayTracingSettings& settings)
+{
+  validateSettings(settings);
+  std::lock_guard lock(m_Impl->renderMutex);
+  if (settings.maxBounces != m_Impl->config.maxBounces || settings.rrStartBounce != m_Impl->config.rrStartBounce)
+    m_Impl->integrator = std::make_unique<PathIntegrator>(PathIntegratorConfig{settings.maxBounces, settings.rrStartBounce});
+  m_Impl->config = settings;
+}
 void RayTracing::setIntegrator(std::unique_ptr<Integrator> integrator)
 {
   assertConfigurable();
@@ -74,9 +85,22 @@ void RayTracing::render(const RayScene &scene, const RenderRequest &request, Fil
       for (int x = left; x < std::min(left + 16, size.width); ++x) {
         const auto pixel = static_cast<std::size_t>(y) * size.width + x;
         sampler.start(pixel, request.sampleIndex);
-        const auto jitter = sampler.next2D();
+        const auto randomJitter = sampler.next2D();
+        const auto jitter = m_Impl->config.jitter ? randomJitter : Vec2{0.5f, 0.5f};
         const auto ray = request.camera.generateRay({x + jitter.x, y + jitter.y}, size);
-        sample[pixel] = m_Impl->integrator->Li(ray, scene, sampler);
+        if (m_Impl->config.output == RayOutput::Normal || m_Impl->config.mode == RayMode::RayCast) {
+          SurfaceHit hit;
+          if (scene.intersect(ray, hit)) {
+            if (m_Impl->config.output == RayOutput::Normal) sample[pixel] = {
+              hit.shadingNormal.x * 0.5f + 0.5f, hit.shadingNormal.y * 0.5f + 0.5f,
+              hit.shadingNormal.z * 0.5f + 0.5f};
+            else {
+              const auto& material = scene.material(hit);
+              sample[pixel] = material.baseColor;
+              if (material.twoSidedEmission || hit.frontFace) sample[pixel] += material.emission;
+            }
+          }
+        } else sample[pixel] = m_Impl->integrator->Li(ray, scene, sampler);
       }
     }
   }, {JobCategory::RayTracing, {}, 1});

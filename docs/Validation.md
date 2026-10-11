@@ -1,5 +1,90 @@
 # Windows x64 validation
 
+## Mesh wireframe on F1 (2026-10-11)
+
+The default Mesh wireframe switch moves from F to F1, independently of debug.shortcuts. Updated regressions cover image/wireframe combinations, exact modifiers, repeat suppression, application/scene consumption, callback ordering and the former F key being unbound. F3/F4/F5 behavior remains covered. Release passes all 14 targeted ApplicationDebug/RenderMode/F5 checks in 4.961 seconds; Debug passes the F1/image state regression in 0.323 seconds. Both Demo executables rebuild successfully; git diff --check passes. Artifacts: build/validation/f1-mesh-*.log/.xml.
+
+## F5 enables its ray image (2026-10-11)
+
+F5 now sets rayTracing.enabled=true while toggling Color/Normal, so it is visible from wireframe startup without a prior I press. I can still turn the image off; F5 reopens it with the next output. Wireframe and device/transport/quality settings remain intact. Repeat, modified, consumed and debug-disabled F5 events do not enable the image. Release Application/RenderMode regressions pass; the updated CPU/GPU F5 regression also passes in Debug. Both Demo builds are updated. Artifacts: build/validation/f5-enable-*.log/.xml. This behavior supersedes the previous F5 image-switch preservation rule.
+
+## Debug shortcuts, camera pan and ray enabled state (2026-10-11)
+
+Release passes all 264 tests across 51 suites in 17.847 seconds. Debug passes 44 Application, RenderMode, InputState, FreeCameraControl and FPSCameraControl regressions in 77.304 seconds. Both builds complete without compiler warnings; git diff --check passes. Release and Debug JadeDemo.exe are rebuilt.
+
+F3 retains space axes/AABBs, F4 retains physics overlays/logging, and unmodified unconsumed F5 toggles Color/Normal output when debug shortcuts are enabled. Tests exercise CPU/GPU with ray images disabled and enabled, repeat/modifier/consumption handling, preserved device/seed/bounce/quality settings and completed Normal frames. Config::render is replaced by RayTracingSettings::enabled; setRayTracingEnabled()/rayTracingEnabled() and setRayTracingSettings() share that state. I continues toggling the ray image independently of Wireframe.
+
+FreeCameraControl no longer binds Q/E roll. Orthographic middle-button panning uses current viewHeight / logical windowHeight and camera right/up axes, preserving rotation. Regressions verify cursor-scale tracking, zoom/resize behavior, ordered press/move/release, focus loss, camera changes, scene activation and projection changes. Perspective middle-button presses do not pan.
+
+Demo keeps only --cpu/--gpu, --scene, --frames and --help. Device flags enable the ray image; no device flag retains wireframe startup. Output is selected with F5, and sampling/bounce controls stay in the engine settings (Demo still uses eight complete rounds per running frame). Release GPU showroom (two frames) and CPU showroom (one frame) exit successfully; removed --output and conflicting --cpu/--gpu flags reject with exit 1. Artifacts are under build/validation/debug-controls-*.log/.xml. Earlier sections record previous APIs and command-line options.
+
+## Written black pixels and independent-frame quality (2026-10-11)
+
+Release passes all 261 tests across 51 suites in 19.940 seconds. Debug passes all 34 targeted ProgressiveSession, ComputeRayTracer, GpuPathTracing and RenderMode tests in 6.997 seconds. Both builds have no compiler warnings; public headers pass an MSVC C++20 /EHsc /W4 /WX /permissive- syntax check with only Jade/include exposed. Git diff --check passes.
+
+A controlled showroom floor patch distinguishes missing pixels from zero-radiance sampling. With centered primary rays, one bounce and one sample, all 912 patch pixels hit an unobstructed floor. The six-face emitting box selects a back-facing light 446 times, while no selected front-facing shadow ray is occluded. GPU and CPU each produce exactly 418 black pixels, with zero disagreement in the black-pixel mask. At four samples 54 remain black; at 16 none do. Replacing that lamp with a downward-only area panel produces zero black pixels at one sample. This is a sampling/lighting issue in the reproduction, rather than incomplete GPU dispatch coverage.
+
+A GPU regression initializes RGBA32F images with a negative sentinel before compute, then inspects all raw alpha channels after dispatch at a nonmultiple 31x21 resolution. All 651 output pixels replace the sentinel, including written black pixels. With a downward panel, three independent seeds illuminate every unoccluded floor pixel in a single sample; CPU/GPU RGB agree within 0.0001. Existing shared-HDR frame tests continue to verify complete textures and zero runtime image readbacks.
+
+ProgressiveSettings::minSamplesPerFrame defaults to four complete rounds before the running-frame deadline applies. Demo uses eight and exposes --frame-samples 1..1024. A nonzero maxSamples also caps this minimum, so --samples 1 explicitly permits one-sample frames. Additional rounds still obey the remaining frame budget, paused accumulation still uses maxSamples, and independent frames retain distinct random streams. Tests verify an expired budget completes the requested eight rounds, a lower cap wins, invalid minima preserve completed state, and CPU/GPU pause/resume remain correct. Higher frame minima can lower actual FPS. Demo ceiling lamps in showroom, stack and destruction scenes now use downward-only panels while retaining their previous emitting underside positions, sizes and radiance; the orbital sun stays emissive geometry.
+
+Artifacts are ignored under build/validation/black-pixels-release-full.xml/.log, black-pixels-debug-targeted.xml/.log, black-pixels-coverage.xml/.log, black-pixels-release-build.log, black-pixels-debug-build.log, black-pixels-public.log, black-pixels-demo-results.json, black-pixels-demo-*.log/.err and ray-noise-research.cpp/.exe/.log. The initial locked Release Demo executable was linked to an alternate validation executable; after it exited, the normal JadeDemo.exe was rebuilt successfully. Earlier sections below record the previous one-round minimum.
+
+## Complete frames with pause-only progressive accumulation (2026-10-11)
+
+Debug and Release build without compiler warnings. Release passes all 259 tests across 51 suites in 16.265 seconds. Debug passes 25 targeted ProgressiveSession, RenderMode, GpuPathTracing and FrameClock tests in 6.221 seconds, plus the affected CollisionDebug overlay regression. Public renderer/Jade headers pass an MSVC C++20 /EHsc /W4 /WX /permissive- syntax check with only Jade/include exposed. Git diff --check passes.
+
+Running frames now submit independent revisions, reset CPU Film/GPU HDR samples and use distinct deterministic frame seeds, even for unchanged scenes. The presentation thread waits for the complete frame. A frame always completes at least one full-image sample, including when its deadline is already expired. Further sample rounds start only when the last round's measured duration fits the remaining FrameClock deadline and maxSamples allows them. An overrun completes in full and reduces actual FPS instead of publishing partial pixels or advancing simulation while the current frame is unfinished. maxSamples caps samples within each running frame; it remains the progressive cap while paused.
+
+P is an unmodified, nonrepeated, unconsumed engine default in every scene. It toggles Runtime pause, stopping physics and allowing progressive rendering of an unchanged snapshot. Camera/material changes while paused still reset that snapshot. Resume starts fresh independent frames. Tests cover P consumption/modifiers/repeats, CPU/GPU pause/resume, stable paused revisions and new running-frame revisions. Existing tests asserting cross-frame sample preservation explicitly run paused.
+
+A gated backend verifies an expired budget cannot complete/publish an unfinished sample, checks per-frame sample index zero and changing frame seeds, and checks paused indices 0/1/2 retain one seed. A separate fixture verifies additional complete samples are allowed within a frame budget. A GPU fixture presents three independent frames with an already-expired budget, compares every pixel/channel against CPU reference output (including a red-to-green material change and a nonmultiple 31x21 dispatch), and records zero runtime image readbacks. Actual Release Demo GPU showroom, GPU dynamic stack and CPU dynamic stack launches each complete eight frames with exit zero and empty stderr; elapsed times are 0.37, 0.38 and 0.72 seconds respectively at the default 24 FPS target.
+
+Artifacts are ignored under build/validation/frame-render-release-full.xml/.log, frame-render-release-targeted.xml/.log, frame-render-debug-targeted.xml/.log, frame-render-debug-overlay.xml/.log, frame-render-release-build.log, frame-render-debug-build.log, frame-render-public.log and frame-render-demo-results.json / frame-render-demo-*.log/.err. Earlier sections below describe the previous always-progressive runtime.
+
+## Complete OpenGL GPU path tracing (2026-10-11)
+
+Debug and Release build without compiler warnings. Release passes all 255 tests across 51 suites in 19.719 seconds. Debug passes all 30 targeted Film, ProgressiveSession, ComputeRayTracer, GpuPathTracing and RenderMode tests in 6.616 seconds. Public RayTracingSettings, ComputeRayTracer, System and Jade headers pass an MSVC C++20 /W4 /WX /permissive- syntax check with only Jade/include exposed. Validation uses native OpenGL on NVIDIA GeForce RTX 5070 Ti.
+
+GPU transport now covers the existing CPU PathIntegrator: diffuse, smooth/rough GGX metal, smooth/rough dielectric reflection/refraction, Fresnel/TIR, emissive triangle sampling, shadow visibility, MIS and roulette. Five material fixtures compare 32-sample CPU/GPU mean radiance with less than 2.5% aggregate relative error. Analytic fixtures check occluded direct light, bounce limits, tinted transmission beyond primary clipping, perfect mirror reflection and total internal reflection. Tests also cover matching 64-bit seeded camera samples, rejected invalid radiance without Film commit and recovery. A zero-coordinate ray-offset regression exposed GPU subnormal flushing; representable offsets now use the smallest normal float in that case.
+
+Runtime accumulates HDR on the GPU and presents shared textures directly. An intercepted glGetTexImage records zero runtime image readbacks; explicit test/export readback remains supported. Integration checks compare the shared HDR accumulation against CPU Film and GL_BACK display pixels against the expected exposure/color mapping. Exposure and sample-limit edits preserve accumulation; algorithm/device/normal/resolution edits reset it. A pinned old frame retains its pixels across restart and resize. Producer/consumer fences and three pinned presentation slots protect texture reuse. Worker completion waits poll at one millisecond; already submitted GPU dispatches finish naturally after cancellation.
+
+Actual Demo launches with --gpu, --gpu --output normal and --cpu finish eight frames with empty stderr. Help reports --cpu|--gpu, --output, --bounces, --rr-start and --samples. Conflicting device flags, zero/oversized bounce limits, zero roulette start, invalid output and the removed --renderer option are rejected. Defaults retain CPU-selected wireframe startup.
+
+A Release benchmark uses the same six-bounce/roulette-start-three integrator, seed and scene on CPU/GPU: diffuse bunny (948 triangles), gold cube, glass sphere, floor and emissive ceiling. CPU: Ryzen 9 9900X with 23 workers. Results are medians of 11 completed rounds after three warmups; initial shader compilation and scene upload are excluded. Runtime GPU timings include completion/validation/publication and exclude image readback; export timings include readback and CPU Film commit.
+
+| Resolution | CPU | GPU export | GPU runtime | CPU / GPU runtime |
+| --- | ---: | ---: | ---: | ---: |
+| 640x360 | 7.453 ms | 8.922 ms | 6.665 ms | 1.118x |
+| 1280x720 | 28.192 ms | 32.004 ms | 23.956 ms | 1.177x |
+
+These measurements show modest full-path speedups in this scene, and do not imply hardware RT-core performance or the earlier primary-ray benchmark's speedup. A 128-sample 640x360 GPU render was visually inspected for diffuse shading, gold reflection, glass transmission and shadows. Artifacts are ignored under build/validation/gpu-path-release-full.xml/.log, gpu-path-debug-targeted.xml/.log, gpu-path-release-build.log, gpu-path-debug-build.log, gpu-path-public.cpp, gpu-path-demo-*.log/.err, gpu-path-bench.cpp/.exe/.log and gpu-path-preview.png. Earlier sections below record historical validation before this completed pipeline.
+
+## Unified ray configuration and live updates (2026-10-11)
+
+Debug and Release build without compiler warnings. Release passes all 248 tests across 50 suites in 12.539 seconds; Debug passes all 23 targeted Film, ProgressiveSession, ComputeRayTracer and RenderMode tests in 5.364 seconds. The public RayTracingSettings, ComputeRayTracer, System and Jade headers pass an MSVC C++20 /W4 /WX /permissive- syntax check with only Jade/include exposed.
+
+RayTracingSettings replaces the separate CPU/GPU configuration types and renderer selector. Integration coverage switches PathTrace/Color to RayCast/Color, RayCast/Normal and back to CPU during Run, updates resolution, preserves a custom Integrator across switches, and rejects invalid mode settings without disturbing completed samples. CPU/GPU normal data agree with jitter disabled. LinearData encoding preserves normal RGB without exposure, tone mapping or sRGB conversion.
+
+Controlled worker tests verify exposure updates both while idle at a sample limit and during an in-flight round, without retracing. Increasing maxSamples resumes the same Film/revision; seed and resolution edits start a fresh revision. Settings snapshots and a publication revision prevent old exposure results from replacing newer ones.
+
+The previously failing hidden-window GL_FRONT overlay capture now reads GL_BACK before swap using the actual presentation/debug passes. The runtime portion still verifies that toggling wireframe preserves revision, sample count and Integrator calls; pixel checks still require both red image pixels and white edges. The regression now passes in both configurations.
+
+Artifacts are ignored under build/validation/ray-settings-release-full.xml/.log, ray-settings-debug-targeted.xml/.log, ray-settings-release-targeted.xml/.log, ray-settings-debug-build.log, ray-settings-release-build.log and ray-settings-public.cpp.
+
+## OpenGL compute ray casting, Stage 1 (2026-10-11)
+
+Release and Debug built the new ComputeRayTracer/OpenGLComputeDevice without compiler warnings, using native OpenGL (`JADE_USE_SOFTWARE_RENDERING=OFF`). Actual compute execution reports NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2. The public ComputeRayTracer, System and Jade umbrella headers passed an MSVC C++20 /W4 /WX /permissive- syntax check.
+
+Nine new GPU tests pass in both configurations. Primary-ray material/normal results match independent CPU RayScene intersections per pixel with jitter disabled. Coverage includes shared meshes, hierarchy shear, nonuniform transforms, texture resize/nonmultiple workgroup sizes, empty scenes, material/transform/mesh edits, orthographic clipping, emission back faces, zero ray components, watertight shared edges, deterministic jitter, pre-cancelled rounds, request validation, progressive worker restart/context restoration and runtime backend selection. A direct GL_BACK read verifies GPU image colors and wireframe edges appear together. Precise shader edge arithmetic fixes an observed shared-diagonal hole caused by contraction/reassociation.
+
+Before the configuration cleanup above, Release passed 243/244 tests across 50 suites in 14.367 seconds and Debug targeted checks passed 17/18 in 5.636 seconds. Both runs failed the pre-existing RenderMode.WireframeOverlaysTheImageWithoutRestartingPathTracing front-buffer readback assertion (white pixels 0, expected >10). A separately built, unmodified HEAD 3dfb1bd worktree reproduced the same assertion. The subsequent capture correction and all-pass results are documented above.
+
+A standalone Release benchmark compares one primary ray with material-color/emission output on both backends, rather than comparing different lighting algorithms. Scene: 24 shared sphere/bunny instances, two unique meshes; CPU Ryzen 9 9900X with 23 JobSystem workers; GPU RTX 5070 Ti. Median of 11 rounds after three warmups: 640x360 CPU 17.691 ms, GPU 5.994 ms (2.951x); 1280x720 CPU 56.922 ms, GPU 16.962 ms (3.356x). GPU measurements include RGBA32F texture readback, conversion and Film commit; shader/context creation and initial scene upload are excluded after warmup. These single-scene measurements do not establish complete path-tracing performance. The generated GPU preview was visually inspected.
+
+Actual Release Demo material-color and normal runs (`--renderer compute|normal --scene 1 --frames 8`) both exit zero with empty stderr. CPU rendering remains the default. Stage 1 does not perform secondary rays or lighting, and uses the existing CPU Film/display adapter. Artifacts are ignored under build/validation/compute-*.xml/.log, gpu-raycast-bench.cpp/.exe/.log and gpu-raycast-preview.png. The baseline source/build are under build/validation/compute-baseline and compute-baseline-build. Git diff --check passed.
+
 ## Archetype descriptors and empty resources (2026-10-11)
 
 Debug and Release each passed 235/235 GoogleTest tests across 49 suites. The final Debug run took 263.577 seconds and Release took 26.499 seconds. The engine and tests built in both configurations without compiler warnings. Release Demo built normally. The running Debug JadeDemo.exe prevented replacing its executable, so the compiled Demo object was linked separately as build/windows-debug/bin/JadeArchetypeDemo.exe.

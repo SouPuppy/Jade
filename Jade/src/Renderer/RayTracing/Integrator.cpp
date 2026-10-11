@@ -34,7 +34,9 @@ LinearRGB PathIntegrator::Li(const Ray &initial, const RayScene &scene, Sampler 
     const Vec3 outgoing = -ray.direction;
     const auto normal = material.model == MaterialModel::Dielectric ? hit.geometricNormal : hit.shadingNormal;
     if (!bsdf.delta() && scene.emitterCount() != 0) {
-      const auto emitter = scene.sampleEmitter(sampler.next1D(), sampler.next2D());
+      const auto selection = sampler.next1D();
+      const auto lightSample = sampler.next2D();
+      const auto emitter = scene.sampleEmitter(selection, lightSample);
       const auto delta = emitter.position - hit.position;
       const float distance = Math::length(delta);
       if (distance > 0) {

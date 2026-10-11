@@ -72,7 +72,7 @@ void InputState::OnFocus(bool focused)
   }
 }
 
-void InputState::OnCursor(double x, double y)
+void InputState::OnCursor(double x, double y, int windowHeight)
 {
   if (!m_Focused || !std::isfinite(x) || !std::isfinite(y)) {
     return;
@@ -82,7 +82,7 @@ void InputState::OnCursor(double x, double y)
   if (!std::isfinite(dx) || !std::isfinite(dy)) {
     return;
   }
-  m_Events.emplace_back(MouseMoved{x, y, dx, dy});
+  m_Events.emplace_back(MouseMoved{x, y, dx, dy, windowHeight});
   m_CursorX = x;
   m_CursorY = y;
   m_CursorInitialized = true;

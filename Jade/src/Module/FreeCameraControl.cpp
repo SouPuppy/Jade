@@ -2,6 +2,7 @@
 
 #include <Jade/Core/Scene.hpp>
 #include <Jade/Graphics/Motion.hpp>
+#include "../internal/Math/Validation.hpp"
 
 #include <memory>
 #include <algorithm>
@@ -13,7 +14,7 @@ namespace {
 struct ControlState {
   Scene &scene;
   Entity target;
-  bool dragging = false;
+  bool dragging = false, panning = false;
   struct Zoom {
     Camera reference;
     double scroll = 0;
@@ -55,17 +56,17 @@ struct ControlState {
       target = selected;
       perspectiveZoom.reset();
       orthographicZoom.reset();
-      dragging = false;
+      dragging = panning = false;
     }
     if (!selected.has<Transform>())
-      dragging = false;
+      dragging = panning = false;
     return selected;
   }
 
   void Reset()
   {
     Target();
-    dragging = false;
+    dragging = panning = false;
   }
 };
 
@@ -96,17 +97,35 @@ void FreeCameraControl::attach(Scene &scene)
   BindMotion<"C-w">(scene, state, Motion::forward, 1.0f);
   BindMotion<"Space">(scene, state, Motion::up, 3.0f);
   BindMotion<"C-Space">(scene, state, Motion::down, 3.0f);
-  BindMotion<"q">(scene, state, Motion::roll, -60.0);
-  BindMotion<"e">(scene, state, Motion::roll, 60.0);
 
   scene.on<MousePressed<"Left">>([state] {
     const auto camera = state->Target();
     state->dragging = camera.has<Transform>();
   });
-  scene.on<MouseReleased<"Left">>([state] { state->Reset(); });
+  scene.on<MouseReleased<"Left">>([state] { state->dragging = false; });
+  scene.on<MousePressed<"Middle">>([state] {
+    const auto camera = state->Target();
+    state->panning = camera.has<Transform>() && camera.has<Camera>() &&
+                     camera.get<Camera>().projection == Projection::Orthographic;
+  });
+  scene.on<MouseReleased<"Middle">>([state] { state->panning = false; });
   scene.on<MouseMoved>([state](const auto &mouse) {
     const auto camera = state->Target();
-    if (state->dragging && camera.has<Transform>()) {
+    if (state->panning && camera.has<Transform>() && camera.has<Camera>()) {
+      const auto& lens = camera.get<Camera>();
+      if (lens.projection != Projection::Orthographic) {
+        state->panning = false;
+      } else if (mouse.windowHeight > 0) {
+        Detail::ValidateCamera(lens);
+        auto& pose = camera.get<Transform>();
+        const double units = static_cast<double>(lens.viewHeight) / mouse.windowHeight;
+        const Vec3 shift = Motion::getRight(pose) * static_cast<float>(-mouse.dx * units) +
+                           Motion::getUp(pose) * static_cast<float>(mouse.dy * units);
+        const auto next = pose.position + shift;
+        Detail::Validate(next);
+        pose.position = next;
+      }
+    } else if (state->dragging && camera.has<Transform>()) {
       Motion::yaw(camera.get<Transform>(), mouse.dx * 0.1);
       Motion::pitch(camera.get<Transform>(), -mouse.dy * 0.1);
     }

@@ -1,0 +1,408 @@
+#version 430 core
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// std430 data uses explicit 16-byte fields shared with the CPU upload structs.
+struct Node { vec4 low; vec4 high; uvec4 links; };
+struct Triangle { vec4 a; vec4 b; vec4 c; vec4 na; vec4 nb; vec4 nc; };
+struct Instance { mat4 model; mat4 inverseModel; uvec4 mesh; };
+struct Material { vec4 baseColor; vec4 emission; vec4 properties; }; // color.w roughness; properties ior/model
+struct Emitter { vec4 a; vec4 b; vec4 c; vec4 normal; vec4 emission; }; // a.w area PDF; b.w CDF; normal.w two-sided
+layout(std430, binding = 0) readonly buffer Nodes { Node nodes[]; };
+layout(std430, binding = 1) readonly buffer Order { uint order[]; };
+layout(std430, binding = 2) readonly buffer Triangles { Triangle triangles[]; };
+layout(std430, binding = 3) readonly buffer Instances { Instance instances[]; };
+layout(std430, binding = 4) readonly buffer Materials { Material materials[]; };
+layout(std430, binding = 5) readonly buffer Emitters { Emitter emitters[]; };
+layout(std430, binding = 6) readonly buffer EmitterMap { uint emitterMap[]; };
+layout(std430, binding = 7) buffer Status { uint invalidSamples; };
+layout(rgba32f, binding = 0) uniform writeonly image2D outputImage;
+layout(rgba32f, binding = 1) uniform image2D accumulationImage;
+uniform ivec2 imageSize;
+uniform vec3 cameraPosition, cameraRight, cameraUp, cameraForward;
+uniform vec4 lens; // half height, near, far, orthographic
+uniform uint tlasRoot;
+uniform int normalShading, jitter;
+uniform uvec2 seed, sampleIndex;
+uniform uint emitterCount, maxBounces, rrStartBounce;
+uniform int pathTracing, accumulate;
+uniform float sampleWeight;
+const uint INVALID = 0xffffffffu;
+const float PI = 3.14159265358979323846;
+const float GAMMA = 8.0 * 1.1920928955078125e-7;
+struct Ray { vec3 origin; vec3 direction; float minimum; float maximum; };
+struct Hit { float t; vec3 weights; uint primitive; uint instance; };
+
+// SplitMix64 using core GLSL uvec2 arithmetic: identical to IndependentSampler,
+// without requiring a vendor-specific 64-bit integer extension.
+uvec2 add64(uvec2 a, uvec2 b) { uint low = a.x + b.x; return uvec2(low, a.y + b.y + uint(low < a.x)); }
+uvec2 shift64(uvec2 a, uint n) { return uvec2((a.x >> n) | (a.y << (32u - n)), a.y >> n); }
+uvec2 multiply64(uvec2 a, uvec2 b) {
+  uint high, low; umulExtended(a.x, b.x, high, low);
+  return uvec2(low, high + a.x * b.y + a.y * b.x);
+}
+uvec2 hash64(uvec2 x) {
+  x = add64(x, uvec2(0x7f4a7c15u, 0x9e3779b9u));
+  x = multiply64(x ^ shift64(x, 30u), uvec2(0x1ce4e5b9u, 0xbf58476du));
+  x = multiply64(x ^ shift64(x, 27u), uvec2(0x133111ebu, 0x94d049bbu));
+  return x ^ shift64(x, 31u);
+}
+float random(uint pixel, uint dimension) {
+  uvec2 bits = hash64(seed ^ hash64(uvec2(pixel, 0u)) ^ hash64(add64(hash64(sampleIndex), uvec2(dimension, 0u))));
+  return float(bits.y >> 8) * (1.0 / 16777216.0);
+}
+float next1D(uint pixel, inout uint dimension) { return random(pixel, dimension++); }
+vec2 next2D(uint pixel, inout uint dimension) { float x = next1D(pixel, dimension); return vec2(x, next1D(pixel, dimension)); }
+bool bounds(Ray ray, uint index, float maximum, out float entry) {
+  Node node = nodes[index];
+  float nearValue = ray.minimum, farValue = min(maximum, ray.maximum);
+  for (int axis = 0; axis < 3; ++axis) {
+    if (ray.direction[axis] == 0.0) {
+      if (ray.origin[axis] < node.low[axis] || ray.origin[axis] > node.high[axis]) return false;
+    } else {
+      float a = (node.low[axis] - ray.origin[axis]) / ray.direction[axis];
+      float b = (node.high[axis] - ray.origin[axis]) / ray.direction[axis];
+      nearValue = max(nearValue, min(a, b)); farValue = min(farValue, max(a, b));
+      if (nearValue > farValue) return false;
+    }
+  }
+  entry = nearValue; return nearValue <= farValue;
+}
+// Ray-space shearing gives adjacent triangles identical shared-edge tests.
+bool triangle(Ray ray, uint index, inout Hit hit) {
+  Triangle tri = triangles[index];
+  int kz = 0;
+  if (abs(ray.direction.y) > abs(ray.direction[kz])) kz = 1;
+  if (abs(ray.direction.z) > abs(ray.direction[kz])) kz = 2;
+  if (ray.direction[kz] == 0.0) return false;
+  int kx = (kz + 1) % 3, ky = (kx + 1) % 3;
+  if (ray.direction[kz] < 0.0) { int swapAxis = kx; kx = ky; ky = swapAxis; }
+  vec3 a = tri.a.xyz - ray.origin, b = tri.b.xyz - ray.origin, c = tri.c.xyz - ray.origin;
+  vec2 shear = vec2(ray.direction[kx], ray.direction[ky]) / ray.direction[kz];
+  precise vec2 aa = vec2(a[kx], a[ky]) - shear * a[kz];
+  precise vec2 bb = vec2(b[kx], b[ky]) - shear * b[kz];
+  precise vec2 cc = vec2(c[kx], c[ky]) - shear * c[kz];
+  // Prevent FMA contraction/reassociation from giving opposite shared-edge
+  // tests different signs. Both triangles must execute the same arithmetic.
+  precise vec3 edges = vec3(bb.x * cc.y - bb.y * cc.x, cc.x * aa.y - cc.y * aa.x, aa.x * bb.y - aa.y * bb.x);
+  if (any(lessThan(edges, vec3(0))) && any(greaterThan(edges, vec3(0)))) return false;
+  float determinant = edges.x + edges.y + edges.z;
+  if (determinant == 0.0) return false;
+  float t = dot(edges, vec3(a[kz], b[kz], c[kz])) / (determinant * ray.direction[kz]);
+  if (isnan(t) || isinf(t) || t <= ray.minimum || t > min(ray.maximum, hit.t)) return false;
+  vec3 geometric = cross(tri.b.xyz - tri.a.xyz, tri.c.xyz - tri.a.xyz);
+  if (dot(geometric, geometric) == 0.0) return false;
+  hit.t = t; hit.weights = edges / determinant; hit.primitive = index;
+  return true;
+}
+void pushChildren(Ray ray, Node node, float maximum, inout uint stack[64], inout int pending) {
+  float left, right;
+  bool hitLeft = bounds(ray, node.links.z, maximum, left);
+  bool hitRight = bounds(ray, node.links.w, maximum, right);
+  if (hitLeft && hitRight) {
+    stack[pending++] = left <= right ? node.links.w : node.links.z;
+    stack[pending++] = left <= right ? node.links.z : node.links.w;
+  } else if (hitLeft) stack[pending++] = node.links.z;
+  else if (hitRight) stack[pending++] = node.links.w;
+}
+bool traceMesh(Ray worldRay, uint instanceIndex, inout Hit hit, bool anyHit) {
+  Instance instance = instances[instanceIndex];
+  if (instance.mesh.x == INVALID) return false;
+  Ray ray;
+  ray.origin = (instance.inverseModel * vec4(worldRay.origin, 1)).xyz;
+  // Do not normalize: t must stay in world-ray units under nonuniform scale.
+  ray.direction = (instance.inverseModel * vec4(worldRay.direction, 0)).xyz;
+  ray.minimum = worldRay.minimum; ray.maximum = worldRay.maximum;
+  uint stack[64]; int pending = 1; stack[0] = instance.mesh.x;
+  while (pending > 0) {
+    uint index = stack[--pending]; float entry;
+    if (!bounds(ray, index, hit.t, entry)) continue;
+    Node node = nodes[index];
+    if (node.links.y != 0u) {
+      for (uint i = 0u; i < node.links.y; ++i)
+        if (triangle(ray, instance.mesh.y + order[node.links.x + i], hit)) {
+          hit.instance = instanceIndex;
+          if (anyHit) return true;
+        }
+    } else pushChildren(ray, node, hit.t, stack, pending);
+  }
+  return hit.instance != INVALID;
+}
+Hit trace(Ray ray, bool anyHit) {
+  Hit hit; hit.t = ray.maximum; hit.instance = INVALID;
+  if (tlasRoot == INVALID) return hit;
+  uint stack[64]; int pending = 1; stack[0] = tlasRoot;
+  while (pending > 0) {
+    uint index = stack[--pending]; float entry;
+    if (!bounds(ray, index, hit.t, entry)) continue;
+    Node node = nodes[index];
+    if (node.links.y != 0u) {
+      for (uint i = 0u; i < node.links.y; ++i)
+        if (traceMesh(ray, order[node.links.x + i], hit, anyHit) && anyHit) return hit;
+    } else pushChildren(ray, node, hit.t, stack, pending);
+  }
+  return hit;
+}
+
+struct Surface { vec3 position; vec3 error; vec3 geometric; vec3 shading; bool front; };
+Surface surface(Ray ray, Hit hit) {
+  Triangle tri = triangles[hit.primitive];
+  mat4 model = instances[hit.instance].model;
+  vec3 p = tri.a.xyz * hit.weights.x + tri.b.xyz * hit.weights.y + tri.c.xyz * hit.weights.z;
+  vec3 error = (abs(tri.a.xyz) * hit.weights.x + abs(tri.b.xyz) * hit.weights.y + abs(tri.c.xyz) * hit.weights.z) * GAMMA;
+  mat3 linear = mat3(model);
+  mat3 absolute = mat3(abs(linear[0]), abs(linear[1]), abs(linear[2]));
+  vec3 worldError = absolute * error + GAMMA * (absolute * abs(p) + abs(model[3].xyz));
+  vec3 geometric = normalize(cross(tri.b.xyz - tri.a.xyz, tri.c.xyz - tri.a.xyz));
+  vec3 shading = tri.na.xyz * hit.weights.x + tri.nb.xyz * hit.weights.y + tri.nc.xyz * hit.weights.z;
+  shading = dot(shading, shading) > 0.0 ? normalize(shading) : geometric;
+  if (dot(shading, geometric) < 0.0) shading = -shading;
+  mat3 normalMatrix = transpose(mat3(instances[hit.instance].inverseModel));
+  geometric = normalize(normalMatrix * geometric); shading = normalize(normalMatrix * shading);
+  return Surface((model * vec4(p, 1)).xyz, worldError, geometric, shading, dot(ray.direction, geometric) < 0.0);
+}
+float nextFloat(float x, bool up) {
+  // GPU arithmetic may flush subnormals. At zero, step to the smallest normal
+  // float so an offset remains on the intended side through matrix arithmetic.
+  if (abs(x) < uintBitsToFloat(0x00800000u)) return up ? uintBitsToFloat(0x00800000u) : -uintBitsToFloat(0x00800000u);
+  uint bits = floatBitsToUint(x);
+  bits += ((x > 0.0) == up) ? 1u : 0xffffffffu;
+  return uintBitsToFloat(bits);
+}
+Ray spawn(vec3 p, vec3 error, vec3 normal, vec3 direction) {
+  vec3 side = dot(direction, normal) < 0.0 ? -normal : normal;
+  vec3 origin = p + side * dot(abs(normal), error);
+  for (int i = 0; i < 3; ++i) if (side[i] != 0.0) origin[i] = nextFloat(origin[i], side[i] > 0.0);
+  return Ray(origin, normalize(direction), 0.0, uintBitsToFloat(0x7f800000u));
+}
+Ray spawn(Surface s, vec3 direction) { return spawn(s.position, s.error, s.geometric, direction); }
+bool finite(vec3 v) { return !any(isnan(v)) && !any(isinf(v)); }
+float maximum(vec3 v) { return max(v.x, max(v.y, v.z)); }
+float powerHeuristic(float a, float b) {
+  float scale = max(a, b);
+  if (!(scale > 0.0)) return 0.0;
+  a /= scale; b /= scale; return a * a / (a * a + b * b);
+}
+float fresnel(float cosine, float eta) {
+  cosine = clamp(abs(cosine), 0.0, 1.0);
+  float sinSquared = (1.0 - cosine * cosine) / (eta * eta);
+  if (sinSquared >= 1.0) return 1.0;
+  float transmitted = sqrt(max(0.0, 1.0 - sinSquared));
+  float parallel = (eta * cosine - transmitted) / (eta * cosine + transmitted);
+  float perpendicular = (cosine - eta * transmitted) / (cosine + eta * transmitted);
+  return (parallel * parallel + perpendicular * perpendicular) * 0.5;
+}
+vec3 schlick(vec3 f0, float cosine) { return mix(f0, vec3(1), pow(clamp(1.0 - abs(cosine), 0.0, 1.0), 5.0)); }
+float distribution(vec3 halfVector, float a) {
+  if (halfVector.z <= 0.0) return 0.0;
+  // sin^2(theta) + alpha^2*cos^2(theta) avoids cancellation around the GGX
+  // peak and keeps transport on shader FP32 rather than slow consumer FP64.
+  float aa = a * a;
+  float denominator = dot(halfVector.xy, halfVector.xy) + aa * halfVector.z * halfVector.z;
+  return aa / (PI * denominator * denominator);
+}
+float masking(vec3 v, float a) {
+  if (v.z == 0.0) return 0.0;
+  float tangent = dot(v.xy, v.xy) / (v.z * v.z);
+  return 2.0 / (1.0 + sqrt(1.0 + a * a * tangent));
+}
+float visiblePdf(vec3 wo, vec3 halfVector, float a) {
+  return wo.z > 0.0 ? distribution(halfVector, a) * masking(wo, a) * abs(dot(wo, halfVector)) / wo.z : 0.0;
+}
+vec3 visibleNormal(vec3 wo, float a, vec2 u) {
+  vec3 stretched = normalize(vec3(a * wo.xy, wo.z));
+  float radial = length(stretched.xy);
+  vec3 tangent = radial > 0.0 ? vec3(-stretched.y / radial, stretched.x / radial, 0) : vec3(1, 0, 0);
+  vec3 bitangent = cross(stretched, tangent);
+  float radius = sqrt(u.x), phi = 2.0 * PI * u.y;
+  float x = radius * cos(phi), y = radius * sin(phi), blend = (1.0 + stretched.z) * 0.5;
+  y = (1.0 - blend) * sqrt(max(0.0, 1.0 - x * x)) + blend * y;
+  vec3 n = tangent * x + bitangent * y + stretched * sqrt(max(0.0, 1.0 - x * x - y * y));
+  return normalize(vec3(a * n.xy, max(0.0, n.z)));
+}
+struct Bsdf { vec3 n; vec3 geometric; vec3 tangent; vec3 bitangent; Material material; bool front; };
+Bsdf bsdf(Surface s, Material material) {
+  vec3 geometric = s.front ? s.geometric : -s.geometric;
+  vec3 n = material.properties.y == 2.0 ? geometric : (s.front ? s.shading : -s.shading);
+  n = normalize(n);
+  vec3 tangent = normalize(abs(n.z) < 0.999 ? cross(vec3(0, 0, 1), n) : cross(vec3(0, 1, 0), n));
+  return Bsdf(n, geometric, tangent, cross(n, tangent), material, s.front);
+}
+vec3 local(Bsdf b, vec3 v) { return vec3(dot(v, b.tangent), dot(v, b.bitangent), dot(v, b.n)); }
+vec3 world(Bsdf b, vec3 v) { return b.tangent * v.x + b.bitangent * v.y + b.n * v.z; }
+bool delta(Bsdf b) { return (b.material.properties.y != 0.0 && b.material.baseColor.w == 0.0) ||
+  (b.material.properties.y == 2.0 && b.material.properties.x == 1.0); }
+float eta(Bsdf b) { return b.front ? b.material.properties.x : 1.0 / b.material.properties.x; }
+float alpha(Bsdf b) { return max(0.001, b.material.baseColor.w * b.material.baseColor.w); }
+vec3 evaluate(Bsdf b, vec3 outgoing, vec3 incoming, out float pdf) {
+  pdf = 0.0;
+  vec3 wo = local(b, outgoing), wi = local(b, incoming);
+  if (wo.z <= 0.0 || wi.z == 0.0 || delta(b)) return vec3(0);
+  bool reflection = wi.z > 0.0;
+  float sides = dot(outgoing, b.geometric) * dot(incoming, b.geometric);
+  if ((reflection && sides <= 0.0) || (!reflection && sides >= 0.0)) return vec3(0);
+  if (b.material.properties.y == 0.0) {
+    if (!reflection) return vec3(0);
+    pdf = wi.z / PI; return b.material.baseColor.rgb / PI;
+  }
+  if (b.material.properties.y == 1.0 && !reflection) return vec3(0);
+  float relativeEta = eta(b);
+  vec3 halfVector = reflection ? wo + wi : wo + wi * relativeEta;
+  if (dot(halfVector, halfVector) == 0.0) return vec3(0);
+  halfVector = normalize(halfVector); if (halfVector.z < 0.0) halfVector = -halfVector;
+  float cosO = dot(wo, halfVector), cosI = dot(wi, halfVector);
+  if (cosO * wo.z <= 0.0 || cosI * wi.z <= 0.0) return vec3(0);
+  float a = alpha(b), halfPdf = visiblePdf(wo, halfVector, a);
+  float microfacet = distribution(halfVector, a) * masking(wo, a) * masking(wi, a);
+  if (b.material.properties.y == 1.0) {
+    pdf = halfPdf / (4.0 * abs(cosO));
+    return schlick(b.material.baseColor.rgb, cosO) * (microfacet / (4.0 * wo.z * wi.z));
+  }
+  float F = fresnel(cosO, relativeEta);
+  if (reflection) {
+    pdf = F * halfPdf / (4.0 * abs(cosO));
+    return vec3(F * microfacet / (4.0 * wo.z * wi.z));
+  }
+  float denominator = cosI + cosO / relativeEta;
+  if (denominator == 0.0) return vec3(0);
+  pdf = (1.0 - F) * halfPdf * abs(cosI) / (denominator * denominator);
+  return b.material.baseColor.rgb * ((1.0 - F) * microfacet * abs(cosI * cosO /
+    (wi.z * wo.z * denominator * denominator)) / (relativeEta * relativeEta));
+}
+struct BsdfSample { vec3 direction; vec3 value; float pdf; bool delta; bool transmission; float eta; };
+BsdfSample sampleBsdf(Bsdf b, vec3 outgoing, uint pixel, inout uint dimension) {
+  BsdfSample result = BsdfSample(vec3(0), vec3(0), 0.0, false, false, 1.0);
+  vec3 wo = local(b, outgoing);
+  if (wo.z <= 0.0) return result;
+  vec3 incoming;
+  float relativeEta = eta(b);
+  if (b.material.properties.y == 0.0) {
+    vec2 u = next2D(pixel, dimension); float radius = sqrt(u.x), phi = 2.0 * PI * u.y;
+    incoming = vec3(radius * cos(phi), radius * sin(phi), sqrt(max(0.0, 1.0 - u.x)));
+  } else {
+    vec3 halfVector = delta(b) ? vec3(0, 0, 1) : visibleNormal(wo, alpha(b), next2D(pixel, dimension));
+    float F = b.material.properties.y == 2.0 ? fresnel(dot(wo, halfVector), relativeEta) : 1.0;
+    bool transmission = false;
+    if (b.material.properties.y == 2.0) transmission = next1D(pixel, dimension) >= F;
+    incoming = transmission ? refract(-wo, halfVector, 1.0 / relativeEta) : -wo + halfVector * (2.0 * dot(wo, halfVector));
+    if (dot(incoming, incoming) == 0.0) return result;
+    result.direction = normalize(world(b, incoming)); result.transmission = transmission;
+    result.eta = transmission ? relativeEta : 1.0;
+    if (delta(b)) {
+      float sides = dot(outgoing, b.geometric) * dot(result.direction, b.geometric);
+      if ((transmission && sides >= 0.0) || (!transmission && sides <= 0.0)) return result;
+      float cosine = abs(dot(result.direction, b.n)); if (cosine == 0.0) return result;
+      result.delta = true;
+      if (b.material.properties.y == 1.0) { result.pdf = 1.0; result.value = schlick(b.material.baseColor.rgb, wo.z) / cosine; }
+      else {
+        result.pdf = transmission ? 1.0 - F : F;
+        result.value = transmission ? b.material.baseColor.rgb * ((1.0 - F) / (cosine * relativeEta * relativeEta)) : vec3(F / cosine);
+      }
+      return result;
+    }
+  }
+  result.direction = normalize(world(b, incoming));
+  result.value = evaluate(b, outgoing, result.direction, result.pdf);
+  return result;
+}
+uint selectEmitter(float sampleValue) {
+  uint low = 0u, high = emitterCount;
+  while (low < high) { uint middle = low + (high - low) / 2u;
+    if (sampleValue < emitters[middle].b.w) high = middle; else low = middle + 1u; }
+  return min(low, emitterCount - 1u);
+}
+float emitterPdf(vec3 reference, Hit hit, Surface s) {
+  uint offset = instances[hit.instance].mesh.z;
+  if (offset == INVALID) return 0.0;
+  uint index = emitterMap[offset + hit.primitive - instances[hit.instance].mesh.y];
+  if (index == INVALID) return 0.0;
+  Emitter e = emitters[index]; vec3 distance = s.position - reference;
+  float d = length(distance); if (d == 0.0) return 0.0;
+  float cosine = dot(e.normal.xyz, -distance / d);
+  if (e.normal.w == 0.0 && cosine <= 0.0) return 0.0;
+  return abs(cosine) > 0.0 ? e.a.w * d * d / abs(cosine) : 0.0;
+}
+vec3 path(Ray ray, uint pixel, inout uint dimension) {
+  vec3 radiance = vec3(0), throughput = vec3(1), previousPosition = vec3(0);
+  bool previousDelta = true; float previousPdf = 0.0, etaScale = 1.0;
+  for (uint depth = 0u; depth <= maxBounces; ++depth) {
+    Hit hit = trace(ray, false); if (hit.instance == INVALID) break;
+    Surface s = surface(ray, hit); Material material = materials[hit.instance];
+    if (material.emission.w != 0.0 || s.front) {
+      float weight = previousDelta ? 1.0 : powerHeuristic(previousPdf, emitterPdf(previousPosition, hit, s));
+      radiance += throughput * material.emission.rgb * weight;
+    }
+    if (depth == maxBounces) break;
+    Bsdf b = bsdf(s, material); vec3 outgoing = -ray.direction;
+    if (!delta(b) && emitterCount > 0u) {
+      float selection = next1D(pixel, dimension); vec2 u = next2D(pixel, dimension);
+      Emitter e = emitters[selectEmitter(selection)];
+      float root = sqrt(u.x); vec3 weights = vec3(1.0 - root, root * (1.0 - u.y), root * u.y);
+      vec3 p = e.a.xyz * weights.x + e.b.xyz * weights.y + e.c.xyz * weights.z;
+      vec3 direction = p - s.position; float distance = length(direction);
+      if (distance > 0.0) {
+        direction /= distance; float cosLight = dot(e.normal.xyz, -direction);
+        if ((e.normal.w != 0.0 || cosLight > 0.0) && cosLight != 0.0) {
+          float lightPdf = e.a.w * distance * distance / abs(cosLight), bsdfPdf;
+          vec3 value = evaluate(b, outgoing, direction, bsdfPdf);
+          if (lightPdf > 0.0 && !isinf(lightPdf) && maximum(value) > 0.0) {
+            Ray shadow = spawn(s, direction);
+            vec3 error = (abs(e.a.xyz) * weights.x + abs(e.b.xyz) * weights.y + abs(e.c.xyz) * weights.z) * (2.0 * GAMMA);
+            vec3 target = spawn(p, error, e.normal.xyz, -direction).origin - shadow.origin;
+            float lengthValue = length(target);
+            if (lengthValue > 0.0) {
+              shadow.direction = target / lengthValue; shadow.maximum = nextFloat(lengthValue, false);
+              if (trace(shadow, true).instance == INVALID)
+                radiance += throughput * value * e.emission.rgb * (abs(dot(b.n, direction)) * powerHeuristic(lightPdf, bsdfPdf) / lightPdf);
+            }
+          }
+        }
+      }
+    }
+    BsdfSample sampled = sampleBsdf(b, outgoing, pixel, dimension);
+    if (!(sampled.pdf > 0.0) || maximum(sampled.value) == 0.0) break;
+    if (!finite(sampled.value)) return vec3(uintBitsToFloat(0x7fc00000u));
+    throughput *= sampled.value * (abs(dot(b.n, sampled.direction)) / sampled.pdf);
+    if (!finite(throughput)) return vec3(uintBitsToFloat(0x7fc00000u));
+    previousDelta = sampled.delta; previousPdf = sampled.pdf; previousPosition = s.position;
+    if (sampled.transmission) etaScale *= sampled.eta * sampled.eta;
+    ray = spawn(s, sampled.direction);
+    if (depth + 1u >= rrStartBounce) {
+      float survival = clamp(maximum(throughput) * etaScale, 0.05, 0.95);
+      if (next1D(pixel, dimension) >= survival) break;
+      throughput /= survival;
+    }
+  }
+  return radiance;
+}
+void main() {
+  ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(pixel, imageSize))) return;
+  uint index = uint(pixel.y * imageSize.x + pixel.x);
+  vec2 offset = jitter != 0 ? vec2(random(index, 0u), random(index, 1u)) : vec2(0.5);
+  vec2 uv = (vec2(pixel) + offset) / vec2(imageSize);
+  float x = (2.0 * uv.x - 1.0) * lens.x * float(imageSize.x) / float(imageSize.y);
+  float y = (1.0 - 2.0 * uv.y) * lens.x;
+  Ray ray;
+  bool orthographic = lens.w != 0.0;
+  ray.origin = orthographic ? cameraPosition + cameraRight * x + cameraUp * y : cameraPosition;
+  ray.direction = normalize(orthographic ? cameraForward : cameraForward + cameraRight * x + cameraUp * y);
+  float cosine = orthographic ? 1.0 : dot(ray.direction, normalize(cameraForward));
+  ray.minimum = lens.y / cosine; ray.maximum = lens.z / cosine;
+  uint dimension = 2u;
+  vec3 color = vec3(0);
+  if (pathTracing != 0 && normalShading == 0) color = path(ray, index, dimension);
+  else {
+    Hit hit = trace(ray, false);
+    if (hit.instance != INVALID) {
+      Surface s = surface(ray, hit); Material material = materials[hit.instance];
+      color = normalShading != 0 ? s.shading * 0.5 + 0.5 : material.baseColor.rgb +
+        ((material.emission.w != 0.0 || s.front) ? material.emission.rgb : vec3(0));
+    }
+  }
+  if (!finite(color) || any(lessThan(color, vec3(0)))) { atomicAdd(invalidSamples, 1u); color = vec3(0); }
+  if (accumulate != 0) {
+    if (any(notEqual(sampleIndex, uvec2(0)))) color = mix(imageLoad(accumulationImage, pixel).rgb, color, sampleWeight);
+    imageStore(accumulationImage, pixel, vec4(color, 1));
+  }
+  imageStore(outputImage, pixel, vec4(color, 1));
+}

@@ -236,6 +236,20 @@ float RayScene::emitterPdf(Vec3 reference, const SurfaceHit &hit) const
 } // namespace Jade::Renderer
 
 namespace Jade::Detail {
+std::vector<Renderer::RenderInstance> RaySceneAccess::instances(const Renderer::RayScene &scene)
+{
+  std::vector<Renderer::RenderInstance> result;
+  const auto &instances = scene.m_Impl->geometry->instances;
+  result.reserve(instances.size());
+  for (std::size_t i = 0; i < instances.size(); ++i) {
+    const auto &instance = instances[i];
+    result.push_back({instance.mesh, instance.model, scene.m_Impl->materials[i], instance.entity});
+  }
+  return result;
+}
+const BVH &RaySceneAccess::acceleration(const Renderer::RayScene &scene) { return scene.m_Impl->geometry->bvh; }
+const EmitterDistribution& RaySceneAccess::emitters(const Renderer::RayScene& scene) { return *scene.m_Impl->lighting; }
+const void *RaySceneAccess::identity(const Renderer::RayScene &scene) { return scene.m_Impl.get(); }
 const void *RaySceneAccess::geometryIdentity(const Renderer::RayScene &scene)
 {
   return scene.m_Impl->geometry.get();

@@ -41,13 +41,15 @@ void Film::addSample(std::span<const LinearRGB> sample)
   ++m_Samples;
 }
 
-Image Film::resolve(float exposureEV) const
+Image Film::resolve(float exposureEV, ImageEncoding encoding) const
 {
   if (!std::isfinite(exposureEV) || std::abs(exposureEV) > 64)
     throw std::invalid_argument("Exposure must be finite and within [-64, 64] EV.");
   Image result{m_Size, std::vector<std::uint8_t>(m_Mean.size() * 4)};
   const double exposure = std::exp2(static_cast<double>(exposureEV));
   const auto encode = [&](float radiance) {
+    if (encoding == ImageEncoding::LinearData)
+      return static_cast<std::uint8_t>(std::clamp(std::lround(radiance * 255.0), 0L, 255L));
     const double linear = radiance * exposure;
     const double mapped = linear / (1 + linear);
     const double srgb = mapped <= 0.0031308 ? 12.92 * mapped : 1.055 * std::pow(mapped, 1.0 / 2.4) - 0.055;

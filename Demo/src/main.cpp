@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -22,6 +23,18 @@ struct DestructionBall {
   using Components = Archetype<Ball, RigidBody>;
 };
 using DynamicBall = Archetype<Ball, RigidBody>;
+
+MeshData CeilingLightMesh()
+{
+  // The emitting underside of a unit light box. Sampling its unused upper
+  // face wastes roughly half the direct-light samples for objects below it.
+  MeshData mesh;
+  for (Vec3 p : {Vec3{-0.5f,-0.5f,-0.5f}, Vec3{0.5f,-0.5f,-0.5f},
+                 Vec3{0.5f,-0.5f,0.5f}, Vec3{-0.5f,-0.5f,0.5f}})
+    mesh.vertices.push_back({p, {0,-1,0}});
+  mesh.indices = {0,1,2,0,2,3};
+  return mesh;
+}
 
 template<class T>
 Entity CreateObject(Scene& scene, MeshHandle mesh, Vec3 position, Material material, Vec3 scale = {1, 1, 1})
@@ -60,7 +73,7 @@ std::shared_ptr<Scene> CreateScene(Vec3 eye)
   return scene;
 }
 
-std::shared_ptr<Scene> CreateStack(Runtime& runtime, MeshHandle mesh, MeshHandle sphereMesh, float gravity)
+std::shared_ptr<Scene> CreateStack(Runtime& runtime, MeshHandle mesh, MeshHandle sphereMesh, MeshHandle lightMesh, float gravity)
 {
   auto scene = CreateScene({7, 5, 11});
   scene->physics().fields = {std::make_shared<const Physics::UniformGravity>(Vec3{0, -gravity, 0})};
@@ -72,17 +85,16 @@ std::shared_ptr<Scene> CreateStack(Runtime& runtime, MeshHandle mesh, MeshHandle
       top = CreateBox<StackBox>(*scene, mesh, Vec3{static_cast<float>(i - width / 2), 0.6f + 1.1f * layer, 0},
                                    Materials::Diffuse({0.75f, 0.35f + 0.15f * layer, 0.15f}));
   }
-  CreateObject<Model>(*scene, mesh, Vec3{0, 6, 0}, Materials::Emissive({18, 18, 18}), Vec3{5, 0.1f, 5});
+  CreateObject<Model>(*scene, lightMesh, Vec3{0, 6, 0}, Materials::Emissive({18, 18, 18}), Vec3{5, 0.1f, 5});
   CreateBall<DynamicBall>(*scene, sphereMesh, Vec3{3.5f, 4, 0},
     Materials::Diffuse({0.2f, 0.5f, 0.9f}), Vec3{0.5f, 0.5f, 0.5f});
   scene->on<KeyPressed<"K">>([&runtime, scenePtr = scene.get(), top] {
     runtime.physics().applyImpulse(*scenePtr, top, {2.5f, 0, 0}, top.get<Transform>().position + Vec3{0, 0.5f, 0});
   });
-  scene->on<KeyPressed<"P">>([&runtime] { runtime.setPaused(!runtime.paused()); });
   return scene;
 }
 
-std::shared_ptr<Scene> CreateOrbit(Runtime& runtime, MeshHandle sphereMesh)
+std::shared_ptr<Scene> CreateOrbit(MeshHandle sphereMesh)
 {
   auto scene = CreateScene({12, 8, 18});
   constexpr double sunMass = 100, earthMass = 10, moonMass = 0.1;
@@ -105,11 +117,10 @@ std::shared_ptr<Scene> CreateOrbit(Runtime& runtime, MeshHandle sphereMesh)
     Materials::Diffuse({0.6f, 0.6f, 0.6f}));
   scene->physics().fields = {std::make_shared<const Physics::BodyGravity>(std::vector<Entity>{sun, earth, moon}, 1)};
   scene->physics().integration = Physics::Integration::VelocityVerlet;
-  scene->on<KeyPressed<"P">>([&runtime] { runtime.setPaused(!runtime.paused()); });
   return scene;
 }
 
-std::shared_ptr<Scene> CreateDestruction(Runtime& runtime, MeshHandle cubeMesh, MeshHandle sphereMesh)
+std::shared_ptr<Scene> CreateDestruction(MeshHandle cubeMesh, MeshHandle sphereMesh, MeshHandle lightMesh)
 {
   constexpr int columns = 10, rows = 10;
   // Small horizontal gaps keep unconnected columns in separate solver islands.
@@ -126,7 +137,7 @@ std::shared_ptr<Scene> CreateDestruction(Runtime& runtime, MeshHandle cubeMesh, 
       CreateBox<StackBox>(*scene, cubeMesh,
         Vec3{(column - (columns - 1) * 0.5f) * columnSpacing, row + 0.5f, 0}, material);
   }
-  CreateObject<Model>(*scene, cubeMesh, Vec3{0, 13, 3}, Materials::Emissive({18, 18, 18}), Vec3{10, 0.2f, 5});
+  CreateObject<Model>(*scene, lightMesh, Vec3{0, 13, 3}, Materials::Emissive({18, 18, 18}), Vec3{10, 0.2f, 5});
   const auto ball = CreateBall<DestructionBall>(*scene, sphereMesh, Vec3{0, 3, 6},
     Materials::Glass());
   auto& body = ball.get<RigidBody>();
@@ -142,7 +153,6 @@ std::shared_ptr<Scene> CreateDestruction(Runtime& runtime, MeshHandle cubeMesh, 
     body.velocity = direction * 30;
     body.angularVelocity = {};
   });
-  scene->on<KeyPressed<"P">>([&runtime] { runtime.setPaused(!runtime.paused()); });
   return scene;
 }
 
@@ -154,10 +164,19 @@ int main(int argc, char** argv)
   try {
     RunOptions run;
     int initialScene = 3;
-    for (int argument = 1; argument < argc; argument += 2) {
+    std::optional<Renderer::RayDevice> device;
+    constexpr auto usage = "Usage: JadeDemo [--cpu|--gpu] [--frames N] [--scene 1|2|3|4]";
+    for (int argument = 1; argument < argc; ++argument) {
       const std::string_view option(argv[argument]);
-      if (argument + 1 >= argc) throw std::invalid_argument("Usage: JadeDemo [--frames N] [--scene 1|2|3|4]");
-      const std::string_view value(argv[argument + 1]);
+      if (option == "--help") { std::cout << usage << '\n'; return 0; }
+      if (option == "--cpu" || option == "--gpu") {
+        const auto requestedDevice = option == "--gpu" ? Renderer::RayDevice::GPU : Renderer::RayDevice::CPU;
+        if (device && *device != requestedDevice) throw std::invalid_argument("Choose either --cpu or --gpu.");
+        device = requestedDevice;
+        continue;
+      }
+      if (argument + 1 >= argc) throw std::invalid_argument(usage);
+      const std::string_view value(argv[++argument]);
       if (option == "--frames") {
         const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), run.frameLimit);
         if (error != std::errc{} || end != value.data() + value.size() || run.frameLimit == 0)
@@ -166,18 +185,21 @@ int main(int argc, char** argv)
         const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), initialScene);
         if (error != std::errc{} || end != value.data() + value.size() || initialScene < 1 || initialScene > 4)
           throw std::invalid_argument("--scene requires 1, 2, 3 or 4.");
-      } else throw std::invalid_argument("Usage: JadeDemo [--frames N] [--scene 1|2|3|4]");
+      } else throw std::invalid_argument(usage);
     }
 
     EngineConfig config;
     config.debug.shortcuts = true;
-    config.renderer.render = false;
+    config.renderer.rayTracing.enabled = device.has_value();
     config.renderer.wireframe = true;
-    config.renderer.rayTracing.resolutionScale = 0.5f;
+    config.renderer.rayTracing.device = device.value_or(Renderer::RayDevice::CPU);
+    config.renderer.rayTracing.minSamplesPerFrame = 8;
+    config.renderer.rayTracing.resolutionScale = 1.0f;
     Application app(config);
     auto& runtime = app.runtime();
     const auto cubeMesh = runtime.assets().add(MeshData::cube(1));
     const auto sphereMesh = runtime.assets().add(MeshData::sphere(1));
+    const auto lightMesh = runtime.assets().add(CeilingLightMesh());
     const auto bunnyMesh = runtime.assets().load<Mesh>("assets/bunny.obj");
     const auto floor = Materials::Diffuse({0.65f, 0.65f, 0.65f});
     const auto lamp = Materials::Emissive({14, 12, 10});
@@ -192,17 +214,17 @@ int main(int argc, char** argv)
     CreateObject<Model>(*showroom, bunnyMesh, Vec3{0, -1.9f - bunnyBottom * 16, 0},
                             Materials::Diffuse({0.8f, 0.28f, 0.12f}), Vec3{16, 16, 16});
     CreateBall(*showroom, sphereMesh, Vec3{2.2f, -0.9f, 0}, Materials::Glass());
-    CreateBox(*showroom, cubeMesh, Vec3{0, 4, 0}, lamp, Vec3{4, 0.1f, 3});
+    CreateBox(*showroom, lightMesh, Vec3{0, 4, 0}, lamp, Vec3{4, 0.1f, 3});
 
     std::shared_ptr<Scene> destruction;
-    auto orbit = CreateOrbit(runtime, sphereMesh);
+    auto orbit = CreateOrbit(sphereMesh);
     bool moonGravity = false;
-    auto stack = CreateStack(runtime, cubeMesh, sphereMesh, 9.81f);
+    auto stack = CreateStack(runtime, cubeMesh, sphereMesh, lightMesh, 9.81f);
     const auto select = [&](const auto& scene) { runtime.setPaused(false); runtime.setScene(scene); return EventFlow::Stop; };
     app.on<KeyPressed<"1">>([&] { return select(showroom); });
     app.on<KeyPressed<"2">>([&] { return select(orbit); });
     app.on<KeyPressed<"4">>([&] {
-      if (!destruction) destruction = CreateDestruction(runtime, cubeMesh, sphereMesh);
+      if (!destruction) destruction = CreateDestruction(cubeMesh, sphereMesh, lightMesh);
       return select(destruction);
     });
     app.on<KeyPressed<"3">>([&] { return select(stack); });
@@ -213,19 +235,19 @@ int main(int argc, char** argv)
       return EventFlow::Stop;
     });
     app.on<KeyPressed<"R">>([&] {
-      if (runtime.scene() == orbit) { orbit = CreateOrbit(runtime, sphereMesh); return select(orbit); }
+      if (runtime.scene() == orbit) { orbit = CreateOrbit(sphereMesh); return select(orbit); }
       if (destruction && runtime.scene() == destruction) {
-        destruction = CreateDestruction(runtime, cubeMesh, sphereMesh);
+        destruction = CreateDestruction(cubeMesh, sphereMesh, lightMesh);
         return select(destruction);
       }
       if (runtime.scene() == stack) {
-        stack = CreateStack(runtime, cubeMesh, sphereMesh, moonGravity ? 1.62f : 9.81f);
+        stack = CreateStack(runtime, cubeMesh, sphereMesh, lightMesh, moonGravity ? 1.62f : 9.81f);
         return select(stack);
       }
       return EventFlow::Stop;
     });
     if (initialScene == 4) {
-      destruction = CreateDestruction(runtime, cubeMesh, sphereMesh);
+      destruction = CreateDestruction(cubeMesh, sphereMesh, lightMesh);
       runtime.setScene(destruction);
     } else runtime.setScene(initialScene == 1 ? showroom : initialScene == 2 ? orbit : stack);
     app.Run(run);

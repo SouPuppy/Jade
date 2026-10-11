@@ -8,6 +8,7 @@ namespace Jade::Detail {
 class OpenGLProgram final {
 public:
   OpenGLProgram(const char *vertexSource, const char *fragmentSource);
+  explicit OpenGLProgram(const char *computeSource);
   ~OpenGLProgram();
   OpenGLProgram(const OpenGLProgram &) = delete;
   OpenGLProgram &operator=(const OpenGLProgram &) = delete;

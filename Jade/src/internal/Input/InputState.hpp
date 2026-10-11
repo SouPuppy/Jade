@@ -32,7 +32,7 @@ public:
   void OnKey(Key key, KeyAction action, Modifiers modifiers);
   void OnMouseButton(MouseButton button, MouseAction action, Modifiers modifiers);
   void OnFocus(bool focused);
-  void OnCursor(double x, double y);
+  void OnCursor(double x, double y, int windowHeight = 0);
   void ResetCursor() noexcept;
   void OnScroll(double dx, double dy);
   bool IsDown(Key key) const noexcept;

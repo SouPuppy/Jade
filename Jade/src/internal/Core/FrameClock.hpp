@@ -36,6 +36,7 @@ public:
   }
 
   TimePoint NextDeadline() const noexcept { return m_Deadline; }
+  TimePoint RenderDeadline() const noexcept { return m_Deadline + m_Period; }
   void Resume(TimePoint now) noexcept { m_Deadline = now; }
 
   FrameStats FinishFrame(TimePoint now)

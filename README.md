@@ -37,9 +37,9 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4`; `--frames N` can be combined with it. F/I independently toggle Wireframe/image rendering.
+Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4`; `--frames N` can be combined with it. F1/I independently toggle Wireframe/image rendering.
 
-F3 toggles axes and cyan AABBs together. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. RayTracing uses resolutionScale 0.5; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and Q/E roll. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
+F3 toggles axes and cyan AABBs together. F5 enables the ray image and switches Color/Normal output. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. Demo RayTracing uses resolutionScale 1.0; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and middle dragging pans the orthographic view. Q/E are unbound. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -47,7 +47,7 @@ F3 toggles axes and cyan AABBs together. F4 toggles orange Collider outlines, re
 int main()
 {
   Jade::EngineConfig config;
-  config.debug.shortcuts = true; // Enable Application F3/F4/O shortcuts; F/I always work.
+  config.debug.shortcuts = true; // Enable Application F3/F4/F5/O shortcuts; F1/I always work.
   Jade::Application app(config);
   auto scene = std::make_shared<Jade::Scene>();
 
@@ -102,7 +102,7 @@ for (auto entity : scene->query<Jade::Transform, Velocity>()) {
 ```cpp
 Jade::EngineConfig config;
 config.physics.fixedStep = 1.0 / 120.0;
-config.renderer.render = false;
+config.renderer.rayTracing.enabled = false;
 config.renderer.wireframe = true;
 config.debug.shortcuts = true;
 Jade::Application app(config);
@@ -114,9 +114,9 @@ scene->physics().fields = {
 runtime.setScene(scene);
 ```
 
-Renderer has independent `setRender(bool)` / `renderEnabled()` and `setWireframe(bool)` / `wireframeEnabled()` controls. F toggles Wireframe; I toggles image rendering, regardless of debug-shortcut settings. Sampling configuration and progress are available through `runtime.renderer().rayTracing()` and `runtime.renderer().progress()`. Changing only Wireframe preserves path-tracing samples. Disabling image rendering stops/joins ray work and clears its image; re-enabling starts fresh samples. Both flags default to render=true, wireframe=false; Demo starts with render=false, wireframe=true.
+Renderer has independent `setRayTracingEnabled(bool)` / `rayTracingEnabled()` and `setWireframe(bool)` / `wireframeEnabled()` controls. F1 toggles Mesh wireframe; I toggles image rendering, regardless of debug-shortcut settings. Sampling configuration and progress are available through `runtime.renderer().rayTracingSettings()` / `setRayTracingSettings()` and `runtime.renderer().progress()`. Changing only Wireframe preserves path-tracing samples. Disabling image rendering stops/joins ray work and clears its image; re-enabling starts fresh samples. RayTracingSettings.enabled defaults to true, wireframe to false; Demo starts with ray tracing disabled and wireframe enabled.
 
-| render | wireframe | Scene presentation |
+| rayTracing.enabled | wireframe | Scene presentation |
 | --- | --- | --- |
 | true | false | RayTracing image |
 | true | true | RayTracing image with mesh edges |
@@ -240,10 +240,15 @@ Scene, Entity, component storage, Assets publication, input and OpenGL remain ow
 
 ## Rendering configuration and extension
 
-Runtime's Renderer::System owns one RayTracing instance automatically. Set sampling parameters in EngineConfig before construction; use app.runtime().renderer().rayTracing() to install a custom Integrator outside Run.
+Runtime's Renderer::System exposes one `RayTracingSettings` configuration for ray algorithms and output. Set it in EngineConfig before construction, or use `rayTracingSettings()` / `setRayTracingSettings()` on the window thread, including FrameUpdate. `rayTracing()` remains the CPU Integrator extension point outside Run.
 
 ```cpp
 Jade::EngineConfig config;
+config.renderer.rayTracing.device = Jade::Renderer::RayDevice::CPU;
+config.renderer.rayTracing.mode = Jade::Renderer::RayMode::PathTrace;
+config.renderer.rayTracing.enabled = true;
+config.renderer.rayTracing.output = Jade::Renderer::RayOutput::Color;
+config.renderer.rayTracing.jitter = true;
 config.renderer.rayTracing.resolutionScale = 1; // Actual framebuffer dimensions.
 config.renderer.rayTracing.maxSamples = 0;     // Unlimited; positive stops a static revision.
 config.jobs.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
@@ -254,11 +259,23 @@ config.renderer.rayTracing.exposureEV = 0;
 Jade::Application app(config);
 ```
 
-Unmodified KeyPressed I toggles image rendering and F toggles Wireframe after application and scene handlers. Both work with debug shortcuts disabled and respect EventFlow::Stop, modifiers and repeats. Wireframe overlays the current image without restarting samples. Disabling image rendering cancels/joins computation; re-enabling starts a fresh Film. Runtime owns the shared worker pool; rendering algorithms and immutable mesh acceleration survive render switches.
+`RayDevice::CPU` / `GPU` selects execution; `RayMode::PathTrace` / `RayCast` selects transport or primary-ray visibility on either backend. `RayOutput::Color` evaluates the selected algorithm, and `RayOutput::Normal` displays primary-hit world normals. Surface BSDFs and PBR properties belong to Material. maxBounces and rrStartBounce control PathTrace on both CPU and GPU.
+
+```cpp
+auto& renderer = app.runtime().renderer();
+auto settings = renderer.rayTracingSettings();
+settings.exposureEV = 1;
+settings.maxSamples = 128;
+renderer.setRayTracingSettings(settings);
+```
+
+Exposure changes resolve the existing Film without retracing. Increasing maxSamples resumes paused accumulation or raises the per-frame sample cap; lowering it preserves completed samples and lets any current round finish. Changing device, mode, output, jitter, resolutionScale, seed or active path-depth settings cancels/joins work and starts a fresh Film on the next scene submission. Invalid settings are rejected before stopping the current renderer. Changing CPU path-depth settings installs the built-in PathIntegrator; other changes retain a custom CPU Integrator. Custom CPU Integrators are not translated into GPU shader code. Normal output bypasses the transport Integrator and uses direct `[0, 1]` RGB data encoding, without exposure, tone mapping or sRGB conversion.
+
+Unmodified KeyPressed I toggles image rendering and F1 toggles Mesh wireframe after application and scene handlers. Both work with debug shortcuts disabled and respect EventFlow::Stop, modifiers and repeats. Wireframe overlays the current image without restarting samples. Disabling image rendering cancels/joins computation; re-enabling starts a fresh Film. Runtime owns the shared worker pool; rendering algorithms and immutable mesh acceleration survive render switches.
 
 Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount within [0, 256], maxBounces within [1, 1024], and roulette start positive. Fewer pixels improve CPU preview latency. Full framebuffer rendering is the default; no realtime full-resolution sample rate is promised.
 
-The window thread captures immutable scene/camera state. A coordinator submits scene compilation as Rendering work and schedules 16x16 tiles as RayTracing background work on the shared persistent CPU workers. Compilation consumes already compiled meshes and reuses/refits/rebuilds the instance TLAS. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and image-render switches reject stale display results.
+Unmodified P toggles pause in every scene, independently of debug shortcuts, and respects event consumption and repeats. The window thread captures immutable scene/camera state. A coordinator submits scene compilation as Rendering work. The CPU backend schedules 16x16 tiles as RayTracing background work on the shared persistent workers; the GPU backend dispatches compute and publishes shared HDR textures. Compilation consumes already compiled meshes and reuses/refits/rebuilds the instance TLAS. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. While running, every application frame gets independent samples, even if the scene is unchanged. The renderer completes minSamplesPerFrame full-image rounds (default 4, capped by a nonzero maxSamples) before applying the frame-rate deadline. It adds further complete samples only while the frameLimits deadline and maxSamples cap allow it, estimating the next round from the previous duration. Demo defaults to 8 rounds; applications configure minSamplesPerFrame and maxSamples through RayTracingSettings. An over-budget round finishes in full and lowers actual FPS; frame boundaries never cancel half an image. Each running frame has a distinct deterministic random stream. P pauses simulation and switches rendering to progressive accumulation of the unchanged snapshot; resuming starts fresh frame samples. Paused camera/component edits reset accumulation. Samples from different frames or revisions are never blended. Scene/camera invalidation, resize and image-render switches reject stale display results.
 
 Wireframe draws unlit triangle edges, independently of image rendering. F3 axes are composed afterward and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.runtime().renderer().progress() reports RayTracing, RayTracing + Wireframe, Wireframe or Disabled, with optional sample count, sample time and inFlight state. Samples are available whenever image rendering is enabled. These values are independent of presentation FPS.
 
@@ -272,12 +289,12 @@ Jade::Renderer::RayTracing renderer;
 for (std::uint64_t sample = 0; sample < 64; ++sample) {
   renderer.render(prepared, {*snapshot.camera, film.size(), sample, 42, {}}, film);
 }
-auto image = film.resolve(); // Top-left origin, opaque sRGB RGBA8.
+auto image = film.resolve(0, renderer.imageEncoding()); // Top-left origin, opaque RGBA8.
 ```
 
-ProgressiveBackend defines a headless sample-round contract over RayScene, RenderRequest and linear HDR Film. Runtime's Renderer::System uses its owned RayTracing; algorithm extension is through Integrator. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with app.runtime().renderer().rayTracing().setIntegrator or on a headless RayTracing instance. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
+ProgressiveBackend defines a headless sample-round contract over RayScene, RenderRequest and linear HDR Film. Runtime's Renderer::System selects its CPU RayTracing or GPU ComputeRayTracer by RayDevice. CPU algorithm extension is through Integrator. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with app.runtime().renderer().rayTracing().setIntegrator or on a headless RayTracing instance. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
 
-PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding once; OpenGL does not repeat color conversion. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
+PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding for CPU/export images; runtime GPU presentation applies the same mapping directly to its HDR texture. Conversion occurs once on either route, and Normal output bypasses it. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
 
 ## Camera and transforms
 
@@ -298,6 +315,40 @@ The right-handed world has Y up; an identity rotation faces local -Z with right 
 Perspective makes distant geometry smaller; orthographic keeps its size. FOV controls perspective vertical coverage, and viewHeight controls orthographic vertical coverage. Resize adjusts horizontal coverage from the actual framebuffer aspect ratio. Both lens values must stay valid, even when inactive. Positions/quaternions must be finite, rotations nonzero, scale positive, FOV strictly (0, 180), heights/clipping distances positive and far greater than near. Since components are plain data, consumers validate them when used. Invalid render data throws from Run.
 
 `scene->setCamera()` rejects foreign/dead entities and missing components. If the selected camera is later destroyed or loses Transform/Camera, Run keeps processing input and clearing/presenting without world or axis drawing. Selecting a valid camera resumes rendering.
+
+## GPU path tracing (OpenGL compute)
+
+Select execution directly in Demo:
+
+```text
+JadeDemo --gpu --scene 1
+JadeDemo --cpu --scene 1
+JadeDemo --gpu --scene 3 --frames 8
+```
+
+`--cpu` and `--gpu` are mutually exclusive, select execution and set `rayTracing.enabled = true`. F5 enables the ray image and toggles Color/Normal output when debug shortcuts are enabled; no prior I press is needed. Sampling and bounce controls belong to `RayTracingSettings`; Demo no longer exposes `--output`, `--bounces`, `--rr-start`, `--samples` or `--frame-samples`. `--frames N` limits application frames, `--scene 1|2|3|4` selects the initial scene and `--help` lists options. The old `--renderer` option is removed. Without an execution flag Demo retains its CPU-selected wireframe startup; I/F1 independently toggle image/Wireframe.
+
+```cpp
+Jade::EngineConfig config;
+config.renderer.rayTracing.device = Jade::Renderer::RayDevice::GPU;
+config.renderer.rayTracing.mode = Jade::Renderer::RayMode::PathTrace;
+config.renderer.rayTracing.maxBounces = 6;
+config.renderer.rayTracing.rrStartBounce = 3;
+config.renderer.rayTracing.resolutionScale = 0.5f;
+Jade::Application app(config);
+```
+
+Demo ceiling lamps in the showroom, stack and destruction scenes emit only from their downward area panels. Sampling all six emitting box faces can otherwise return zero direct light for a surface below the lamp. This produces written black pixels at low sample counts. The higher frame minimum reduces remaining stochastic noise; it is not a denoiser.
+
+ComputeRayTracer evaluates Lambertian diffuse, GGX metal, smooth/rough dielectric reflection and transmission, Fresnel/TIR, emissive triangles, shadow visibility, next-event estimation with power-heuristic MIS, and Russian roulette. These follow the existing CPU BSDF/PathIntegrator and the [PBRT path-integrator approach](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer). Camera clipping applies to primary rays; secondary paths have unrestricted distance. Misses return black. SplitMix64 shader arithmetic uses core uvec2 operations to match the CPU IndependentSampler for 64-bit seed/sample counters. Numerical operations can still differ between CPU and GPU.
+
+The runtime path is CPU scene compilation/upload -> OpenGL compute ray generation/BVH traversal/transport -> GPU HDR accumulation -> shared texture -> display shader exposure/Reinhard/sRGB -> debug overlays. There is no per-round image readback, CPU Film averaging, or image upload in this path. Eight std430 buffers hold nodes, order, unique-mesh triangles, instances, materials, emitters, emitter lookup and a numerical-error counter. Only that four-byte status counter is read after completion. A 1 ms fence poll bounds cancellation response and keeps dispatches from building an unbounded command queue; an already submitted GPU dispatch still runs to completion.
+
+Three pinned presentation textures keep published frames immutable. Producer fences/flush and display waits import shared-context writes; consumer fences prevent reuse while a previous draw still samples a texture. GLFW creation/destruction stays on the window thread. Compute has a shared hidden OpenGL 4.3 core context; presentation retains OpenGL 3.3. Exposure is applied at display time and preserves accumulated HDR samples. Resolution, scene/camera changes and transport changes start fresh accumulation. Normal output bypasses light transport and color conversion.
+
+Headless ComputeRayTracer construction defaults to GPU PathTrace and uses an independent compute context. Explicit settings must select RayDevice::GPU. Its public render(scene, request, film) intentionally reads one sample into CPU Film for export/testing; use film.resolve(exposure, renderer.imageEncoding()) for the chosen output. Runtime handles shared GPU presentation automatically.
+
+This is programmable OpenGL compute path tracing; it uses no Vulkan/DXR/CUDA dependency or hardware RT pipeline. Use native drivers (JADE_USE_SOFTWARE_RENDERING=OFF) for GPU execution; Mesa llvmpipe executes compute on CPU. Unsupported compute contexts fail explicitly. BLAS/TLAS building, refit and emitter distributions remain on CPU and reuse the existing caches. Textures, volumes, nested media, denoising and dedicated caustic algorithms remain outside both implementations.
 
 ## Collision detection
 
@@ -355,8 +406,8 @@ Both modules target `scene->camera()` at event time, so changing the selected ca
 | WASD / arrows | Local forward/back/right/left, 3 units/second | Horizontal forward/back/right/left, 3 units/second |
 | Shift+W / Ctrl+W | Forward, 6 / 1 units/second | Horizontal forward, 6 / 1 units/second |
 | Space / Ctrl+Space | Parent Y up/down, 3 units/second | Unbound; Space is available for a character controller |
-| Q / E | Roll, -60 / +60 degrees/second | Unbound; orientation has no roll |
-| Mouse | Left-button drag, 0.1 degrees/pixel | Captured continuous look, 0.1 degrees/pixel; pitch limited to +/-89 degrees |
+| Q / E | Unbound | Unbound; orientation has no roll |
+| Mouse | Left-button look, 0.1 degrees/pixel; middle-button pan in Orthographic | Captured continuous look, 0.1 degrees/pixel; pitch limited to +/-89 degrees |
 | Wheel | Zoom active lens, one Motion::zoom increment per offset | Unbound |
 
 FreeCameraControl resets dragging on scene activation/deactivation, a changed camera and left-button release (including focus loss). FPSCameraControl captures the cursor when its Scene becomes active; switching to another Scene restores that Scene's cursor mode. Installing FPS controls on an already active Scene applies capture on the next Run processing pass. Cursor mode changes, scene switches and focus changes reset the mouse position baseline to avoid jumps. FPS yaw and horizontal movement use parent Y, which is world Y for root cameras. Looking up or down does not change horizontal movement speed. External orientation edits and camera selection are respected, with pitch clamped and roll removed. Neither module applies gravity or collision; FPS jumping awaits a character controller and physics.
@@ -381,7 +432,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-Bare F (Wireframe) and I (image rendering) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F3 (axes/AABBs), F4 (physics/forces/logs) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
+Bare F1 (Mesh wireframe) and I (image rendering) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F3 (axes/AABBs), F4 (physics/forces/logs), F5 (Color/Normal) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
 
 ## Events and controls
 
@@ -426,7 +477,7 @@ scene->on<Jade::SceneDeactivated>([&] { dragging = false; });
 scene->on<Jade::SceneActivated>([&] { dragging = false; });
 ```
 
-`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape/F/I and enabled F3/F4/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
+`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape/F1/I and enabled F3/F4/F5/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
 
 Deactivation runs before committing the pointer; activation runs after. Lifecycle Stop ends listener propagation but does not cancel the switch. Reentrant selections queue another switch. A deactivation exception retains the old scene; an activation exception retains the new scene. Both discard pending requests and propagate the original exception. Application destruction releases ownership without calling lifecycle callbacks. One scene can be active/reserved in only one Application at a time.
 
@@ -452,7 +503,7 @@ There are no folder aggregation headers. Source `.cpp` files include their match
 
 ## Frame scheduling and logs
 
-`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setRender(false)` bypasses ray computation. Wireframe, axes and physics overlays remain independent of it. Demo starts with image rendering off, Wireframe on and axes disabled.
+`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setRayTracingEnabled(false)` bypasses ray computation. Wireframe, axes and physics overlays remain independent of it. Demo starts with image rendering off, Wireframe on and axes disabled.
 
 ```text
 15:27:07.591522  INFO [Application] - Ready: window=960x640 target_fps=24 vsync=off

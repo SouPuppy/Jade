@@ -2,6 +2,7 @@
 #include "../Device/OpenGL/OpenGLDevice.hpp"
 #include "../Device/OpenGL/OpenGLProgram.hpp"
 #include <Jade/Renderer/Common/Image.hpp>
+#include "../Device/OpenGL/GpuFrame.hpp"
 #include <memory>
 namespace Jade::Detail {
 class OpenGLDisplay final {
@@ -10,6 +11,7 @@ public:
   ~OpenGLDisplay();
   void begin(Renderer::ImageSize);
   void image(const Renderer::Image &);
+  void image(const std::shared_ptr<GpuFrame>&, float exposureEV, Renderer::ImageEncoding);
 
   void present();
 

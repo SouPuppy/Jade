@@ -1,4 +1,11 @@
 add_library(Jade STATIC
+  include/Jade/Renderer/RayTracing/RayTracingSettings.hpp
+  src/Renderer/RayTracing/Settings.hpp
+  src/internal/Renderer/Device/OpenGL/GpuFrame.hpp
+  include/Jade/Renderer/RayTracing/ComputeRayTracer.hpp
+  src/Renderer/RayTracing/ComputeRayTracer.cpp
+  src/internal/Renderer/Device/OpenGL/OpenGLComputeDevice.hpp
+  src/internal/Renderer/Device/OpenGL/OpenGLComputeDevice.cpp
   include/Jade/Physics/Field/ForceField.hpp
   include/Jade/Physics/Field/GravityField.hpp
   include/Jade/Physics/Environment.hpp
@@ -187,6 +194,7 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${jade_sources})
 
 set(jade_shader_root "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(jade_shader_files
+  Renderer/RayTracing/Shaders/RayTrace.comp
   internal/Renderer/Presentation/Shaders/Display.vert
   internal/Renderer/Presentation/Shaders/ImageDisplay.frag
   internal/Renderer/Debug/Shaders/Lines.vert

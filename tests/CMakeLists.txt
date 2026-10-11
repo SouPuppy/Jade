@@ -11,6 +11,7 @@ add_executable(JadeSmokeTests
   CollisionTests.cpp
   MeshTests.cpp
   RendererTests.cpp
+  ComputeRayTracerTests.cpp
 
   RenderModeTests.cpp
   SahTests.cpp

@@ -866,3 +866,78 @@ TEST(Application, AxisGizmoDefaultsOffAndF3TogglesOncePerUnconsumedPress)
     EXPECT_FALSE(app.runtime().axesEnabled());
   }
 }
+
+TEST(Application, F5EnablesRayImageAndTogglesOutputWithoutChangingWireframe)
+{
+  for (const auto device : {Jade::Renderer::RayDevice::CPU, Jade::Renderer::RayDevice::GPU}) {
+    auto config = HiddenInputApplication();
+    config.debug.shortcuts = true;
+    config.renderer.rayTracing.enabled = false;
+    config.renderer.wireframe = true;
+    config.renderer.rayTracing.device = device;
+    config.renderer.rayTracing.maxBounces = 7;
+    config.renderer.rayTracing.seed = 42;
+    config.renderer.rayTracing.minSamplesPerFrame = 3;
+    config.renderer.rayTracing.maxSamples = 1;
+    config.renderer.rayTracing.resolutionScale = 0.125f;
+    Jade::Application app(config);
+    MakeTestScene(app);
+    auto& renderer = app.runtime().renderer();
+    auto expected = renderer.rayTracingSettings();
+    KeyboardAdapter input;
+    input.Send(GLFW_KEY_F5, GLFW_PRESS);
+    input.Send(GLFW_KEY_F5, GLFW_REPEAT);
+    app.Run({1});
+    expected.output = Jade::Renderer::RayOutput::Normal;
+    expected.enabled = true;
+    EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    EXPECT_TRUE(renderer.rayTracingEnabled());
+    EXPECT_EQ(renderer.progress().samplesPerPixel, 1u);
+    EXPECT_TRUE(renderer.wireframeEnabled());
+    input.Send(GLFW_KEY_I, GLFW_PRESS);
+    input.Send(GLFW_KEY_I, GLFW_RELEASE);
+    app.Run({1});
+    expected.enabled = false;
+    EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
+    input.Send(GLFW_KEY_F5, GLFW_RELEASE);
+    input.Send(GLFW_KEY_F5, GLFW_PRESS, GLFW_MOD_SHIFT);
+    app.Run({1});
+    EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    const auto consumed = app.runtime().scene()->on<Jade::KeyPressed<"F5">>([] { return Jade::EventFlow::Stop; });
+    input.Send(GLFW_KEY_F5, GLFW_RELEASE);
+    input.Send(GLFW_KEY_F5, GLFW_PRESS);
+    app.Run({1});
+    EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    consumed.disconnect();
+    input.Send(GLFW_KEY_F5, GLFW_RELEASE);
+    input.Send(GLFW_KEY_F5, GLFW_PRESS);
+    app.Run({1});
+    expected.output = Jade::Renderer::RayOutput::Color;
+    expected.enabled = true;
+    EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    EXPECT_EQ(renderer.progress().samplesPerPixel, 1u);
+
+    // The settings field and the explicit runtime switch share one enabled state.
+    renderer.setRayTracingEnabled(true);
+    EXPECT_TRUE(renderer.rayTracingSettings().enabled);
+    input.Send(GLFW_KEY_F5, GLFW_RELEASE);
+    input.Send(GLFW_KEY_F5, GLFW_PRESS);
+    app.Run({1});
+    EXPECT_TRUE(renderer.rayTracingEnabled());
+    EXPECT_EQ(renderer.rayTracingSettings().output, Jade::Renderer::RayOutput::Normal);
+    EXPECT_EQ(renderer.progress().samplesPerPixel, 1u);
+    expected.enabled = false;
+    renderer.setRayTracingSettings(expected);
+    EXPECT_FALSE(renderer.rayTracingEnabled());
+    app.Run({1});
+    EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
+  }
+  Jade::Application app(HiddenInputApplication());
+  MakeTestScene(app);
+  const auto settings = app.runtime().renderer().rayTracingSettings();
+  KeyboardAdapter input;
+  input.Send(GLFW_KEY_F5, GLFW_PRESS);
+  app.Run({1});
+  EXPECT_EQ(app.runtime().renderer().rayTracingSettings(), settings);
+}

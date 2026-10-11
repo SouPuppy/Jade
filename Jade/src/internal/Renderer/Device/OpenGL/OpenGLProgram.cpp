@@ -1,6 +1,8 @@
 #include "OpenGLProgram.hpp"
+#include "OpenGLComputeDevice.hpp"
 
 #include <stdexcept>
+#include <algorithm>
 #include <string>
 
 namespace Jade::Detail {
@@ -69,6 +71,26 @@ OpenGLProgram::OpenGLProgram(const char *vertexSource, const char *fragmentSourc
 }
 
 OpenGLProgram::~OpenGLProgram() { glDeleteProgram(m_Handle); }
+
+OpenGLProgram::OpenGLProgram(const char *computeSource)
+{
+  Shader compute(ComputeShader, computeSource);
+  m_Handle = glCreateProgram();
+  if (!m_Handle) throw std::runtime_error("Failed to create an OpenGL compute program.");
+  try {
+    glAttachShader(m_Handle, compute.Handle());
+    glLinkProgram(m_Handle);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(m_Handle, GL_LINK_STATUS, &linked);
+    if (!linked) {
+      GLint length = 0;
+      glGetProgramiv(m_Handle, GL_INFO_LOG_LENGTH, &length);
+      std::string message(static_cast<std::size_t>(std::max(1, length)), '\0');
+      glGetProgramInfoLog(m_Handle, static_cast<GLsizei>(message.size()), nullptr, message.data());
+      throw std::runtime_error("OpenGL compute program linking failed: " + message);
+    }
+  } catch (...) { glDeleteProgram(m_Handle); throw; }
+}
 
 GLint OpenGLProgram::Uniform(const char *name) const
 {

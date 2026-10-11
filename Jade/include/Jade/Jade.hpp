@@ -51,6 +51,7 @@
 #include <Jade/Renderer/Common/LinearRGB.hpp>
 #include <Jade/Renderer/RayTracing/Ray.hpp>
 #include <Jade/Renderer/RayTracing/RayTracing.hpp>
+#include <Jade/Renderer/RayTracing/ComputeRayTracer.hpp>
 #include <Jade/Renderer/RayTracing/RayScene.hpp>
 #include <Jade/Renderer/RayTracing/Sampler.hpp>
 

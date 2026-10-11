@@ -2,6 +2,7 @@
 #include <Jade/EngineConfig.hpp>
 #include <Jade/Assets/Assets.hpp>
 #include <memory>
+#include <chrono>
 
 namespace Jade {
 class Application;
@@ -37,7 +38,7 @@ private:
   void abort() noexcept;
   void finish();
   void suspend() noexcept;
-  void render(Renderer::ImageSize);
+  void render(Renderer::ImageSize, std::chrono::steady_clock::time_point deadline);
   struct Impl;
   std::unique_ptr<Impl> m_Impl;
 };

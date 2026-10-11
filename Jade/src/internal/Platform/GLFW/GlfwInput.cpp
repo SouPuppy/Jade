@@ -95,7 +95,9 @@ void InstallInputCallbacks(GLFWwindow* window, InputState& input)
   glfwSetCursorPosCallback(window, [](GLFWwindow* source, double x, double y) noexcept {
     auto& state = *static_cast<InputState*>(glfwGetWindowUserPointer(source));
     try {
-      state.OnCursor(x, y);
+      int width = 0, height = 0;
+      glfwGetWindowSize(source, &width, &height);
+      state.OnCursor(x, y, height);
     } catch (...) {
       state.CaptureError(std::current_exception());
     }

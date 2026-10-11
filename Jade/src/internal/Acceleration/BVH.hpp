@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <stop_token>
+#include <span>
 #include <vector>
 namespace Jade::Detail {
 struct BuildCancelled {};
@@ -51,6 +52,12 @@ struct BVHStats {
 // Shared binary binned-SAH implementation for BLAS and TLAS.
 class BVH final {
 public:
+  struct Node {
+    Bounds bounds;
+    std::uint32_t start = 0, count = 0, left = 0, right = 0;
+  };
+  std::span<const Node> nodes() const noexcept { return m_Nodes; }
+  std::span<const std::uint32_t> order() const noexcept { return m_Order; }
   Bounds bounds() const { return m_Nodes.empty() ? Bounds{} : m_Nodes.front().bounds; }
   void build(const std::vector<Bounds> &bounds, std::stop_token token = {});
   void refit(const std::vector<Bounds> &bounds, std::stop_token token = {});
@@ -114,10 +121,6 @@ public:
   }
 
 private:
-  struct Node {
-    Bounds bounds;
-    std::uint32_t start = 0, count = 0, left = 0, right = 0;
-  };
   std::uint32_t buildNode(std::size_t first, std::size_t count, const std::vector<Bounds> &bounds,
                           std::uint32_t depth, std::stop_token token);
   void updateCost();

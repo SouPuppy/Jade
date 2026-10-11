@@ -8,6 +8,8 @@ struct MouseMoved {
   double y = 0;
   double dx = 0;
   double dy = 0;
+  // Height in the same window-coordinate units as dx/dy; zero if unavailable.
+  int windowHeight = 0;
 };
 
 } // namespace Jade

@@ -6,7 +6,8 @@ class Scene;
 
 namespace Module {
 
-// Installs scene-local free flight with left-button mouse look, roll and zoom.
+// Installs scene-local free flight, left-button look, wheel zoom and
+// orthographic middle-button panning. Q/E are unbound.
 // Input always targets the Scene's currently selected camera.
 // A Scene may install either FreeCameraControl or FPSCameraControl.
 struct FreeCameraControl {

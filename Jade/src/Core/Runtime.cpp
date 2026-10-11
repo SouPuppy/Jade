@@ -123,13 +123,13 @@ void Runtime::setPhysicsDebug(bool enabled) noexcept {
   }
 }
 bool Runtime::physicsDebugEnabled() const noexcept { return m_Impl->physicsDebug; }
-void Runtime::render(Renderer::ImageSize size) {
+void Runtime::render(Renderer::ImageSize size, std::chrono::steady_clock::time_point deadline) {
   m_Impl->renderer.rethrowError();
   std::optional<Renderer::SceneSnapshot> snapshot;
   std::optional<Detail::CollisionDebugLines> debug;
   if (m_Impl->scene) {
     const auto camera = m_Impl->scene->camera();
-    const bool geometry = m_Impl->renderer.renderEnabled() || m_Impl->renderer.wireframeEnabled();
+    const bool geometry = m_Impl->renderer.rayTracingEnabled() || m_Impl->renderer.wireframeEnabled();
     if ((geometry || m_Impl->axes || m_Impl->aabbs || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
       snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry);
     if (m_Impl->physicsDebug || m_Impl->aabbs)
@@ -169,6 +169,7 @@ void Runtime::render(Renderer::ImageSize size) {
           m.a.id(), m.b.id(), p.pointA.x, p.pointA.y, p.pointA.z, m.normal.x, m.normal.y, m.normal.z, std::max(0.0f, -p.separation), p.normalImpulse);
     }
   }
-  m_Impl->renderer.render(snapshot ? &*snapshot : nullptr, size, m_Impl->axes, debug ? &*debug : nullptr);
+  m_Impl->renderer.render(snapshot ? &*snapshot : nullptr, size, m_Impl->axes, debug ? &*debug : nullptr,
+                          m_Impl->paused, deadline);
 }
 } // namespace Jade

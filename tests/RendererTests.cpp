@@ -105,6 +105,7 @@ struct Control {
   bool release = false;
   bool blockFirst = false;
   std::vector<Vec3> cameras;
+  std::vector<std::uint64_t> sampleIndices, seeds;
 };
 class RecordingBackend final : public ProgressiveBackend {
 public:
@@ -116,6 +117,7 @@ public:
   {
     ProgressiveSettings s;
     s.maxSamples = m_Limit;
+    s.minSamplesPerFrame = 1;
     return s;
   }
   void render(const RayScene &, const RenderRequest &request, Film &film) override
@@ -124,6 +126,8 @@ public:
     {
       std::unique_lock lock(m_Control->mutex);
       m_Control->cameras.push_back(request.camera.position);
+      m_Control->sampleIndices.push_back(request.sampleIndex);
+      m_Control->seeds.push_back(request.seed);
       if (call == 1 && m_Control->blockFirst) {
         while (!m_Control->release && !request.cancellation.stop_requested())
           m_Control->ready.wait_for(lock, std::chrono::milliseconds(1));
@@ -495,9 +499,180 @@ TEST(Film, HdrMeanToneMappingAndValidation)
   Material material;
   material.emission.r = -1;
   EXPECT_THROW(validateMaterial(material), std::invalid_argument);
-  RayTracingConfig invalid;
+  RayTracingSettings invalid;
   invalid.resolutionScale = 0;
   EXPECT_THROW((RayTracing{invalid}), std::invalid_argument);
+}
+
+TEST(ProgressiveSession, LiveExposureAndSampleLimitsPreserveFilmWhileSeedAndResolutionReset)
+{
+  Fixture f;
+  auto control = std::make_shared<Control>();
+  Jade::Detail::ProgressiveSession session;
+  session.install(std::make_unique<RecordingBackend>(control));
+  session.start();
+  const auto snapshot = f.snapshot();
+  session.submit(snapshot, {8, 8});
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 1; }));
+  const auto first = session.image();
+  const auto revision = session.progress().revision;
+  ProgressiveSettings settings; settings.maxSamples = 1; settings.exposureEV = 2;
+  session.updateSettings(settings);
+  ASSERT_TRUE(waitUntil([&] { return session.image() != first; }));
+  EXPECT_GT(session.image()->pixels[0], first->pixels[0]);
+  EXPECT_EQ(control->calls, 1);
+  EXPECT_EQ(session.progress().samplesPerPixel, 1u);
+  EXPECT_EQ(session.progress().revision, revision);
+  settings.maxSamples = 3;
+  session.updateSettings(settings);
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 3; }));
+  EXPECT_EQ(control->calls, 3);
+  EXPECT_EQ(session.progress().revision, revision);
+  settings.maxSamples = 1;
+  session.updateSettings(settings);
+  settings.seed = 17;
+  session.updateSettings(settings);
+  session.submit(snapshot, {8, 8});
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 1; }));
+  EXPECT_GT(session.progress().revision, revision);
+  EXPECT_EQ(control->calls, 4);
+  settings.resolutionScale = .5f;
+  session.updateSettings(settings);
+  session.submit(snapshot, {8, 8});
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 1; }));
+  EXPECT_EQ(session.progress().size, (ImageSize{4, 4}));
+  EXPECT_EQ(control->calls, 5);
+  session.stop();
+  session.rethrowError();
+}
+
+TEST(ProgressiveSession, ExposureUpdatedDuringARoundResolvesTheCompletedSampleWithoutRetracing)
+{
+  Fixture f;
+  auto control = std::make_shared<Control>(); control->blockFirst = true;
+  Jade::Detail::ProgressiveSession session;
+  session.install(std::make_unique<RecordingBackend>(control));
+  session.start(); session.submit(f.snapshot(), {4, 4});
+  ASSERT_TRUE(waitUntil([&] { return control->calls == 1; }));
+  ProgressiveSettings settings; settings.maxSamples = 1; settings.exposureEV = 1;
+  session.updateSettings(settings);
+  {
+    std::lock_guard lock(control->mutex);
+    control->release = true;
+  }
+  control->ready.notify_all();
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 1; }));
+  Film expected({4, 4}); expected.addSample(std::vector<LinearRGB>(16, LinearRGB{1, 0, 0}));
+  ASSERT_TRUE(session.image());
+  EXPECT_EQ(session.image()->pixels, expected.resolve(1).pixels);
+  EXPECT_EQ(control->calls, 1);
+  EXPECT_FALSE(session.progress().inFlight);
+  session.stop(); session.rethrowError();
+}
+
+TEST(Film, NormalDataBypassesExposureToneMappingAndSrgb)
+{
+  Film film({1, 1});
+  const std::array sample{LinearRGB{.5f, .5f, 1}};
+  film.addSample(sample);
+  EXPECT_EQ(film.resolve(0, ImageEncoding::LinearData).pixels,
+    (std::vector<std::uint8_t>{128, 128, 255, 255}));
+  EXPECT_EQ(film.resolve(4, ImageEncoding::LinearData).pixels,
+    film.resolve(0, ImageEncoding::LinearData).pixels);
+}
+
+TEST(ProgressiveSession, RunningFramesFinishWholeRoundsBeforeAdvancingAndOnlyPauseAccumulates)
+{
+  Fixture f;
+  auto control = std::make_shared<Control>(); control->blockFirst = true;
+  Jade::Detail::ProgressiveSession session;
+  session.install(std::make_unique<RecordingBackend>(control, 3));
+  session.start();
+  const auto snapshot = f.snapshot();
+  const auto expired = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  session.submit(snapshot, {8, 8}, false, expired);
+  ASSERT_TRUE(waitUntil([&] { return control->calls == 1; }));
+  std::atomic<bool> completed = false;
+  std::jthread waiter([&] { session.waitForFrame(); completed = true; });
+  // Even an expired budget cannot expose an unfinished whole-image round.
+  EXPECT_FALSE(completed);
+  EXPECT_FALSE(session.image());
+  {
+    std::lock_guard lock(control->mutex); control->release = true;
+  }
+  control->ready.notify_all();
+  const bool finished = waitUntil([&] { return completed.load(); });
+  if (!finished) session.stop();
+  waiter.join();
+  ASSERT_TRUE(finished);
+  ASSERT_TRUE(session.image());
+  EXPECT_EQ(session.image()->pixels.size(), 8u * 8u * 4u);
+  EXPECT_EQ(session.progress().samplesPerPixel, 1u);
+  EXPECT_EQ(control->calls, 1);
+  const auto firstRevision = session.progress().revision;
+
+  // An unchanged scene still gets a fresh frame and a different random stream.
+  session.submit(snapshot, {8, 8}, false, expired);
+  ASSERT_TRUE(waitUntil([&] { return session.progress().revision > firstRevision; }));
+  session.waitForFrame();
+  EXPECT_EQ(session.progress().samplesPerPixel, 1u);
+  EXPECT_EQ(control->calls, 2);
+  session.submit(snapshot, {8, 8}, true);
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 3; }));
+  const auto pausedRevision = session.progress().revision;
+  session.submit(snapshot, {8, 8}, true);
+  EXPECT_EQ(control->calls, 5);
+  EXPECT_EQ(session.progress().revision, pausedRevision);
+  session.submit(snapshot, {8, 8}, false, expired);
+  ASSERT_TRUE(waitUntil([&] { return session.progress().revision > pausedRevision; }));
+  session.waitForFrame();
+  EXPECT_EQ(session.progress().samplesPerPixel, 1u);
+  session.stop(); session.rethrowError();
+  EXPECT_EQ(control->sampleIndices, (std::vector<std::uint64_t>{0, 0, 0, 1, 2, 0}));
+  ASSERT_EQ(control->seeds.size(), 6u);
+  EXPECT_NE(control->seeds[0], control->seeds[1]);
+  EXPECT_EQ(control->seeds[2], 0u);
+  EXPECT_EQ(control->seeds[2], control->seeds[4]);
+}
+
+TEST(ProgressiveSession, FrameQualityMinimumSurvivesExpiredBudgetsAndHonorsTheSampleCap)
+{
+  Fixture f; auto control = std::make_shared<Control>();
+  Jade::Detail::ProgressiveSession session;
+  session.install(std::make_unique<RecordingBackend>(control, 0));
+  ProgressiveSettings settings; settings.minSamplesPerFrame = 8;
+  session.updateSettings(settings); session.start();
+  const auto expired = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  session.submit(f.snapshot(), {4,4}, false, expired);
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 8; }));
+  session.waitForFrame();
+  EXPECT_EQ(control->calls, 8);
+  const auto completed = session.progress();
+  settings.minSamplesPerFrame = 0;
+  EXPECT_THROW(session.updateSettings(settings), std::invalid_argument);
+  EXPECT_EQ(session.progress().revision, completed.revision);
+  settings.minSamplesPerFrame = 12; settings.maxSamples = 3;
+  session.updateSettings(settings);
+  session.submit(f.snapshot(), {4,4}, false, expired);
+  ASSERT_TRUE(waitUntil([&] { return session.progress().revision > completed.revision && session.progress().samplesPerPixel == 3; }));
+  session.waitForFrame(); session.stop(); session.rethrowError();
+  EXPECT_EQ(control->calls, 11);
+}
+
+TEST(ProgressiveSession, RunningFrameBudgetAllowsAdditionalCompletedSamplesWithinOneFrame)
+{
+  Fixture f;
+  auto control = std::make_shared<Control>();
+  Jade::Detail::ProgressiveSession session;
+  session.install(std::make_unique<RecordingBackend>(control, 3)); session.start();
+  session.submit(f.snapshot(), {4, 4}, false, std::chrono::steady_clock::now() + std::chrono::seconds(5));
+  ASSERT_TRUE(waitUntil([&] { return session.progress().samplesPerPixel == 3; }));
+  session.waitForFrame();
+  session.stop(); session.rethrowError();
+  EXPECT_EQ(control->calls, 3);
+  EXPECT_EQ(control->sampleIndices, (std::vector<std::uint64_t>{0, 1, 2}));
+  ASSERT_EQ(control->seeds.size(), 3u);
+  EXPECT_EQ(control->seeds[0], control->seeds[2]);
 }
 
 TEST(ProgressiveSession, CoalescesMovingSnapshotsAndResetsAccumulation)
@@ -637,7 +812,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   app.on<FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 3) {
       ASSERT_TRUE(waitUntil([&] { return control->calls.load() > 0; }));
-      app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
+      app.runtime().renderer().setRayTracingEnabled(false); app.runtime().renderer().setWireframe(true);
     }
     if (frame.frame == 4)
       pausedCalls = control->calls;
@@ -646,7 +821,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
       object.get<Transform>().position = {1, 0, 0};
     }
     if (frame.frame == 7)
-      app.runtime().renderer().setRender(true); app.runtime().renderer().setWireframe(false);
+      app.runtime().renderer().setRayTracingEnabled(true); app.runtime().renderer().setWireframe(false);
     if (frame.frame == 10)
       resumed = waitUntil([&] { return control->calls.load() > pausedCalls; });
   });
@@ -670,7 +845,7 @@ TEST(ApplicationRendering, OwnsDefaultRayTracingAndLocksIntegratorDuringRun)
     EXPECT_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()), std::logic_error);
   });
   EXPECT_NO_THROW(app.Run({1}));
-  app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
+  app.runtime().renderer().setRayTracingEnabled(false); app.runtime().renderer().setWireframe(true);
   EXPECT_NO_THROW(app.Run({1}));
   EXPECT_NO_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
 }

@@ -467,7 +467,7 @@ TEST(CollisionDebug, ApplicationControlsAreOptInAndValidateOnlyWhenDisplayed)
   EXPECT_TRUE(app.runtime().physicsDebugEnabled());
   EXPECT_THROW(app.Run({1}), std::invalid_argument);
   app.runtime().setPhysicsDebug(false);
-  app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
+  app.runtime().renderer().setRayTracingEnabled(false); app.runtime().renderer().setWireframe(true);
   EXPECT_NO_THROW(app.Run({1}));
 }
 
@@ -625,7 +625,7 @@ TEST(CollisionDebug, LogsSimulationAndBodyValuesWithoutPerFrameSummarySpam)
   logging.sink = [&](const Log::Record& r) { records.push_back(r); };
   Log::Configure(logging);
   auto config = hidden(); config.debug.physics = true;
-  config.renderer.render = false; config.renderer.wireframe = true;
+  config.renderer.rayTracing.enabled = false; config.renderer.wireframe = true;
   Application app(config);
   auto scene = std::make_shared<Scene>(); camera(*scene);
   add(*scene, Sphere{1}).add<RigidBody>();
@@ -652,6 +652,7 @@ TEST(CollisionDebug, ColliderEditsAndOverlayTogglesDoNotRestartPathTracing)
   auto config = hidden();
   config.debug.physics = true;
   Application app(config);
+  app.runtime().setPaused(true); // Only paused rendering accumulates across display frames.
   const auto scene = std::make_shared<Scene>();
   camera(*scene);
   const auto object = add(*scene, Sphere{1});

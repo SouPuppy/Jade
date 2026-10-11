@@ -52,6 +52,7 @@ void OpenGLDisplay::image(const Renderer::Image &image)
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, m_Texture);
   glUniform1i(m_ImageProgram->Uniform("u_Image"), 0);
+  glUniform1i(m_ImageProgram->Uniform("u_Linear"), 0);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   if (m_TextureSize != image.size) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image.size.width, image.size.height, 0, GL_RGBA,
@@ -61,6 +62,27 @@ void OpenGLDisplay::image(const Renderer::Image &image)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image.size.width, image.size.height, GL_RGBA, GL_UNSIGNED_BYTE,
                     image.pixels.data());
   glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+void OpenGLDisplay::image(const std::shared_ptr<GpuFrame>& frame, float exposureEV, Renderer::ImageEncoding encoding)
+{
+  if (!frame || !frame->texture || !frame->ready) throw std::invalid_argument("Incomplete GPU frame.");
+  m_Device.current();
+  glWaitSync(frame->ready, 0, GL_TIMEOUT_IGNORED);
+  glDisable(GL_DEPTH_TEST);
+  glUseProgram(m_ImageProgram->Handle());
+  glBindVertexArray(m_Vao);
+  glActiveTexture(GL_TEXTURE0);
+  // Rebinding imports completed shared-object changes from the compute context.
+  glBindTexture(GL_TEXTURE_2D, frame->texture);
+  glUniform1i(m_ImageProgram->Uniform("u_Image"), 0);
+  glUniform1i(m_ImageProgram->Uniform("u_Linear"), 1);
+  glUniform1i(m_ImageProgram->Uniform("u_Data"), encoding == Renderer::ImageEncoding::LinearData);
+  glUniform1f(m_ImageProgram->Uniform("u_Exposure"), exposureEV);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  const auto consumed = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (!consumed) throw std::runtime_error("Cannot fence GPU presentation.");
+  if (const auto previous = frame->consumed.exchange(consumed)) glDeleteSync(previous);
+  glFlush();
 }
 void OpenGLDisplay::present()
 {

@@ -7,6 +7,7 @@
 #include <vector>
 
 namespace Jade::Renderer {
+enum class ImageEncoding { Radiance, LinearData };
 
 struct ImageSize {
   int width = 0;
@@ -15,7 +16,8 @@ struct ImageSize {
   std::size_t pixels() const;
 };
 
-// Top-left origin, tightly packed sRGB RGBA8, alpha always opaque.
+// Top-left origin, tightly packed RGBA8, alpha always opaque.
+// Radiance resolves to sRGB; diagnostic LinearData resolves without color conversion.
 struct Image {
   ImageSize size;
   std::vector<std::uint8_t> pixels;
@@ -29,7 +31,7 @@ public:
   std::span<const LinearRGB> pixels() const noexcept { return m_Mean; }
   // Commits a complete round atomically with respect to cancellation.
   void addSample(std::span<const LinearRGB> sample);
-  Image resolve(float exposureEV = 0) const;
+  Image resolve(float exposureEV = 0, ImageEncoding encoding = ImageEncoding::Radiance) const;
 
 private:
   ImageSize m_Size;

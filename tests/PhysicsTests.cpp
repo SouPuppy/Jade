@@ -23,7 +23,7 @@ Entity floor(Scene& scene) {
 double length(Vec3 v) { return std::hypot(v.x, v.y, v.z); }
 EngineConfig hidden() {
   EngineConfig c; c.window.visible = false; c.window.width = c.window.height = 64;
-  c.renderer.render = false; c.renderer.wireframe = true; c.logPerformance = false;
+  c.renderer.rayTracing.enabled = false; c.renderer.wireframe = true; c.logPerformance = false;
   return c;
 }
 }
