@@ -18,6 +18,12 @@ struct Missing : Physical { using Physical::Physical; };
 struct Throws : Jade::Archetype<A> {
   explicit Throws(Jade::Entity e) : Jade::Archetype<A>(e) { throw std::runtime_error("constructor"); }
 };
+struct Configured : Jade::Archetype<A, B> {
+  Configured(Jade::Entity e, int value, std::unique_ptr<int> payload) : Jade::Archetype<A, B>(e) {
+    get<A>().value = value + *payload;
+    if (value < 0) throw std::runtime_error("configuration");
+  }
+};
 }
 static_assert(std::is_same_v<Jade::Archetype<Jade::Archetype<A, B>, B, C>, Jade::Archetype<A, B, C>>);
 TEST(Archetype, ComposesTypedHandlesAndQueriesActualComponents) {
@@ -55,6 +61,14 @@ TEST(Archetype, FailedCreationLeavesNoPartialEntities) {
   const auto values = scene.query<A>();
   EXPECT_EQ(values.begin(), values.end());
   EXPECT_TRUE(scene.create<Jade::Archetype<A>>().has<A>());
+}
+TEST(Archetype, ForwardsConstructorArgumentsAndRollsBackConfigurationFailures) {
+  Jade::Scene scene;
+  const auto object = scene.create<Configured>(4, std::make_unique<int>(8));
+  EXPECT_EQ(object.get<A>().value, 12);
+  EXPECT_THROW(scene.create<Configured>(-1, std::make_unique<int>(8)), std::runtime_error);
+  const auto objects = scene.query<A, B>();
+  EXPECT_EQ(std::distance(objects.begin(), objects.end()), 1);
 }
 TEST(Archetype, StructuralChangesKeepStableComponentObjects) {
   Jade::Scene scene;

@@ -92,13 +92,13 @@ TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
   EXPECT_NO_THROW(app.Run({1}));
   EXPECT_THROW(app.runtime().scene()->setCamera(selected), std::invalid_argument);
   app.runtime().scene()->setCamera(initial);
-  app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
+  app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
   EXPECT_NO_THROW(app.Run({1}));
   std::array<GLint, 2> mode{};
   glGetIntegerv(GL_POLYGON_MODE, mode.data());
-  EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
   EXPECT_EQ(mode[0], GL_FILL);
-  app.runtime().renderer().setMode(Jade::Renderer::Mode::RayTracing);
+  app.runtime().renderer().setRender(true); app.runtime().renderer().setWireframe(false);
   EXPECT_NO_THROW(app.Run({1}));
   glGetIntegerv(GL_POLYGON_MODE, mode.data());
   EXPECT_EQ(mode[0], GL_FILL);

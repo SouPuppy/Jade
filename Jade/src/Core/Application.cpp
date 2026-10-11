@@ -72,8 +72,6 @@ void Application::Run(const RunOptions &options)
     throw std::logic_error("Application::Run cannot be called from an event callback.");
   }
   m_Impl->runtime.begin();
-  const auto wireframe = [&] { return runtime().renderer().mode() == Renderer::Mode::Wireframe; };
-  const auto toggleWireframe = [&] { runtime().renderer().setMode(wireframe() ? Renderer::Mode::RayTracing : Renderer::Mode::Wireframe); };
   m_Impl->running = true;
   m_Impl->stopRequested = false;
   using Clock = Detail::FrameClock::Clock;
@@ -135,16 +133,21 @@ void Application::Run(const RunOptions &options)
             flow == EventFlow::Continue && !m_Impl->stopRequested) {
           m_Impl->window.RequestClose();
         }
-        if (key->action == KeyAction::Pressed && key->event.key == Key::I &&
+        if (key->action == KeyAction::Pressed && (key->event.key == Key::I || key->event.key == Key::F) &&
             key->event.modifiers == Modifiers::None && flow == EventFlow::Continue &&
-            !m_Impl->stopRequested && !m_Impl->window.ShouldClose())
-          toggleWireframe();
+            !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
+          auto& renderer = runtime().renderer();
+          if (key->event.key == Key::I) {
+            renderer.setRender(!renderer.renderEnabled());
+            applicationLog << Log::info("Render: {}", renderer.renderEnabled() ? "on" : "off");
+          } else {
+            renderer.setWireframe(!renderer.wireframeEnabled());
+            applicationLog << Log::info("Wireframe: {}", renderer.wireframeEnabled() ? "on" : "off");
+          }
+        }
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
-          if (key->event.key == Key::F) {
-            toggleWireframe();
-            applicationLog << Log::info("Wireframe: {}", wireframe() ? "on" : "off");
-          } else if (key->event.key == Key::F3) {
+          if (key->event.key == Key::F3) {
             runtime().setAxes(!runtime().axesEnabled());
             applicationLog << Log::info("Axis Gizmo: {}", runtime().axesEnabled() ? "on" : "off");
           } else if (key->event.key == Key::F4) {

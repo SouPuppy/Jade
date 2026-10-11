@@ -6,7 +6,7 @@ Application owns a global main-thread dispatcher; each Scene owns a dispatcher f
 
 ```cpp
 Jade::EngineConfig config;
-config.debug.shortcuts = true; // F: wireframe, F3: axes, F4: physics debug/logs, O: projection.
+config.debug.shortcuts = true; // F3: axes, F4: physics debug/logs, O: projection. F/I always work.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
 scene->use<Jade::Module::FreeCameraControl>();
@@ -16,7 +16,7 @@ Include Jade/Module/FreeCameraControl.hpp or Jade/Jade.hpp. FreeCameraControl in
 
 For first-person controls, include Jade/Module/FPSCameraControl.hpp and use `scene->use<Jade::Module::FPSCameraControl>()` instead. It keeps WASD/arrows and Shift/Ctrl+W on the horizontal plane, captures the cursor for continuous mouse look, clamps pitch to +/-89 degrees and removes roll. Space, Ctrl+Space, Q/E and wheel are unbound; physics and jumping belong to a future character controller. A Scene rejects installing both control types. Both modules use the existing Scene::on events, skip missing components and release subscriptions with their Scene.
 
-Unmodified KeyPressed I switches between RayTracing and Wireframe, including when debug is disabled. Repeats, modified keys and consumed events do not toggle it. F retains the same toggle when debug is enabled.
+Unmodified KeyPressed F toggles Wireframe; I toggles image rendering independently, including when debug shortcuts are disabled. Repeats, modified keys and consumed events do not toggle either. Both may be on (image plus mesh edges) or off (clear background plus any enabled debug overlays). Physics and input continue. Scene selection preserves both switches.
 
 The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing FreeCameraControl. FreeCameraControl can also be used with debug disabled.
 
@@ -167,7 +167,7 @@ scene->on<Jade::KeyPressed<"Escape">>([] {
 scene->on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 ```
 
-With config.debug.shortcuts=true, unconsumed bare F, F3, F4 and O toggle renderer mode, axes, the complete physics debug overlay/logging and camera projection once per press. F4 leaves renderer mode unchanged; it toggles cyan AABBs, yellow Collider outlines, red contact points and green normals together. Physics/Debug logs state changes and rate-limited configuration/body/contact information. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. O preserves both lens zoom values, pose and clip planes. Initial debug visibility follows config.debug.axes/config.debug.physics independently. Direct controls live on runtime.renderer(), runtime.setAxes() and runtime.setPhysicsDebug().
+With config.debug.shortcuts=true, unconsumed bare F3, F4 and O toggle axes, the complete physics debug overlay/logging and camera projection once per press. F4 toggles cyan AABBs, yellow Collider outlines, red contact points and green normals together; it works even with image/Wireframe disabled. Physics/Debug logs state changes and rate-limited configuration/body/contact information. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. O preserves both lens zoom values, pose and clip planes. Initial debug visibility follows config.debug.axes/config.debug.physics independently. Direct controls live on runtime.renderer(), runtime.setAxes() and runtime.setPhysicsDebug().
 
 Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
@@ -198,7 +198,7 @@ and skipped subscribers. `consumed_by` identifies the subscription returning
 EventFlow::Stop; zero means propagation continued. This uses the same level as
 the event, so a consumed FrameUpdate does not generate a per-frame Debug message.
 Dispatch records are emitted after successful callbacks, including unhandled input
-with zero handlers. Application default Escape and enabled F/F3/F4/O actions run afterward.
+with zero handlers. Application default Escape/F/I and enabled F3/F4/O actions run afterward.
 
 KeyHeld, MouseHeld, MouseMoved, MouseScrolled and FrameUpdate use Trace, including
 their relevant dt, position/deltas or frame index. Enable them explicitly with

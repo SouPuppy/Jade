@@ -209,7 +209,7 @@ TEST(SceneModules, RejectsRecursiveInstallationAndAllowsRetry)
   EXPECT_TRUE(RecursiveModule::connection.connected());
 }
 
-TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
+TEST(ApplicationDebug, DebugShortcutsAreOptInAndWireframeAlwaysOperatesOncePerPress)
 {
   EXPECT_FALSE(Jade::EngineConfig{}.debug.shortcuts);
   for (const bool debug : {false, true}) {
@@ -224,7 +224,7 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
     input.Tap(GLFW_KEY_F4);
     input.Tap(GLFW_KEY_O);
     app.Run({1});
-    EXPECT_EQ((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe), debug);
+    EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
     EXPECT_EQ(app.runtime().axesEnabled(), debug);
     EXPECT_EQ(app.runtime().physicsDebugEnabled(), debug);
     EXPECT_EQ(lens.projection, debug ? Jade::Projection::Orthographic : Jade::Projection::Perspective);
@@ -235,21 +235,21 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
     input.Tap(GLFW_KEY_F4);
     input.Tap(GLFW_KEY_O);
     app.Run({1});
-    EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
     EXPECT_FALSE(app.runtime().axesEnabled());
     EXPECT_FALSE(app.runtime().physicsDebugEnabled());
     EXPECT_EQ(lens.projection, Jade::Projection::Perspective);
-    app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
-    EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
+    EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
     input.Tap(GLFW_KEY_F4);
     app.Run({1});
     EXPECT_EQ(app.runtime().physicsDebugEnabled(), debug);
-    EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
     EXPECT_FALSE(app.runtime().axesEnabled());
     if (debug) {
       input.Tap(GLFW_KEY_F);
       app.Run({1});
-      EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+      EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
     }
   }
 }
@@ -266,7 +266,7 @@ TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
     input.Tap(GLFW_KEY_O, modifier);
   }
   app.Run({1});
-  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
   EXPECT_FALSE(app.runtime().axesEnabled());
   EXPECT_FALSE(app.runtime().physicsDebugEnabled());
   EXPECT_EQ(scene->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
@@ -282,7 +282,7 @@ TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
   input.Tap(GLFW_KEY_O);
   app.Run({1});
   EXPECT_EQ(sceneF, 0);
-  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
   EXPECT_FALSE(app.runtime().axesEnabled());
   EXPECT_FALSE(app.runtime().physicsDebugEnabled());
   EXPECT_EQ(scene->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
@@ -294,18 +294,18 @@ TEST(ApplicationDebug, CallbacksRunBeforeDefaultsAndStopCanPreventThem)
   const auto scene = SelectScene(app);
   std::vector<int> order;
   app.on<Jade::KeyPressed<"f">>([&] {
-    EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
     order.push_back(1);
   });
   scene->on<Jade::KeyPressed<"f">>([&] {
-    EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
     order.push_back(2);
   });
   Input input;
   input.Tap(GLFW_KEY_F);
   app.Run({1});
   EXPECT_EQ(order, (std::vector<int>{1, 2}));
-  EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
   app.on<Jade::KeyPressed<"F3">>([&] { app.stop(); });
   input.Tap(GLFW_KEY_F3);
   app.Run({1});

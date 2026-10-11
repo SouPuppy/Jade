@@ -9,14 +9,14 @@ RenderHost::RenderHost(Window &window, bool vsync, std::string title, Renderer::
   m_Session.bind(m_RayTracing);
 }
 RenderHost::~RenderHost() { stop(); }
-void RenderHost::start(bool wireframe)
+void RenderHost::start(bool render)
 {
   stop();
   invalidate();
-  m_Wireframe = wireframe;
+  m_Render = render;
   m_RayTracing.m_ApplicationActive = true;
   try {
-    if (!wireframe)
+    if (render)
       m_Session.start();
   } catch (...) {
     stop();
@@ -32,40 +32,42 @@ void RenderHost::invalidate() noexcept { m_Session.invalidate(); }
 void RenderHost::rethrowError() { m_Session.rethrowError(); }
 Renderer::RenderProgress RenderHost::progress() const
 {
-  if (m_Wireframe) {
+  if (!m_Render) {
     Renderer::RenderProgress result;
-    result.rendererName = "Wireframe";
+    result.rendererName = "Disabled";
     return result;
   }
   auto result = m_Session.progress();
   result.rendererName = "RayTracing";
   return result;
 }
-void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSize size, bool wireframe,
+void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSize size, bool render, bool wireframe,
                       bool axes, const CollisionDebugLines* colliders)
 {
-  if (m_Wireframe != wireframe) {
-    m_Wireframe = wireframe;
+  if (m_Render != render) {
+    m_Render = render;
     m_Session.stop();
     invalidate();
     rethrowError();
-    if (!wireframe)
+    if (render)
       m_Session.start();
   }
   if (m_FrameSize != size) {
     invalidate();
     m_FrameSize = size;
   }
-  m_Window.SetTitle(m_Title + " | " + (wireframe ? "Wireframe" : "RayTracing"));
+  const auto name = render ? (wireframe ? "RayTracing + Wireframe" : "RayTracing") :
+    (wireframe ? "Wireframe" : "Disabled");
+  m_Window.SetTitle(m_Title + " | " + name);
   m_Display.begin(size);
   if (snapshot && snapshot->camera) {
-    if (wireframe)
-      m_Debug.wireframe(*snapshot, size);
-    else {
+    if (render) {
       m_Session.submit(*snapshot, size);
       if (auto image = m_Session.image())
         m_Display.image(*image);
     }
+    if (wireframe)
+      m_Debug.wireframe(*snapshot, size);
     if (axes)
       m_Debug.axes(*snapshot->camera, size);
     if (colliders)

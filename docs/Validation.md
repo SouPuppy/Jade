@@ -1,5 +1,15 @@
 # Windows x64 validation
 
+## Independent render controls and Archetype Demo (2026-10-10)
+
+Debug and Release each passed 199/199 GoogleTest tests across 46 suites. Engine, Demo and tests rebuilt in both configurations without compiler warnings. Seven affected public headers passed standalone MSVC C++20 /W4 /WX compilation. Renderer::Mode/setMode are removed; render and wireframe flags are independent, with F/I available even when debug shortcuts are disabled.
+
+Real GLFW callbacks verify all four switch combinations, exact modifiers, repeats, global/scene consumption and title/progress labels. Actual OpenGL front-buffer readback verifies a RayTracing image and mesh edges together. A completed one-sample revision and integrator call count remain unchanged across Wireframe toggles. Disabling image rendering starts no integrator, retains the Wireframe flag and resumes fresh samples when enabled. With both scene-rendering flags off, physics still advances, axes/collision overlays remain available and unused Geometry/Material data is not consumed. Typed creation checks constructor argument forwarding, move-only arguments and rollback after configuration failures.
+
+Demo now creates Model/Cube/Ball/StackBox through Archetype constructors, shares one unit-cube mesh and preserves rendering switches across scene changes. Both actual executables completed 40-frame launches with empty stderr and normal shutdown. An ignored harness built from the rewritten Demo source with a hidden window checks F4, P, K, 1/2/3, R, F and I through actual callbacks, including all four rendering combinations. The Debug launch exceeded its frame budget and exercised debt dropping; no realtime-performance guarantee follows from these checks.
+
+Artifacts are ignored under .temp/render-controls-debug-tests.xml/.log, .temp/render-controls-release-tests.xml/.log, .temp/render-controls-*-targeted.xml/.log, .temp/render-controls-header-checks.log, .temp/render-controls-*-demo.log/.err and .temp/render-controls-demo-input.log. Builds remain build/collision-debug/ and build/collision-release/. No commit was created.
+
 ## Runtime, Archetype and rigid-body dynamics (2026-10-10)
 
 Debug and Release each passed 197/197 GoogleTest tests across 46 suites. Both isolated configurations rebuilt the engine, Demo and tests without compiler warnings. Nine affected public headers passed standalone MSVC C++20 /W4 /WX compilation. Runtime now owns Scene selection, Assets, Renderer::System and Physics::System; tests retain coverage of scene switching, callback/worker exceptions, recovery, input propagation and rendering.

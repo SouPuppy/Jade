@@ -6,11 +6,11 @@
 
 namespace Jade { class Runtime; class Window; namespace Detail { struct CollisionDebugLines; } }
 namespace Jade::Renderer {
-enum class Mode { RayTracing, Wireframe };
 struct Config {
   RayTracingConfig rayTracing;
   bool vsync = false;
-  Mode mode = Mode::RayTracing;
+  bool render = true;
+  bool wireframe = false;
 };
 class System final {
 public:
@@ -19,8 +19,10 @@ public:
   System& operator=(const System&) = delete;
   RayTracing& rayTracing() noexcept;
   RenderProgress progress() const;
-  void setMode(Mode mode) noexcept;
-  Mode mode() const noexcept;
+  void setRender(bool enabled) noexcept;
+  bool renderEnabled() const noexcept;
+  void setWireframe(bool enabled) noexcept;
+  bool wireframeEnabled() const noexcept;
 private:
   friend class Jade::Runtime;
   System(Window&, Config, std::string title);

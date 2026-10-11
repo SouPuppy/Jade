@@ -37,7 +37,7 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts in Wireframe with a 5/3/1 pyramid of nine dynamic cubes above a static floor. Press 3 to return to this scene, P to pause/resume physics, R to reset the pyramid and K to give its top cube an off-center impulse. F4 toggles cyan AABBs, yellow Collider outlines, red contact markers, green normal arrows and Physics/Debug logging. Press 1 for the bunny/metal/glass showroom or 2 for the animated sphere hierarchy; P pauses the hierarchy animation. I switches RayTracing/Wireframe; RayTracing uses resolutionScale 0.5. The input/presentation loop targets 24 FPS. Each scene retains its camera; WASD/arrows move, Space/Ctrl+Space fly, Shift+W is faster, Ctrl+W slower, left dragging turns, the wheel zooms and Q/E roll. O switches projection, F also toggles wireframe, F3 toggles axes and Esc exits.
+Demo starts with image rendering off and Wireframe on, showing a 5/3/1 pyramid of nine dynamic cubes above a static floor. F toggles Wireframe; I toggles image rendering independently. Both can be enabled for an overlay, or disabled while physics/input/debug continue. Press 3 to return to the pyramid, P to pause/resume physics, R to reset it and K to give its top cube an off-center impulse. F4 toggles cyan AABBs, yellow Collider outlines, red contact markers, green normal arrows and Physics/Debug logging. Press 1 for the bunny/metal/glass showroom or 2 for the animated sphere hierarchy; P pauses the hierarchy animation. Scene selection preserves both render switches. RayTracing uses resolutionScale 0.5; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and Q/E roll. O switches projection, F3 toggles axes and Esc exits. Demo objects use Archetype constructors and share a single unit-cube mesh.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -45,7 +45,7 @@ Demo starts in Wireframe with a 5/3/1 pyramid of nine dynamic cubes above a stat
 int main()
 {
   Jade::EngineConfig config;
-  config.debug.shortcuts = true; // Enable Application F/F3/F4/O shortcuts.
+  config.debug.shortcuts = true; // Enable Application F3/F4/O shortcuts; F/I always work.
   Jade::Application app(config);
   auto scene = std::make_shared<Jade::Scene>();
 
@@ -101,14 +101,24 @@ for (auto entity : scene->query<Jade::Transform, Velocity>()) {
 Jade::EngineConfig config;
 config.physics.gravity = {0, -9.81f, 0};
 config.physics.fixedStep = 1.0 / 120.0;
-config.renderer.mode = Jade::Renderer::Mode::Wireframe;
+config.renderer.render = false;
+config.renderer.wireframe = true;
 config.debug.shortcuts = true;
 Jade::Application app(config);
 auto& runtime = app.runtime();
 // runtime.assets(), runtime.scene(), runtime.renderer(), runtime.physics()
 ```
 
-Renderer mode is selected with `runtime.renderer().setMode(...)`; sampling configuration and progress are available through `runtime.renderer().rayTracing()` and `runtime.renderer().progress()`. Physics is independently usable as `Jade::Physics::System` with `step(scene, dt)`. Runtime accumulates frame time into fixed steps after FrameUpdate and before rendering. At most eight substeps run per frame; excess whole steps are discarded and logged. Scene selection, Run boundaries and `runtime.setPaused(...)` reset accumulated time and contact caches. Inactive scenes do not simulate.
+Renderer has independent `setRender(bool)` / `renderEnabled()` and `setWireframe(bool)` / `wireframeEnabled()` controls. F toggles Wireframe; I toggles image rendering, regardless of debug-shortcut settings. Sampling configuration and progress are available through `runtime.renderer().rayTracing()` and `runtime.renderer().progress()`. Changing only Wireframe preserves path-tracing samples. Disabling image rendering stops/joins ray work and clears its image; re-enabling starts fresh samples. Both flags default to render=true, wireframe=false; Demo starts with render=false, wireframe=true.
+
+| render | wireframe | Scene presentation |
+| --- | --- | --- |
+| true | false | RayTracing image |
+| true | true | RayTracing image with mesh edges |
+| false | true | Mesh edges |
+| false | false | Cleared background |
+
+Axes and physics debug drawing remain independently available in all four states. Physics is independently usable as `Jade::Physics::System` with `step(scene, dt)`. Runtime accumulates frame time into fixed steps after FrameUpdate and before rendering. At most eight substeps run per frame; excess whole steps are discarded and logged. Scene selection, Run boundaries and `runtime.setPaused(...)` reset accumulated time and contact caches. Inactive scenes do not simulate.
 
 ```cpp
 using Object = Jade::Archetype<Jade::Geometry, Jade::Transform, Jade::Material>;
@@ -116,18 +126,19 @@ using Physical = Jade::Archetype<Jade::Transform, Jade::Collider, Jade::RigidBod
 class Ball : public Jade::Archetype<Object, Physical> {
   using Base = Jade::Archetype<Object, Physical>;
 public:
-  explicit Ball(Jade::Entity entity) : Base(entity) {
+  Ball(Jade::Entity entity, Jade::MeshHandle mesh, Jade::Vec3 position, float mass = 1) : Base(entity) {
     add<Jade::Collider>(Jade::Sphere{0.5f});
+    get<Jade::Geometry>().mesh = mesh;
+    get<Jade::Transform>().position = position;
+    get<Jade::RigidBody>().mass = mass;
   }
 };
-auto ball = scene->create<Ball>();
-ball.get<Jade::Geometry>().mesh = sphereMesh;
-ball.get<Jade::RigidBody>().mass = 2;
+auto ball = scene->create<Ball>(sphereMesh, Jade::Vec3{0, 2, 0}, 2.0f);
 ball.get<Jade::RigidBody>().velocity = {1, 0, 0};
 for (auto entity : scene->query<Physical>()) { /* includes manually composed entities */ }
 ```
 
-Archetype recursively flattens and deduplicates component types in first-appearance order. Composition groups are aliases; only the final handle constructor initializes custom values. Default-constructible components are added automatically; use get to edit them and add to initialize non-default-constructible components such as Collider. Missing declared components or a throwing constructor roll back the new entity. Ball is an identity handle, not the component owner. Queries cache matching component signatures and enumerate those groups instead of scanning all entity slots. Components remain in stable type pools; this version adds signature indexing, not packed movable component chunks.
+Archetype recursively flattens and deduplicates component types in first-appearance order. Composition groups are aliases; only the final handle constructor initializes custom values. `scene.create<T>(args...)` forwards constructor arguments after the Entity identity, including move-only arguments. Default-constructible components are added automatically; use get to edit them and add to initialize non-default-constructible components such as Collider. Missing declared components or a throwing constructor roll back the new entity. Ball is an identity handle, not the component owner. Queries cache matching component signatures and enumerate those groups instead of scanning all entity slots. Components remain in stable type pools; this version adds signature indexing, not packed movable component chunks.
 
 RigidBody uses world-space velocity and angularVelocity (radians/second), mass in kg, friction 0.6 and restitution 0 by default. A Collider without RigidBody, or with mass 0, is static. Positive-mass bodies require a root Transform and Collider; parented dynamic bodies are rejected. Inertia is derived from the scaled Box/Sphere. `runtime.physics().applyImpulse(scene, entity, impulse, worldPoint)` changes both linear and angular velocity for off-center impulses.
 
@@ -200,13 +211,13 @@ config.renderer.rayTracing.exposureEV = 0;
 Jade::Application app(config);
 ```
 
-Unmodified KeyPressed I toggles RayTracing/Wireframe after application and scene handlers. It works with debug=false and respects EventFlow::Stop, modifiers and repeats. Entering wireframe cancels and joins current computation; returning starts a fresh Film. Worker pools and immutable mesh acceleration remain owned by the application. F provides the same toggle when debug shortcuts are enabled.
+Unmodified KeyPressed I toggles image rendering and F toggles Wireframe after application and scene handlers. Both work with debug shortcuts disabled and respect EventFlow::Stop, modifiers and repeats. Wireframe overlays the current image without restarting samples. Disabling image rendering cancels/joins computation; re-enabling starts a fresh Film. Worker pools and immutable mesh acceleration remain owned by Renderer::System.
 
 Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount within [0, 256], maxBounces within [1, 1024], and roulette start positive. Fewer pixels improve CPU preview latency. Full framebuffer rendering is the default; no realtime full-resolution sample rate is promised.
 
-The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
+The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and image-render switches reject stale display results.
 
-Wireframe draws unlit triangle edges and runs no ray integrator. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.runtime().renderer().progress() reports RayTracing or Wireframe, the optional completed sample count, sample time and inFlight state. Wireframe reports no physical samples. These values are independent of presentation FPS.
+Wireframe draws unlit triangle edges, independently of image rendering. F3 axes are composed afterward and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.runtime().renderer().progress() reports RayTracing, RayTracing + Wireframe, Wireframe or Disabled, with optional sample count, sample time and inFlight state. Samples are available whenever image rendering is enabled. These values are independent of presentation FPS.
 
 Rendering can also run headlessly through public interfaces:
 
@@ -327,7 +338,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-`EngineConfig::debug.shortcuts` defaults to false in both builds. Enabling it permits bare F (renderer mode), F3 (axes), F4 (physics overlays/logs) and O (camera projection), once per press after global and scene callbacks. Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/config.debug.physics independently. Direct controls use runtime.renderer().setMode(), runtime.setAxes() and runtime.setPhysicsDebug(); this flag does not change the process-wide logger threshold.
+Bare F (Wireframe) and I (image rendering) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it additionally permits F3 (axes), F4 (physics overlays/logs) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/config.debug.physics independently. Direct controls use runtime.renderer().setRender(), runtime.renderer().setWireframe(), runtime.setAxes() and runtime.setPhysicsDebug(); this flag does not change the process-wide logger threshold.
 
 ## Events and controls
 
@@ -372,7 +383,7 @@ scene->on<Jade::SceneDeactivated>([&] { dragging = false; });
 scene->on<Jade::SceneActivated>([&] { dragging = false; });
 ```
 
-`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape and enabled F/F3/F4/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
+`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape/F/I and enabled F3/F4/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
 
 Deactivation runs before committing the pointer; activation runs after. Lifecycle Stop ends listener propagation but does not cancel the switch. Reentrant selections queue another switch. A deactivation exception retains the old scene; an activation exception retains the new scene. Both discard pending requests and propagate the original exception. Application destruction releases ownership without calling lifecycle callbacks. One scene can be active/reserved in only one Application at a time.
 
@@ -398,7 +409,7 @@ There are no folder aggregation headers. Source `.cpp` files include their match
 
 ## Frame scheduling and logs
 
-`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setMode(Jade::Renderer::Mode::Wireframe)` bypasses ray computation; debug drawing overlays the presented image without changing path tracing samples. Demo starts in Wireframe with axes disabled.
+`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setRender(false)` bypasses ray computation. Wireframe, axes and physics overlays remain independent of it. Demo starts with image rendering off, Wireframe on and axes disabled.
 
 ```text
 15:27:07.591522  INFO [Application] - Ready: window=960x640 target_fps=24 vsync=off

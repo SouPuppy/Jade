@@ -586,7 +586,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   app.on<FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 3) {
       ASSERT_TRUE(waitUntil([&] { return control->calls.load() > 0; }));
-      app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
+      app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
     }
     if (frame.frame == 4)
       pausedCalls = control->calls;
@@ -595,14 +595,14 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
       object.get<Transform>().position = {1, 0, 0};
     }
     if (frame.frame == 7)
-      app.runtime().renderer().setMode(Jade::Renderer::Mode::RayTracing);
+      app.runtime().renderer().setRender(true); app.runtime().renderer().setWireframe(false);
     if (frame.frame == 10)
       resumed = waitUntil([&] { return control->calls.load() > pausedCalls; });
   });
   app.Run({10});
   EXPECT_GT(pausedCalls, 0);
   EXPECT_TRUE(resumed);
-  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
 }
 
 TEST(ApplicationRendering, OwnsDefaultRayTracingAndLocksIntegratorDuringRun)
@@ -614,12 +614,12 @@ TEST(ApplicationRendering, OwnsDefaultRayTracingAndLocksIntegratorDuringRun)
   config.renderer.rayTracing.workerCount = 1;
   Application app(config);
   EXPECT_EQ(app.runtime().renderer().rayTracing().name(), "RayTracing");
-  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
   app.on<FrameUpdate>([&] {
     EXPECT_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()), std::logic_error);
   });
   EXPECT_NO_THROW(app.Run({1}));
-  app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
+  app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
   EXPECT_NO_THROW(app.Run({1}));
   EXPECT_NO_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
 }

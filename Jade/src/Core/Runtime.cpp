@@ -121,7 +121,9 @@ void Runtime::render(Renderer::ImageSize size) {
   std::optional<Detail::CollisionDebugLines> debug;
   if (m_Impl->scene) {
     const auto camera = m_Impl->scene->camera();
-    if (camera.has<Transform>() && camera.has<Camera>()) snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets);
+    const bool geometry = m_Impl->renderer.renderEnabled() || m_Impl->renderer.wireframeEnabled();
+    if ((geometry || m_Impl->axes || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
+      snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry);
     if (m_Impl->physicsDebug) {
       debug = Detail::captureCollisionDebug(*m_Impl->scene, true, true, true);
       for (auto& manifold : debug->contacts) for (auto& p : manifold.points)

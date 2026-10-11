@@ -3,28 +3,33 @@
 
 namespace Jade::Renderer {
 struct System::Impl {
-  Mode mode;
+  bool render, wireframe;
   Detail::RenderHost host;
   Impl(Window& window, Config config, std::string title)
-    : mode(config.mode), host(window, config.vsync, std::move(title), config.rayTracing) {}
+    : render(config.render), wireframe(config.wireframe),
+      host(window, config.vsync, std::move(title), config.rayTracing) {}
 };
 System::System(Window& window, Config config, std::string title)
   : m_Impl(std::make_unique<Impl>(window, config, std::move(title))) {}
 System::~System() = default;
 RayTracing& System::rayTracing() noexcept { return m_Impl->host.rayTracing(); }
 RenderProgress System::progress() const {
-  if (m_Impl->mode == Mode::Wireframe) { RenderProgress p; p.rendererName = "Wireframe"; return p; }
-  return m_Impl->host.progress();
+  auto result = m_Impl->render ? m_Impl->host.progress() : RenderProgress{};
+  result.rendererName = m_Impl->render ? (m_Impl->wireframe ? "RayTracing + Wireframe" : "RayTracing") :
+    (m_Impl->wireframe ? "Wireframe" : "Disabled");
+  return result;
 }
-Mode System::mode() const noexcept { return m_Impl->mode; }
-void System::setMode(Mode mode) noexcept {
-  if (mode != m_Impl->mode) { m_Impl->mode = mode; m_Impl->host.invalidate(); }
+bool System::renderEnabled() const noexcept { return m_Impl->render; }
+bool System::wireframeEnabled() const noexcept { return m_Impl->wireframe; }
+void System::setRender(bool enabled) noexcept {
+  if (enabled != m_Impl->render) { m_Impl->render = enabled; m_Impl->host.invalidate(); }
 }
-void System::start() { m_Impl->host.start(m_Impl->mode == Mode::Wireframe); }
+void System::setWireframe(bool enabled) noexcept { m_Impl->wireframe = enabled; }
+void System::start() { m_Impl->host.start(m_Impl->render); }
 void System::stop() noexcept { m_Impl->host.stop(); }
 void System::invalidate() noexcept { m_Impl->host.invalidate(); }
 void System::rethrowError() { m_Impl->host.rethrowError(); }
 void System::render(const SceneSnapshot* snapshot, ImageSize size, bool axes, const Detail::CollisionDebugLines* debug) {
-  m_Impl->host.draw(snapshot, size, m_Impl->mode == Mode::Wireframe, axes, debug);
+  m_Impl->host.draw(snapshot, size, m_Impl->render, m_Impl->wireframe, axes, debug);
 }
 } // namespace Jade::Renderer

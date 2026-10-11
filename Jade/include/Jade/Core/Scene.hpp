@@ -84,12 +84,12 @@ public:
   }
 
   Entity create();
-  template<class T> T create()
+  template<class T, class... Args> T create(Args&&... args)
   {
     static_assert(std::is_base_of_v<Entity, T>, "Typed entities derive from Jade::Archetype.");
     const auto entity = create();
     try {
-      T result(entity);
+      T result(entity, std::forward<Args>(args)...);
       Detail::CheckArchetype(entity, typename T::JadeArchetypeComponents{});
       return result;
     } catch (...) {

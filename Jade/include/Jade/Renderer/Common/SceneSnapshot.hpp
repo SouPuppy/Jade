@@ -24,7 +24,8 @@ struct SceneSnapshot {
   std::vector<RenderInstance> instances;
   std::optional<CameraFrame> camera;
   bool operator==(const SceneSnapshot &) const = default;
-  static SceneSnapshot capture(const Scene &scene, const Assets &assets);
+  // Camera-only capture lets debug overlays run while scene rendering is disabled.
+  static SceneSnapshot capture(const Scene &scene, const Assets &assets, bool includeGeometry = true);
 };
 
 struct EmitterSample {
