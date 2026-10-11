@@ -1,4 +1,10 @@
 #pragma once
+#include <Jade/Graphics/Texture.hpp>
+#include <Jade/Graphics/SpriteRenderer.hpp>
+#include <Jade/Animation/AnimationClip.hpp>
+#include <Jade/Animation/Animator.hpp>
+#include <Jade/Animation/AnimationSystem.hpp>
+#include <Jade/Physics/CharacterController.hpp>
 
 #include <Jade/Application.hpp>
 #include <Jade/EngineConfig.hpp>
@@ -56,3 +62,6 @@
 #include <Jade/Renderer/RayTracing/Sampler.hpp>
 
 #include <Jade/Renderer/Common/SceneSnapshot.hpp>
+
+#include <Jade/Graphics/Light.hpp>
+#include <Jade/Renderer/RenderPipeline.hpp>

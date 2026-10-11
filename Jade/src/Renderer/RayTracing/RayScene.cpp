@@ -45,11 +45,24 @@ Vec3 transformError(const Matrix4 &model, Vec3 position, Vec3 error)
   return result;
 }
 
+Texel sampleSprite(const RenderInstance& appearance, Vec3 local) {
+  if (!appearance.texture) return {{1,1,1}, 1};
+  const auto& region = appearance.region;
+  // Stay inside the selected frame, including rays exactly on its outer edge.
+  const float x = std::clamp(local.x + 0.5f, 0.0f, 1.0f);
+  const float y = std::clamp(1.0f - local.y, 0.0f, 1.0f);
+  const float u = std::min(region.x + x * region.width, std::nextafter(region.x + region.width, region.x));
+  const float v = std::min(region.y + y * region.height, std::nextafter(region.y + region.height, region.y));
+  return appearance.texture->sample({u, v});
+}
+
 } // namespace
 
 struct RayScene::Impl {
   std::shared_ptr<const CompiledGeometry> geometry = std::make_shared<CompiledGeometry>();
   std::vector<Material> materials;
+  std::vector<RenderLight> lights;
+  std::vector<RenderInstance> appearances;
   std::shared_ptr<const EmitterDistribution> lighting = std::make_shared<EmitterDistribution>();
   Jade::Detail::SceneAccelerationUpdate update = Jade::Detail::SceneAccelerationUpdate::Rebuilt;
 };
@@ -89,7 +102,7 @@ try {
       const bool moved = before.objectToWorld.values != after.objectToWorld.values;
       if (moved)
         sameTransforms = false;
-      if (before.material.emission != after.material.emission ||
+      if (before.unlit != after.unlit || before.material.emission != after.material.emission ||
           before.material.twoSidedEmission != after.material.twoSidedEmission ||
           (moved && (before.material.emission.maximum() > 0 || after.material.emission.maximum() > 0)))
         sameEmitters = false;
@@ -134,6 +147,8 @@ try {
   }
   for (const auto &instance : snapshot.instances)
     output->materials.push_back(instance.material);
+  output->appearances = snapshot.instances;
+  output->lights = snapshot.lights;
   if (sameEmitters)
     output->lighting = m_Impl->previous->lighting;
   else {
@@ -151,6 +166,8 @@ try {
   return {};
 }
 
+std::span<const RenderLight> RayScene::lights() const noexcept {return m_Impl->lights;}
+
 bool RayScene::intersect(const Ray &ray, SurfaceHit &hit) const
 {
   float maximum = ray.tMax;
@@ -160,6 +177,9 @@ bool RayScene::intersect(const Ray &ray, SurfaceHit &hit) const
                     ray.tMin, maximum};
     SurfaceHit candidate;
     if (!MeshAccess::intersect(*instance.mesh, local, candidate))
+      return false;
+    const auto& appearance = m_Impl->appearances[index];
+    if (appearance.texture && sampleSprite(appearance, candidate.position).alpha < appearance.alphaCutoff)
       return false;
     maximum = candidate.t;
     const auto position = candidate.position;
@@ -175,18 +195,33 @@ bool RayScene::intersect(const Ray &ray, SurfaceHit &hit) const
   });
 }
 
-bool RayScene::occluded(const Ray &ray) const
+bool RayScene::occluded(const Ray &ray) const {return occluded(ray,UINT32_MAX);}
+bool RayScene::occluded(const Ray &ray,std::uint32_t ignoredInstance) const
 {
   float maximum = ray.tMax;
   return m_Impl->geometry->bvh.visit(ray, maximum, true, [&](std::uint32_t index) {
-    const auto &instance = m_Impl->geometry->instances[index];
+    if(index==ignoredInstance) return false;
+    const auto& instance = m_Impl->geometry->instances[index];
     const Ray local{Math::point(instance.inverse, ray.origin), Math::vector(instance.inverse, ray.direction),
                     ray.tMin, ray.tMax};
-    return MeshAccess::occluded(*instance.mesh, local);
+    const auto& appearance = m_Impl->appearances[index];
+    if (!appearance.texture) return MeshAccess::occluded(*instance.mesh, local);
+    SurfaceHit hit;
+    return MeshAccess::intersect(*instance.mesh, local, hit) && sampleSprite(appearance, hit.position).alpha >= appearance.alphaCutoff;
   });
 }
 
 const Material &RayScene::material(const SurfaceHit &hit) const { return m_Impl->materials.at(hit.instance); }
+bool RayScene::unlit(const SurfaceHit& hit) const { return m_Impl->appearances.at(hit.instance).unlit; }
+Texel RayScene::spriteSample(const SurfaceHit& hit) const {
+  const auto& appearance = m_Impl->appearances.at(hit.instance);
+  const auto& mesh = appearance.mesh->data();
+  const auto offset = static_cast<std::size_t>(hit.primitive) * 3;
+  const auto local = mesh.vertices.at(mesh.indices.at(offset)).position * hit.barycentric.x +
+    mesh.vertices.at(mesh.indices.at(offset + 1)).position * hit.barycentric.y +
+    mesh.vertices.at(mesh.indices.at(offset + 2)).position * hit.barycentric.z;
+  return sampleSprite(appearance, local);
+}
 std::size_t RayScene::instanceCount() const noexcept { return m_Impl->materials.size(); }
 std::size_t RayScene::emitterCount() const noexcept { return m_Impl->lighting->emitters.size(); }
 std::size_t RayScene::meshCount() const noexcept
@@ -238,14 +273,7 @@ float RayScene::emitterPdf(Vec3 reference, const SurfaceHit &hit) const
 namespace Jade::Detail {
 std::vector<Renderer::RenderInstance> RaySceneAccess::instances(const Renderer::RayScene &scene)
 {
-  std::vector<Renderer::RenderInstance> result;
-  const auto &instances = scene.m_Impl->geometry->instances;
-  result.reserve(instances.size());
-  for (std::size_t i = 0; i < instances.size(); ++i) {
-    const auto &instance = instances[i];
-    result.push_back({instance.mesh, instance.model, scene.m_Impl->materials[i], instance.entity});
-  }
-  return result;
+  return scene.m_Impl->appearances;
 }
 const BVH &RaySceneAccess::acceleration(const Renderer::RayScene &scene) { return scene.m_Impl->geometry->bvh; }
 const EmitterDistribution& RaySceneAccess::emitters(const Renderer::RayScene& scene) { return *scene.m_Impl->lighting; }

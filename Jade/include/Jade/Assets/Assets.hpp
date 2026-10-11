@@ -2,6 +2,7 @@
 
 #include <Jade/Assets/AssetHandle.hpp>
 #include <Jade/Graphics/Mesh.hpp>
+#include <Jade/Graphics/Texture.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -41,12 +42,13 @@ public:
     return std::static_pointer_cast<const T>(Share(handle.m_Store, handle.m_Id, typeid(T)));
   }
 
-  // Wavefront OBJ is the only file loader in this version. Relative paths use
+  // OBJ meshes and PNG textures. Relative paths use
   // the working directory. Repeated canonical paths share the same resource.
   template <class T> AssetHandle<T> load(const std::filesystem::path &path)
   {
-    static_assert(std::is_same_v<T, Mesh>, "Assets::load currently supports Mesh OBJ resources only.");
-    return LoadMesh(path);
+    static_assert(std::is_same_v<T, Mesh> || std::is_same_v<T, Texture>, "Assets::load supports Mesh and Texture.");
+    if constexpr (std::is_same_v<T, Mesh>) return LoadMesh(path);
+    else return LoadTexture(path);
   }
 
 private:
@@ -56,6 +58,7 @@ private:
   std::shared_ptr<const void> Share(const std::weak_ptr<Detail::AssetStore> &owner, std::uint64_t id,
                                     std::type_index type) const;
   MeshHandle LoadMesh(const std::filesystem::path &path);
+  TextureHandle LoadTexture(const std::filesystem::path &path);
   std::shared_ptr<Detail::AssetStore> m_Store;
 };
 

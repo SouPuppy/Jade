@@ -1,50 +1,14 @@
 #include "DebugDraw.hpp"
 #include <JadeShaders.hpp>
 #include <array>
+#include "../RaySceneAccess.hpp"
+#include "../../Mesh/MeshAccess.hpp"
+#include "../../../Renderer/Common/Math.hpp"
 namespace Jade::Detail {
-DebugDraw::DebugDraw(OpenGLDevice &device) : m_Device(device)
-{
-  device.current();
-  m_LineProgram = std::make_unique<OpenGLProgram>(Shaders::LinesVertex, Shaders::LinesFragment);
-  glGenVertexArrays(1, &m_Vao);
-  glGenBuffers(1, &m_Buffer);
-  glBindVertexArray(m_Vao);
-  glBindBuffer(GL_ARRAY_BUFFER, m_Buffer);
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), nullptr);
-}
-DebugDraw::~DebugDraw()
-{
-  m_Device.current();
-  m_LineProgram.reset();
-  glDeleteBuffers(1, &m_Buffer);
-  glDeleteVertexArrays(1, &m_Vao);
-}
-void DebugDraw::lines(std::span<const Vec3> points, const Matrix4 &transform, Vec3 color, bool depth)
-{
-  if (points.empty())
-    return;
-  glUseProgram(m_LineProgram->Handle());
-  glBindVertexArray(m_Vao);
-  glBindBuffer(GL_ARRAY_BUFFER, m_Buffer);
-  glUniformMatrix4fv(m_LineProgram->Uniform("u_Transform"), 1, GL_FALSE, transform.data());
-  glUniform3f(m_LineProgram->Uniform("u_Color"), color.x, color.y, color.z);
-  if (depth)
-    glEnable(GL_DEPTH_TEST);
-  else
-    glDisable(GL_DEPTH_TEST);
-  glDepthFunc(GL_LESS);
-  glDepthMask(depth ? GL_TRUE : GL_FALSE);
-  // Bound each upload/draw independently of the CPU mesh's total index count.
-  constexpr std::size_t batch = 65536;
-  for (std::size_t offset = 0; offset < points.size(); offset += batch) {
-    const auto count = std::min(batch, points.size() - offset);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(count * sizeof(Vec3)), points.data() + offset,
-                 GL_STREAM_DRAW);
-    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(count));
-  }
-  glDepthMask(GL_TRUE);
-  glDisable(GL_DEPTH_TEST);
+DebugDraw::DebugDraw(OpenGLDevice &device) : m_Device(device) {}
+DebugDraw::~DebugDraw() = default;
+void DebugDraw::lines(std::span<const Vec3> points,const Matrix4& transform,Vec3 color,bool depth) {
+  m_Device.drawLines(points,transform,color,depth);
 }
 void DebugDraw::wireframe(const Renderer::SceneSnapshot &snapshot, Renderer::ImageSize size)
 {
@@ -73,6 +37,61 @@ void DebugDraw::axes(const Renderer::CameraFrame &camera, Renderer::ImageSize si
     const std::array<Vec3, 2> points{{{}, axis}};
     lines(points, projection, axis, false);
   }
+}
+void DebugDraw::paths(std::span<const Vec3> points,const Renderer::CameraFrame& camera,Renderer::ImageSize size,Vec3 color) {
+  lines(points,camera.viewProjection(size),color,false);
+}
+void DebugDraw::frustum(const Renderer::CameraFrame& source,const Renderer::CameraFrame& observer,Renderer::ImageSize size) {
+  std::array<Vec3,8> corners;
+  const std::array<Vec2,4> pixels{{{0,0},{static_cast<float>(size.width),0},
+    {static_cast<float>(size.width),static_cast<float>(size.height)},{0,static_cast<float>(size.height)}}};
+  for(int i=0;i<4;++i) {
+    const auto ray=source.generateRay(pixels[i],size);
+    corners[i]=ray.at(ray.tMin);
+    corners[i+4]=ray.at(std::min(ray.tMax,15.f));
+  }
+  std::vector<Vec3> edges;
+  for(int i=0;i<4;++i) {
+    const int next=(i+1)%4;
+    edges.insert(edges.end(),{corners[i],corners[next],corners[i+4],corners[next+4],corners[i],corners[i+4]});
+  }
+  paths(edges,observer,size,{1,.8f,.2f});
+}
+void DebugDraw::scene(const Renderer::SceneSnapshot& snapshot,Renderer::ImageSize size,Renderer::DebugViewOptions options) {
+  if(!snapshot.camera) return;
+  const auto vp=snapshot.camera->viewProjection(size);
+  if(options.entityAxes) {
+    for(const auto& transform:snapshot.entityTransforms) {
+      const auto origin=Renderer::Math::point(transform,{});
+      const std::array<Vec3,3> axes{{{1,0,0},{0,1,0},{0,0,1}}};
+      for(const auto axis:axes) {
+        const auto end=origin+Renderer::Math::unit(Renderer::Math::vector(transform,axis))*.4f;
+        const std::array<Vec3,2> points{origin,end};lines(points,vp,axis,false);
+      }
+    }
+  }
+  if(options.cameraFrustums) for(const auto& camera:snapshot.cameras) frustum(camera,*snapshot.camera,size);
+  if(options.lights) {
+    for(const auto& light:Renderer::realtimeLights(snapshot)) {
+      const std::array<Vec3,2> points{light.position,light.position+light.direction*2};
+      lines(points,vp,{1,1,0},false);
+    }
+  }
+  if(!options.bvh || snapshot.instances.empty()) return;
+  const auto rayScene=m_Compiler.compile(snapshot);
+  std::vector<Vec3> edges;
+  const auto add=[&](const Bounds& bounds,const Matrix4& model) {
+    if(!bounds.valid() || edges.size()>24576) return;
+    std::array<Vec3,8> vertices;
+    for(int i=0;i<8;++i) vertices[i]=Renderer::Math::point(model,
+      {i&1?bounds.high.x:bounds.low.x,i&2?bounds.high.y:bounds.low.y,i&4?bounds.high.z:bounds.low.z});
+    for(int i=0;i<8;++i) for(int bit=1;bit<=4;bit*=2) if(!(i&bit)) edges.insert(edges.end(),{vertices[i],vertices[i|bit]});
+  };
+  for(const auto& node:RaySceneAccess::acceleration(rayScene).nodes()) add(node.bounds,Matrix4::Identity());
+  lines(edges,vp,{.5f,.3f,1},false);edges.clear();
+  for(const auto& instance:snapshot.instances)
+    for(const auto& node:MeshAccess::acceleration(*instance.mesh).nodes()) add(node.bounds,instance.objectToWorld);
+  lines(edges,vp,{.3f,.7f,1},false);
 }
 void DebugDraw::colliders(const CollisionDebugLines &debug, const Renderer::CameraFrame &camera,
                           Renderer::ImageSize size)

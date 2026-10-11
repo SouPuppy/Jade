@@ -96,7 +96,7 @@ void RayTracing::render(const RayScene &scene, const RenderRequest &request, Fil
               hit.shadingNormal.z * 0.5f + 0.5f};
             else {
               const auto& material = scene.material(hit);
-              sample[pixel] = material.baseColor;
+              sample[pixel] = scene.unlit(hit) ? scene.spriteSample(hit).color : material.baseColor;
               if (material.twoSidedEmission || hit.frontFace) sample[pixel] += material.emission;
             }
           }

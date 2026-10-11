@@ -1,5 +1,66 @@
 # Jade Architecture
 
+## Sprite animation and Untitled
+
+Runtime also owns `Animation::System`, which updates Animator/SpriteRenderer after
+gameplay callbacks and fixed physics steps, before snapshot capture. Paused runtime
+ticks resolve changed clips without advancing animation time. Clip resources use
+Assets handles rather than pointers to live mutable clip data.
+
+Assets loads PNG Texture resources with Windows WIC and caches canonical paths.
+Immutable RGBA8 resources are retained by detached snapshots. Sprite instances use a
+shared compiled quad, frame UV region, pivot and an upright camera-facing transform.
+Changing only a frame region reuses the existing geometry acceleration.
+
+CPU and GPU ray backends sample the same nearest sRGB texels, convert RGB to linear,
+and reject alpha below the instance cutoff before committing a hit. This also applies
+to occlusion queries. Sprite quads use local `(x + 0.5, 1 - y)` UVs; this is a sprite
+interface, not general mesh UV mapping. Unlit sprites terminate transport with texture
+color and are excluded from emissive light sampling. The GPU retains packed RGBA
+texels in an SSBO and uploads frame selection separately from mesh geometry.
+
+`CharacterController` is a root-entity planar controller using fresh collision queries
+and small displacement steps against static colliders. It has no RigidBody and handles
+horizontal correction/sliding at a fixed support height. Untitled owns input, player
+states, eight-direction clip mapping, camera rotation, world construction and reset.
+
+## Render pipeline framework
+
+Renderer::System selects RenderMode::Raster/Hybrid/RayTracing/None over a common immutable
+SceneSnapshot. Entity/Scene ownership and gameplay components are unchanged. RenderPipeline
+receives RenderContext (snapshot, GraphicsDevice, RenderTarget, output settings and frame
+budget). Raster and Hybrid compose shared upload, shadow, geometry/lighting and composite
+passes; Hybrid uses BVH visibility queries during forward lighting instead of shadow maps.
+The backend owns GPU resources, framebuffer depth, shader execution and synchronization.
+GL commands live under internal/Renderer/Device/OpenGL; pipeline and debug code issue
+device/pass operations. Running tracing frames reserve 6 ms of the frame budget for presentation and window
+scheduling, while preserving the complete-sample floor and paused accumulation.
+The existing ProgressiveSession, CPU tracer and GPU compute transport
+remain the RayTracing pipeline implementation. None submits no normal image-rendering work.
+
+Raster/Hybrid support up to eight direct lights. Graphics/Light.hpp provides directional,
+point and rectangular area components, normalized into world-space RenderLight snapshots.
+Existing emissive meshes remain physical triangle emitters for tracing. Realtime passes
+reduce open emitters to center-sampled area lights and closed emitters to isotropic point
+sources with the same total Lambertian flux. Metal highlights and opaque tinted dielectric
+surfaces are realtime approximations; reflections and refraction remain tracer features.
+Both realtime pipelines use a small ambient approximation. Sprite alpha is tested for
+raster fragments, shadow maps and GPU/CPU shadow rays. GPU Hybrid uses a world-space SAH BVH
+in OpenGL 3.3 buffer textures. CPU Hybrid uses the shared JobSystem/RayScene and uploads a
+visibility mask at rayTracing.resolutionScale; it keeps geometry at full window resolution.
+
+F1 wireframe, F3 scene diagnostics and F4 physics remain overlays. Config.renderer.debugView
+controls entity axes, BVH, camera frustums and light directions within F3. Debug line commands
+use GraphicsDevice; BVH drawing is bounded. F5 changes output without changing pipeline.
+F2's observer is Runtime-owned and never replaces scene.camera(). Its controls consume
+movement/look input before global/scene gameplay handlers. The world keeps updating and
+the selected pipeline is restored on exit. Runtime samples a 16?9 grid from the latest game
+camera snapshot at at most 6 Hz. PathIntegrator::record shares transport with Li and records
+primary, bounce, shadow and escape segments without changing random-number consumption.
+These are diagnostic CPU samples rather than an exact capture of GPU film samples. The
+observer uses a raster background, preserves original billboard geometry for path consistency,
+clears on scene switch and restores mouse capture on exit/focus loss.
+
 ## Core model and boundaries
 
 Entity identifies an existence in Scene. Components describe its state, systems interpret that state, and Assets owns shareable resources. Rendering uses Transform, Geometry, Material and an explicitly selected Camera. The CPU path tracer is independent of the window and OpenGL display.
@@ -45,7 +106,8 @@ flowchart LR
 | Physics/Collider.hpp, Physics/Collision.hpp | Local Box/Sphere components and window-independent Contact queries |
 | Physics/RigidBody.hpp, Physics/System.hpp | Linear/angular dynamics, manifolds, impulses and contact solving |
 | Physics/Environment.hpp, Physics/Field/ | Scene rules, immutable force/gravity sampling and source snapshots |
-| Renderer/System.hpp | Independent image/Wireframe controls, integrator access and progress |
+| Renderer/System.hpp, Renderer/RenderPipeline.hpp | Pipeline selection, device/pass contracts, overlays and progress |
+| Graphics/Light.hpp | Shared directional, point and rectangular area lights |
 | Materials/Material.hpp, Materials/Presets.hpp | Material values, validation and diffuse/metal/glass/emissive presets |
 | Graphics/Camera.hpp, Graphics/Motion.hpp | Projection settings and scene motion |
 | Renderer/RayTracing/Ray.hpp, Renderer/RayTracing/RayScene.hpp | Ray queries, surface hits, immutable scene compilation |
@@ -156,7 +218,7 @@ Outside Run, selection commits immediately. During Run, one optional pending poi
 
 Lifecycle Stop affects listeners only. Deactivation exceptions retain the old scene; activation exceptions retain the new one. The unused reservation and pending requests are released on failure and the original exception propagates. Input/update exceptions also discard queued switches. Normal bounded Run exit leaves a queued request for the next Run. Application destruction releases its ownership without invoking user lifecycle callbacks.
 
-Ordinary events dispatch globally first, then to the retained active scene, then to unconsumed built-in Escape/F1/I and enabled F3/F4/F5/O handlers. Stop prevents downstream propagation; consumed FrameUpdate still renders. Inactive scenes receive neither input nor update. Switches reset dt/diagnostic windows/pacing, with dt=0 on the first new frame, while Run elapsed and frame counts continue. Physical held keys/buttons remain intact; no synthetic transitions are introduced. Scene destruction expires its connections; Application destruction expires global connections.
+Ordinary events dispatch globally first, then to the retained active scene, then to unconsumed built-in Escape/F1/I and enabled F2/F3/F4/F5/O handlers. Stop prevents downstream propagation; consumed FrameUpdate still renders. Inactive scenes receive neither input nor update. Switches reset dt/diagnostic windows/pacing, with dt=0 on the first new frame, while Run elapsed and frame counts continue. Physical held keys/buttons remain intact; no synthetic transitions are introduced. Scene destruction expires its connections; Application destruction expires global connections.
 
 ## Assets
 
@@ -182,7 +244,7 @@ Category and priority do not describe resource locks. User callbacks must use ex
 
 Scene::setCamera requires a live own-Scene identity with Transform and Camera. Creating Camera components never selects them implicitly. A removed/destroyed active camera causes clear/present only, retaining input and callbacks. Selecting a valid camera resumes geometry and axes.
 
-Runtime's Renderer::System exposes one RayTracingSettings configuration at EngineConfig.renderer.rayTracing. RayDevice selects CPU or GPU execution, independently of RayMode (RayCast or PathTrace); RayOutput selects Color or primary-hit Normal independently of Material BSDF properties. rayTracingSettings()/setRayTracingSettings() read/update it on the owning window thread, including during Run. Exposure resolves existing CPU Film or changes GPU display mapping, and maxSamples resumes or caps completed accumulation; algorithm, output, jitter, resolution and seed changes reset samples. Path-depth changes reset transport; on CPU they install the built-in PathIntegrator. runtime.renderer().rayTracing() exposes Integrator configuration outside Run. Independent rayTracing.enabled/wireframe flags are initialized by EngineConfig.renderer and controlled by setRayTracingEnabled/setWireframe. Unmodified I toggles image rendering; F1 toggles Mesh wireframe. Both work independently of EngineConfig.debug.shortcuts and respect consumption, modifiers and repeats. The window title/progress identify RayTracing, RayTracing + Wireframe, Wireframe or Disabled.
+Runtime's Renderer::System exposes one RayTracingSettings configuration at EngineConfig.renderer.rayTracing. RayDevice selects CPU or GPU execution, independently of RayMode (RayCast or PathTrace); RayOutput selects Color or primary-hit Normal independently of Material BSDF properties. rayTracingSettings()/setRayTracingSettings() read/update it on the owning window thread, including during Run. Exposure resolves existing CPU Film or changes GPU display mapping, and maxSamples resumes or caps completed accumulation; algorithm, output, jitter, resolution and seed changes reset samples. Path-depth changes reset transport; on CPU they install the built-in PathIntegrator. runtime.renderer().rayTracing() exposes Integrator configuration outside Run. EngineConfig.renderer.pipeline selects the image pipeline, while wireframe remains an independent overlay. Legacy rayTracing.enabled maps false to None and true to RayTracing. These settings are initialized by EngineConfig.renderer and controlled by setRayTracingEnabled/setWireframe. Unmodified I cycles Raster/Hybrid/RayTracing/None; F1 toggles mesh wireframe. Both work independently of EngineConfig.debug.shortcuts and respect consumption, modifiers and repeats. The window title/progress identify the selected pipeline and optional wireframe/soul view.
 
 ProgressiveBackend defines sampling settings, naming and algorithm locks. It receives immutable RayScene plus RenderRequest and commits exactly one sample round, or cancels without publication. Headless/CPU rendering commits Film; the private GPU capability publishes shared HDR textures. RayTracing is the application implementation; custom Integrators change transport behavior without changing the application modes. The application locks direct custom-Integrator replacement throughout Run, including wireframe frames. The unified settings API stops/joins a session before changing algorithm controls and snapshots common live settings for each round.
 
@@ -198,7 +260,7 @@ Film accumulates linear HDR radiance as a running mean. Normal output is primary
 
 Running frames submit distinct revisions even for identical snapshots, reset CPU Film/GPU HDR at sample zero and use distinct frame-seeded random streams. RenderHost waits for the entire frame before composing/presenting; minSamplesPerFrame full-image rounds finish even if the deadline has expired (default 4, capped by nonzero maxSamples). Demo uses 8 by default; sampling controls remain in RayTracingSettings. This is a quality floor, so actual FPS may be lower than the target. Additional rounds start only when their estimated duration fits FrameClock::RenderDeadline and maxSamples permits them. Overruns lower actual FPS instead of abandoning part of the image. P / Runtime::setPaused(true) switches to asynchronous progressive accumulation of an unchanged snapshot; resuming starts independent frames. During paused camera/material/transform edits, pending snapshots coalesce and only complete rounds publish. Scene changes, resize, missing camera, minimization and image-render switches cancel work and invalidate the publication epoch. Wireframe alone preserves samples. Completed work from an invalidated epoch cannot publish. Shutdown requests cancellation and joins the coordinator and workers before releasing resources. Worker failures propagate from Run, including finite Runs, and the guard permits recovery after correcting the cause.
 
-I enables/disables RayTracing image rendering; F independently enables/disables unlit triangle-edge drawing. The switches allow all four combinations. DebugDraw streams transformed GL_LINES; depth tests compare edges. F3 draws positive unit XYZ axes in red/green/blue as an independent debug overlay. Display begins each frame in GL_FILL and does not use polygon mode as its wireframe implementation.
+I cycles the image pipeline; F1 independently toggles triangle-edge drawing. None permits enabled overlays without an image. DebugDraw streams transformed GL_LINES; depth tests compare edges. F3 draws positive unit XYZ axes in red/green/blue as an independent debug overlay. Display begins each frame in GL_FILL and does not use polygon mode as its wireframe implementation.
 
 Coordinates are right-handed with Y up. A quaternion maps local +X right, +Y up and -Z forward into parent coordinates. Local models are T*R*S and world models multiply the full ancestry. Camera position inherits the full parent matrix while orientation composes ancestor quaternions without scale. CameraFrame generates perspective or orthographic rays and supplies matching view/projection matrices for wireframe and diagnostics.
 
@@ -252,11 +314,11 @@ Module::FreeCameraControl lives in the engine and registers scene-local motion, 
 
 Module::FPSCameraControl registers horizontal motion and continuous mouse look, clamps pitch to +/-89 degrees and removes roll. Yaw and movement use parent Y (world Y for root cameras); vertical motion, jumping, gravity and collision are left to a future character controller. It resolves Transform on every callback and derives heading from the current pose, so camera replacements and external edits remain safe. Scene's installation ledger rejects mixed Free/FPS controls and rolls back either module on installation failure. Application selects the active Scene's cursor capture mode; the window adapter uses GLFW disabled-cursor mode for FPS and resets cursor deltas on mode and scene changes. InputState already resets the baseline on focus changes.
 
-EngineConfig.debug.shortcuts defaults to false independently of build type and logging. Unconsumed unmodified Pressed F1/I always toggle Wireframe/image rendering independently. When enabled, F3/F4/F5/O additionally toggle axes/AABBs, the complete physics debug overlay/logging, Color/Normal ray output (F5 also enables the ray image) and camera projection after both dispatcher layers. O retains pose/zoom/clips; stop or a closed window prevents defaults. Initial debug visibility follows config.debug.axes/config.debug.physics independently; Renderer::System owns rendering flags and Runtime owns debug state.
+EngineConfig.debug.shortcuts defaults to false independently of build type and logging. Unconsumed unmodified Pressed F1 toggles wireframe and I cycles pipelines. When enabled, F2 toggles the soul observer, F3/F4 toggle scene/physics diagnostics, F5 changes Color/Normal output without switching pipeline, and O changes the active view projection after both dispatcher layers. O retains pose/zoom/clips; stop or a closed window prevents defaults. Initial debug visibility follows config.debug.axes/config.debug.physics independently; Renderer::System owns rendering flags and Runtime owns debug state.
 
 ## Loop, events and build
 
-After committing any pending scene, the main loop polls and dispatches ordered key/button/cursor/scroll events, applies unconsumed Escape/F1/I/P and enabled F3/F4/F5/O defaults, waits for steady-clock deadlines, dispatches held keys/buttons and FrameUpdate, then clears, renders, presents and logs. Zero-sized framebuffers keep processing edge input but skip held/update/render/logs; restoration resets dt. FrameClock skips expired slots after overruns. frameLimits defaults to 24 FPS; RunOptions::frameLimit independently caps submitted frames. Each Run retains scene/resources/subscriptions and resets timing. stop allows a later Run; nested Run throws.
+After committing any pending scene, the main loop polls and dispatches ordered key/button/cursor/scroll events, applies unconsumed Escape/F1/I/P and enabled F2/F3/F4/F5/O defaults, waits for steady-clock deadlines, dispatches held keys/buttons and FrameUpdate, then clears, renders, presents and logs. Zero-sized framebuffers keep processing edge input but skip held/update/render/logs; restoration resets dt. FrameClock skips expired slots after overruns. frameLimits defaults to 24 FPS; RunOptions::frameLimit independently caps submitted frames. Each Run retains scene/resources/subscriptions and resets timing. stop allows a later Run; nested Run throws.
 
 [Events](Events.md) describes propagation, exact modifiers and connection lifetime. CMake explicitly lists source/header pairs. Demo and tests are independently optional. GLFW/GLAD are private static dependencies; GoogleTest is configured only for tests. GLAD's fixed OpenGL 3.3 Core C source and licenses live in vendor/glad. Shader include expansion and embedding use cmake/EmbedShaders.cmake. Configuration and compilation require no Python interpreter, virtual environment, pip or generator packages. Windows Debug/Release use matching /MDd and /MD runtimes. Software builds select llvmpipe before GLFW when no nonempty driver override exists, and release GPU resources with the owning context current. Runtime/asset deployment stays shared across target configurations.
 

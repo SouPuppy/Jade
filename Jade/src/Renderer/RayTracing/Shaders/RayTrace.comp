@@ -5,7 +5,7 @@ layout(local_size_x = 8, local_size_y = 8) in;
 struct Node { vec4 low; vec4 high; uvec4 links; };
 struct Triangle { vec4 a; vec4 b; vec4 c; vec4 na; vec4 nb; vec4 nc; };
 struct Instance { mat4 model; mat4 inverseModel; uvec4 mesh; };
-struct Material { vec4 baseColor; vec4 emission; vec4 properties; }; // color.w roughness; properties ior/model
+struct Material { vec4 baseColor; vec4 emission; vec4 properties; vec4 region; uvec4 textureInfo; };
 struct Emitter { vec4 a; vec4 b; vec4 c; vec4 normal; vec4 emission; }; // a.w area PDF; b.w CDF; normal.w two-sided
 layout(std430, binding = 0) readonly buffer Nodes { Node nodes[]; };
 layout(std430, binding = 1) readonly buffer Order { uint order[]; };
@@ -15,6 +15,10 @@ layout(std430, binding = 4) readonly buffer Materials { Material materials[]; };
 layout(std430, binding = 5) readonly buffer Emitters { Emitter emitters[]; };
 layout(std430, binding = 6) readonly buffer EmitterMap { uint emitterMap[]; };
 layout(std430, binding = 7) buffer Status { uint invalidSamples; };
+layout(std430, binding = 8) readonly buffer Texels { uint texels[]; };
+struct AnalyticLight {vec4 position,direction,intensity,right,up;};
+layout(std430,binding=9) readonly buffer AnalyticLights {AnalyticLight lights[];};
+uniform uint lightCount;
 layout(rgba32f, binding = 0) uniform writeonly image2D outputImage;
 layout(rgba32f, binding = 1) uniform image2D accumulationImage;
 uniform ivec2 imageSize;
@@ -31,6 +35,24 @@ const float PI = 3.14159265358979323846;
 const float GAMMA = 8.0 * 1.1920928955078125e-7;
 struct Ray { vec3 origin; vec3 direction; float minimum; float maximum; };
 struct Hit { float t; vec3 weights; uint primitive; uint instance; };
+
+vec4 spriteTexel(Material material, vec3 local) {
+  if (material.textureInfo.x == INVALID) return vec4(1);
+  vec2 coordinate = clamp(vec2(local.x + 0.5, 1.0 - local.y), vec2(0), vec2(1));
+  vec2 dimensions = vec2(material.textureInfo.yz);
+  // Clamp in pixel coordinates to the frame's last pixel rather than its neighbor.
+  vec2 pixel = floor((material.region.xy + coordinate * material.region.zw) * dimensions);
+  pixel = clamp(pixel, floor(material.region.xy * dimensions), ceil((material.region.xy + material.region.zw) * dimensions) - vec2(1));
+  uvec2 p = uvec2(clamp(pixel, vec2(0), dimensions - vec2(1)));
+  uint value = texels[material.textureInfo.x + p.y * material.textureInfo.y + p.x];
+  vec4 rgba = vec4(value & 255u, (value >> 8) & 255u, (value >> 16) & 255u, value >> 24) / 255.0;
+  rgba.rgb = mix(pow((rgba.rgb + vec3(0.055)) / 1.055, vec3(2.4)), rgba.rgb / 12.92, lessThanEqual(rgba.rgb, vec3(0.04045)));
+  return rgba;
+}
+vec4 spriteTexel(Hit hit) {
+  Triangle tri = triangles[hit.primitive];
+  return spriteTexel(materials[hit.instance], tri.a.xyz * hit.weights.x + tri.b.xyz * hit.weights.y + tri.c.xyz * hit.weights.z);
+}
 
 // SplitMix64 using core GLSL uvec2 arithmetic: identical to IndependentSampler,
 // without requiring a vendor-specific 64-bit integer extension.
@@ -118,11 +140,16 @@ bool traceMesh(Ray worldRay, uint instanceIndex, inout Hit hit, bool anyHit) {
     if (!bounds(ray, index, hit.t, entry)) continue;
     Node node = nodes[index];
     if (node.links.y != 0u) {
-      for (uint i = 0u; i < node.links.y; ++i)
-        if (triangle(ray, instance.mesh.y + order[node.links.x + i], hit)) {
-          hit.instance = instanceIndex;
+      for (uint i = 0u; i < node.links.y; ++i) {
+        Hit candidate = hit;
+        if (triangle(ray, instance.mesh.y + order[node.links.x + i], candidate)) {
+          candidate.instance = instanceIndex;
+          Material material = materials[instanceIndex];
+          if (material.textureInfo.x != INVALID && spriteTexel(candidate).a < material.properties.z) continue;
+          hit = candidate;
           if (anyHit) return true;
         }
+      }
     } else pushChildren(ray, node, hit.t, stack, pending);
   }
   return hit.instance != INVALID;
@@ -327,6 +354,7 @@ vec3 path(Ray ray, uint pixel, inout uint dimension) {
   for (uint depth = 0u; depth <= maxBounces; ++depth) {
     Hit hit = trace(ray, false); if (hit.instance == INVALID) break;
     Surface s = surface(ray, hit); Material material = materials[hit.instance];
+    if (material.properties.w != 0.0) { radiance += throughput * spriteTexel(hit).rgb; break; }
     if (material.emission.w != 0.0 || s.front) {
       float weight = previousDelta ? 1.0 : powerHeuristic(previousPdf, emitterPdf(previousPosition, hit, s));
       radiance += throughput * material.emission.rgb * weight;
@@ -357,6 +385,29 @@ vec3 path(Ray ray, uint pixel, inout uint dimension) {
           }
         }
       }
+    }
+    if(!delta(b)) for(uint i=0u;i<lightCount;++i) {
+      AnalyticLight light=lights[i];
+      vec3 target=light.position.xyz;float area=1.0;
+      if(light.intensity.w==2.0) {
+        vec2 u=next2D(pixel,dimension);
+        target+=light.right.xyz*((u.x-.5)*light.right.w)+light.up.xyz*((u.y-.5)*light.up.w);
+        area=light.right.w*light.up.w;
+      }
+      vec3 difference=target-s.position;
+      float distance=light.intensity.w==0.0?10000.0:length(difference);
+      if(distance<=0.0) continue;
+      vec3 direction=light.intensity.w==0.0?-light.direction.xyz:difference/distance;
+      vec3 irradiance=light.intensity.rgb;
+      if(light.intensity.w!=0.0) irradiance*=area/(distance*distance);
+      if(light.intensity.w==2.0) {
+        float cosine=dot(light.direction.xyz,-direction);
+        irradiance*=light.position.w!=0.0?abs(cosine):max(0.0,cosine);
+      }
+      float pdf;vec3 value=evaluate(b,outgoing,direction,pdf);
+      if(maximum(value)<=0.0 || maximum(irradiance)<=0.0) continue;
+      Ray shadow=spawn(s,direction);shadow.maximum=nextFloat(distance,false);
+      if(trace(shadow,true).instance==INVALID) radiance+=throughput*value*irradiance*abs(dot(b.n,direction));
     }
     BsdfSample sampled = sampleBsdf(b, outgoing, pixel, dimension);
     if (!(sampled.pdf > 0.0) || maximum(sampled.value) == 0.0) break;
@@ -395,7 +446,7 @@ void main() {
     Hit hit = trace(ray, false);
     if (hit.instance != INVALID) {
       Surface s = surface(ray, hit); Material material = materials[hit.instance];
-      color = normalShading != 0 ? s.shading * 0.5 + 0.5 : material.baseColor.rgb +
+      color = normalShading != 0 ? s.shading * 0.5 + 0.5 : material.properties.w != 0.0 ? spriteTexel(hit).rgb : material.baseColor.rgb +
         ((material.emission.w != 0.0 || s.front) ? material.emission.rgb : vec3(0));
     }
   }

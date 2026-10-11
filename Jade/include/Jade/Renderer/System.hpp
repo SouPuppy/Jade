@@ -2,6 +2,8 @@
 #include <Jade/Renderer/RayTracing/RayTracing.hpp>
 #include <Jade/Renderer/RayTracing/ComputeRayTracer.hpp>
 #include <Jade/Renderer/Common/SceneSnapshot.hpp>
+#include <Jade/Renderer/RenderPipeline.hpp>
+#include <Jade/Renderer/RayTracing/Integrator.hpp>
 #include <memory>
 #include <chrono>
 #include <string>
@@ -10,14 +12,20 @@ namespace Jade { class Runtime; class Window; namespace Detail { struct Collisio
 namespace Jade::Renderer {
 struct Config {
   RayTracingSettings rayTracing;
+  RenderMode pipeline = RenderMode::RayTracing;
   bool vsync = false;
   bool wireframe = false;
+  DebugViewOptions debugView;
 };
 class System final {
 public:
   ~System();
   System(const System&) = delete;
   System& operator=(const System&) = delete;
+  void setPipeline(RenderMode);
+  RenderMode pipeline() const noexcept;
+  void nextPipeline();
+  bool sceneRenderingEnabled() const noexcept;
   RayTracing& rayTracing() noexcept;
   RayTracingSettings rayTracingSettings() const;
   // Call on the application/window thread, including from FrameUpdate.
@@ -36,7 +44,7 @@ private:
   void invalidate() noexcept;
   void rethrowError();
   void render(const SceneSnapshot*, ImageSize, bool axes, const Detail::CollisionDebugLines*, bool paused,
-              std::chrono::steady_clock::time_point deadline);
+              std::chrono::steady_clock::time_point deadline, const CameraFrame* observer=nullptr, const std::vector<PathSegment>* paths=nullptr);
   struct Impl;
   std::unique_ptr<Impl> m_Impl;
 };

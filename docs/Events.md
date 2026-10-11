@@ -6,7 +6,7 @@ Application owns a global main-thread dispatcher; each Scene owns a dispatcher f
 
 ```cpp
 Jade::EngineConfig config;
-config.debug.shortcuts = true; // F3: axes/AABB, F4: physics/forces/logs, F5: Color/Normal, O: projection. F1/I always work.
+config.debug.shortcuts = true; // F2: soul observer, F3: axes/AABB, F4: physics/forces/logs, F5: Color/Normal, O: projection. F1/I always work.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
 scene->use<Jade::Module::FreeCameraControl>();
@@ -16,7 +16,7 @@ Include Jade/Module/FreeCameraControl.hpp or Jade/Jade.hpp. FreeCameraControl in
 
 For first-person controls, include Jade/Module/FPSCameraControl.hpp and use `scene->use<Jade::Module::FPSCameraControl>()` instead. It keeps WASD/arrows and Shift/Ctrl+W on the horizontal plane, captures the cursor for continuous mouse look, clamps pitch to +/-89 degrees and removes roll. Space, Ctrl+Space, Q/E and wheel are unbound; physics and jumping belong to a future character controller. A Scene rejects installing both control types. Both modules use the existing Scene::on events, skip missing components and release subscriptions with their Scene.
 
-Unmodified KeyPressed F1 toggles Mesh wireframe; I toggles image rendering independently, including when debug shortcuts are disabled. Repeats, modified keys and consumed events do not toggle either. Both may be on (image plus mesh edges) or off (clear background plus any enabled debug overlays). Physics and input continue. Scene selection preserves both switches.
+Unmodified KeyPressed F1 toggles mesh wireframe; I cycles Raster ? Hybrid ? RayTracing ? None ? Raster, including when debug shortcuts are disabled. Repeats, modified keys and consumed events do not invoke defaults. Wireframe is independent of the selected image pipeline. None clears the image but permits enabled debug overlays. Physics and input continue. Scene selection preserves the selected pipeline and overlay flags.
 
 The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing FreeCameraControl. FreeCameraControl can also be used with debug disabled.
 
@@ -169,9 +169,9 @@ scene->on<Jade::KeyPressed<"Escape">>([] {
 scene->on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 ```
 
-With config.debug.shortcuts=true, unconsumed bare F3 toggles axes and cyan AABBs together: if either is enabled, both turn off; otherwise both turn on. F4 independently toggles orange Collider outlines, red contact points, green normals, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow lengths encode direction only; near-zero forces are hidden and unsolved total forces are unavailable. F5 toggles ray output between Color and primary-hit Normal, preserving device, transport and quality settings; changing output resets image samples. It also enables the ray image, including after I turns it off, so no prior I press is needed. Wireframe remains independent. O switches camera projection while preserving both zoom values, pose and clip planes. All overlays work with image/Wireframe disabled. Repeat and modified keys do not trigger defaults; EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. Initial visibility uses config.debug.axes/aabbs/physics. Runtime provides independent setAxes(), setAabbs() and setPhysicsDebug() controls. Logging reports field count, integration method, bodies, contacts and forces at most once per second.
+With config.debug.shortcuts=true, unconsumed bare F3 toggles axes and cyan AABBs together: if either is enabled, both turn off; otherwise both turn on. F4 independently toggles orange Collider outlines, red contact points, green normals, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow lengths encode direction only; near-zero forces are hidden and unsolved total forces are unavailable. F5 toggles the selected pipeline output between Color and Normal, preserving device, transport and quality settings; changing output resets image samples. It preserves the selected pipeline, including None. Wireframe remains independent. O switches camera projection while preserving both zoom values, pose and clip planes. All overlays work with image/Wireframe disabled. Repeat and modified keys do not trigger defaults; EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. Initial visibility uses config.debug.axes/aabbs/physics. Runtime provides independent setAxes(), setAabbs() and setPhysicsDebug() controls. Logging reports field count, integration method, bodies, contacts and forces at most once per second.
 
-Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
+Unconsumed Escape leaves soul observation if active; otherwise it closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
 ## Subscription lifetime and mutation
 
@@ -200,7 +200,7 @@ and skipped subscribers. `consumed_by` identifies the subscription returning
 EventFlow::Stop; zero means propagation continued. This uses the same level as
 the event, so a consumed FrameUpdate does not generate a per-frame Debug message.
 Dispatch records are emitted after successful callbacks, including unhandled input
-with zero handlers. Application default Escape/F1/I and enabled F3/F4/F5/O actions run afterward.
+with zero handlers. Application default Escape/F1/I and enabled F2/F3/F4/F5/O actions run afterward.
 
 KeyHeld, MouseHeld, MouseMoved, MouseScrolled and FrameUpdate use Trace, including
 their relevant dt, position/deltas or frame index. Enable them explicitly with
@@ -224,3 +224,13 @@ record. Subscription IDs restart with each dispatcher and persist across Runs.
 Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Module/FreeCameraControl.hpp and Module/FPSCameraControl.hpp expose reusable scene controls; their engine implementations use Scene::on and Motion. Application.hpp and Core/Scene.hpp adapt typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.
 
 The current event set is keyboard/button transitions and held events, MouseMoved, MouseScrolled, FrameUpdate and scene-only SceneActivated/SceneDeactivated. Resize and text events can be added as separate event types and backend adapters without changing mesh/component contracts. The current on() reports unsupported event types at compile time.
+
+## Soul camera input
+
+With debug.shortcuts enabled, an unconsumed bare F2 press toggles Runtime's observer.
+The game camera stays selected in Scene. WASD/Q/E/Shift movement and right-button look
+are intercepted before global and scene input handlers while the observer is active;
+FrameUpdate, physics and animation continue. O changes the observer lens, and I changes
+the game pipeline restored on exit. F2 or Esc leaves observation; Esc closes the app
+when observation is inactive. Focus loss releases look capture and scene switches clear
+observer state. Sparse paths are sampled from the game camera, not the observer.

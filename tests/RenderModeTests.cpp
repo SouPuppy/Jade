@@ -64,7 +64,7 @@ public:
 };
 } // namespace
 
-TEST(RenderMode, F1AndIIndependentlyToggleAllFourStatesAndHonorInputConsumption)
+TEST(RenderMode, F1OverlayIsIndependentOfPipelineCycleAndHonorsInputConsumption)
 {
   Application app(hidden());
   const auto scene = MakeTestScene(app);
@@ -98,19 +98,19 @@ TEST(RenderMode, F1AndIIndependentlyToggleAllFourStatesAndHonorInputConsumption)
   app.Run({2});
   EXPECT_FALSE(renderer.rayTracingEnabled());
   EXPECT_TRUE(renderer.wireframeEnabled());
-  EXPECT_EQ(renderer.progress().rendererName, "Wireframe");
+  EXPECT_EQ(renderer.progress().rendererName, "None + Wireframe");
   EXPECT_FALSE(renderer.progress().samplesPerPixel);
   tap(GLFW_KEY_F1);
   app.Run({2});
   EXPECT_FALSE(renderer.rayTracingEnabled());
   EXPECT_FALSE(renderer.wireframeEnabled());
-  EXPECT_EQ(renderer.progress().rendererName, "Disabled");
-  EXPECT_EQ(std::string_view(glfwGetWindowTitle(glfwGetCurrentContext())), "Jade | Disabled");
+  EXPECT_EQ(renderer.progress().rendererName, "None");
+  EXPECT_EQ(std::string_view(glfwGetWindowTitle(glfwGetCurrentContext())), "Jade | None");
   tap(GLFW_KEY_I);
   app.Run({2});
-  EXPECT_TRUE(renderer.rayTracingEnabled());
+  EXPECT_EQ(renderer.pipeline(), RenderMode::Raster);
   EXPECT_FALSE(renderer.wireframeEnabled());
-  EXPECT_EQ(renderer.progress().rendererName, "RayTracing");
+  EXPECT_EQ(renderer.progress().rendererName, "Raster");
 }
 
 TEST(RenderMode, RunningFramesAreIndependentAndPEnablesPausedAccumulation)
@@ -299,7 +299,7 @@ TEST(RenderMode, DisabledRenderingStartsNoIntegratorAndResumingStartsFreshSample
   });
   app.Run({8});
   EXPECT_EQ(calls, 0);
-  tap(GLFW_KEY_I);
+  renderer.setPipeline(RenderMode::RayTracing);
   app.Run({8});
   EXPECT_GT(calls, 0);
   EXPECT_TRUE(renderer.wireframeEnabled());
@@ -309,7 +309,7 @@ TEST(RenderMode, DisabledRenderingStartsNoIntegratorAndResumingStartsFreshSample
   object.get<Transform>().position.x = 1;
   app.Run({8});
   EXPECT_EQ(calls, completedCalls);
-  tap(GLFW_KEY_I);
+  renderer.setPipeline(RenderMode::RayTracing);
   app.Run({8});
   EXPECT_GT(calls, completedCalls);
   EXPECT_TRUE(renderer.wireframeEnabled());
@@ -392,8 +392,8 @@ TEST(RenderMode, RealPathTracingAndWheelInputSurviveRepeatedRenderToggles)
     if (frame.frame == 12) {
       EXPECT_FALSE(app.runtime().renderer().rayTracingEnabled());
       EXPECT_FALSE(app.runtime().renderer().progress().inFlight);
-      EXPECT_EQ(app.runtime().renderer().progress().rendererName, "Disabled");
-      tap(GLFW_KEY_I);
+      EXPECT_EQ(app.runtime().renderer().progress().rendererName, "None");
+      app.runtime().renderer().setPipeline(RenderMode::RayTracing);
     }
     if (frame.frame == 20) {
       EXPECT_TRUE(app.runtime().renderer().rayTracingEnabled());

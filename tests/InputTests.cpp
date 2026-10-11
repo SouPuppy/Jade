@@ -867,7 +867,7 @@ TEST(Application, AxisGizmoDefaultsOffAndF3TogglesOncePerUnconsumedPress)
   }
 }
 
-TEST(Application, F5EnablesRayImageAndTogglesOutputWithoutChangingWireframe)
+TEST(Application, F5TogglesOutputWithoutChangingPipelineOrWireframe)
 {
   for (const auto device : {Jade::Renderer::RayDevice::CPU, Jade::Renderer::RayDevice::GPU}) {
     auto config = HiddenInputApplication();
@@ -889,10 +889,10 @@ TEST(Application, F5EnablesRayImageAndTogglesOutputWithoutChangingWireframe)
     input.Send(GLFW_KEY_F5, GLFW_REPEAT);
     app.Run({1});
     expected.output = Jade::Renderer::RayOutput::Normal;
-    expected.enabled = true;
+    expected.enabled = false;
     EXPECT_EQ(renderer.rayTracingSettings(), expected);
-    EXPECT_TRUE(renderer.rayTracingEnabled());
-    EXPECT_EQ(renderer.progress().samplesPerPixel, 1u);
+    EXPECT_EQ(renderer.pipeline(), Jade::Renderer::RenderMode::None);
+    EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
     EXPECT_TRUE(renderer.wireframeEnabled());
     input.Send(GLFW_KEY_I, GLFW_PRESS);
     input.Send(GLFW_KEY_I, GLFW_RELEASE);
@@ -914,9 +914,9 @@ TEST(Application, F5EnablesRayImageAndTogglesOutputWithoutChangingWireframe)
     input.Send(GLFW_KEY_F5, GLFW_PRESS);
     app.Run({1});
     expected.output = Jade::Renderer::RayOutput::Color;
-    expected.enabled = true;
+    expected.enabled = false;
     EXPECT_EQ(renderer.rayTracingSettings(), expected);
-    EXPECT_EQ(renderer.progress().samplesPerPixel, 1u);
+    EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
 
     // The settings field and the explicit runtime switch share one enabled state.
     renderer.setRayTracingEnabled(true);

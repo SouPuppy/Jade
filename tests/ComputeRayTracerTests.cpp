@@ -450,7 +450,7 @@ TEST(GpuPathTracing, RunningFramesPresentCompleteTexturesEvenWhenTheirBudgetExpi
     for (int frameIndex = 0; frameIndex < 3; ++frameIndex) {
       object.get<Material>().baseColor = frameIndex == 1 ? LinearRGB{0,1,0} : LinearRGB{1,0,0};
       const auto snapshot = f.snapshot();
-      host.draw(&snapshot,size,true,false,false,nullptr,false,expired);
+      host.draw(&snapshot,size,RenderMode::RayTracing,false,false,nullptr,false,expired);
       EXPECT_EQ(gpuImageReadbacks,0);
       EXPECT_EQ(host.progress().samplesPerPixel,1u);
       EXPECT_FALSE(host.progress().inFlight);
@@ -483,9 +483,9 @@ TEST(GpuPathTracing, RuntimeAccumulatesAndPresentsSharedHdrTexturesWithoutImageR
   const auto snapshot = f.snapshot();
   {
     ReadbackGuard guard;
-    host.start(true); host.draw(&snapshot,{32,24},true,false,false);
+    host.start(true); host.draw(&snapshot,{32,24},RenderMode::RayTracing,false,false);
     ASSERT_TRUE(waitFor([&] { host.rethrowError(); return host.progress().samplesPerPixel == 8; }));
-    host.draw(&snapshot,{32,24},true,false,false);
+    host.draw(&snapshot,{32,24},RenderMode::RayTracing,false,false);
     EXPECT_EQ(gpuImageReadbacks,0);
   }
   const auto frame = host.gpuFrame(); ASSERT_TRUE(frame);
@@ -510,7 +510,7 @@ TEST(GpuPathTracing, RuntimeAccumulatesAndPresentsSharedHdrTexturesWithoutImageR
     EXPECT_NEAR(bytes[(y*32+x)*4+c],expected.pixels[((23-y)*32+x)*4+c],1);
   EXPECT_EQ(host.progress().samplesPerPixel,8u); EXPECT_EQ(host.progress().revision,revision);
   settings.output = RayOutput::Normal; settings.resolutionScale = .5f; settings.maxSamples = 2;
-  host.setRayTracingSettings(settings); host.draw(&snapshot,{32,24},true,false,false);
+  host.setRayTracingSettings(settings); host.draw(&snapshot,{32,24},RenderMode::RayTracing,false,false);
   ASSERT_TRUE(waitFor([&] { host.rethrowError(); return host.progress().samplesPerPixel == 2; }));
   EXPECT_EQ(host.progress().size,(ImageSize{16,12}));
   // A pinned old frame survives resize/restarts and cannot be overwritten.

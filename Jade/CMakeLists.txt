@@ -1,9 +1,25 @@
 add_library(Jade STATIC
+  include/Jade/Renderer/RenderPipeline.hpp
+  include/Jade/Graphics/Light.hpp
+  src/internal/Renderer/Pipeline/RayTracingPipeline.hpp
+  src/internal/Renderer/Pipeline/RealtimePipeline.hpp
+  src/internal/Renderer/Device/OpenGL/RasterScene.hpp
+  src/internal/Renderer/Device/OpenGL/RasterScene.cpp
+  include/Jade/Graphics/Texture.hpp
+  include/Jade/Graphics/SpriteRenderer.hpp
+  include/Jade/Animation/SpriteFrame.hpp
+  include/Jade/Animation/AnimationClip.hpp
+  include/Jade/Animation/Animator.hpp
+  include/Jade/Animation/AnimationSystem.hpp
+  include/Jade/Physics/CharacterController.hpp
+  src/Graphics/Texture.cpp
+  src/Animation/AnimationSystem.cpp
+  src/Physics/CharacterController.cpp
   include/Jade/Renderer/RayTracing/RayTracingSettings.hpp
   src/Renderer/RayTracing/Settings.hpp
   src/internal/Renderer/Device/OpenGL/GpuFrame.hpp
   include/Jade/Renderer/RayTracing/ComputeRayTracer.hpp
-  src/Renderer/RayTracing/ComputeRayTracer.cpp
+  src/internal/Renderer/Device/OpenGL/ComputeRayTracer.cpp
   src/internal/Renderer/Device/OpenGL/OpenGLComputeDevice.hpp
   src/internal/Renderer/Device/OpenGL/OpenGLComputeDevice.cpp
   include/Jade/Physics/Field/ForceField.hpp
@@ -154,7 +170,7 @@ add_library(Jade STATIC
   src/Renderer/RayTracing/RayScene.cpp
   src/Renderer/RayTracing/RayScene.hpp
   src/internal/Core/SceneTransforms.hpp
-  src/internal/Renderer/Presentation/OpenGLDisplay.cpp
+  src/internal/Renderer/Device/OpenGL/OpenGLDisplay.cpp
   src/internal/Renderer/Presentation/OpenGLDisplay.hpp
   src/internal/Renderer/Host/ProgressiveSession.cpp
   src/internal/Renderer/Host/ProgressiveSession.hpp
@@ -187,13 +203,16 @@ target_compile_definitions(Jade PRIVATE
   $<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
   $<$<PLATFORM_ID:Windows>:NOMINMAX>
 )
-target_link_libraries(Jade PRIVATE glfw jade_glad OpenGL::GL)
+target_link_libraries(Jade PRIVATE glfw jade_glad OpenGL::GL windowscodecs ole32)
 jade_configure_target(Jade)
 get_target_property(jade_sources Jade SOURCES)
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${jade_sources})
 
 set(jade_shader_root "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(jade_shader_files
+  internal/Renderer/Device/OpenGL/Shaders/Raster.vert
+  internal/Renderer/Device/OpenGL/Shaders/Raster.frag
+  internal/Renderer/Device/OpenGL/Shaders/ToneMap.frag
   Renderer/RayTracing/Shaders/RayTrace.comp
   internal/Renderer/Presentation/Shaders/Display.vert
   internal/Renderer/Presentation/Shaders/ImageDisplay.frag

@@ -1,4 +1,4 @@
-#include "OpenGLDisplay.hpp"
+#include "../../Presentation/OpenGLDisplay.hpp"
 #include <JadeShaders.hpp>
 
 #include <array>

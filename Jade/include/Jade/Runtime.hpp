@@ -1,6 +1,11 @@
 #pragma once
 #include <Jade/EngineConfig.hpp>
 #include <Jade/Assets/Assets.hpp>
+#include <Jade/Animation/AnimationSystem.hpp>
+#include <Jade/Renderer/RayTracing/Integrator.hpp>
+#include <Jade/Events/Keyboard.hpp>
+#include <Jade/Events/Mouse.hpp>
+#include <Jade/Events/MouseMoved.hpp>
 #include <memory>
 #include <chrono>
 
@@ -16,8 +21,9 @@ public:
   void setScene(std::shared_ptr<Scene> scene);
   Renderer::System& renderer() noexcept;
   Physics::System& physics() noexcept;
+  Animation::System& animation() noexcept;
   JobSystem& jobs() noexcept;
-  // Accumulates display dt and executes fixed simulation steps only.
+  // Executes fixed physics steps, then advances sprite animation before rendering.
   void tick(float dt);
   unsigned substeps() const noexcept;
   double droppedTime() const noexcept;
@@ -29,10 +35,18 @@ public:
   bool aabbsEnabled() const noexcept;
   void setPhysicsDebug(bool enabled) noexcept;
   bool physicsDebugEnabled() const noexcept;
+  void setSoulMode(bool);
+  bool soulMode() const noexcept;
+  const Renderer::CameraFrame* soulCamera() const noexcept;
+  const std::vector<Renderer::PathSegment>& soulPaths() const noexcept;
 private:
   friend class Application;
   Runtime(Window&, const EngineConfig&);
   bool commitScene();
+  bool soulKey(KeyAction,const KeyEvent&);
+  bool soulMouse(MouseAction,const MouseEvent&);
+  bool soulMouseMoved(const MouseMoved&);
+  void toggleProjection();
   void begin();
   void end() noexcept;
   void abort() noexcept;

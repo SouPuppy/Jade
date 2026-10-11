@@ -9,6 +9,7 @@
 #include <optional>
 #include <stop_token>
 #include <vector>
+#include <span>
 
 namespace Jade::Detail {
 struct RaySceneAccess;
@@ -23,7 +24,11 @@ public:
   static RayScene build(const SceneSnapshot &snapshot);
   bool intersect(const Ray &ray, SurfaceHit &hit) const override;
   bool occluded(const Ray &ray) const override;
+  bool occluded(const Ray&, std::uint32_t ignoredInstance) const;
   const Material &material(const SurfaceHit &hit) const;
+  bool unlit(const SurfaceHit& hit) const;
+  Texel spriteSample(const SurfaceHit& hit) const;
+  std::span<const RenderLight> lights() const noexcept;
   EmitterSample sampleEmitter(float selection, Vec2 sample) const;
   float emitterPdf(Vec3 reference, const SurfaceHit &hit) const;
   std::size_t instanceCount() const noexcept;

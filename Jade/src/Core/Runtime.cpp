@@ -7,6 +7,8 @@
 #include <Jade/Physics/Collider.hpp>
 #include <cmath>
 #include <optional>
+#include <Jade/Graphics/Motion.hpp>
+#include "../Renderer/Common/Math.hpp"
 
 namespace Jade {
 namespace {
@@ -21,7 +23,15 @@ struct Runtime::Impl {
   std::shared_ptr<Scene> scene;
   std::optional<std::shared_ptr<Scene>> pending;
   Renderer::System renderer;
+  bool soul=false, soulLook=false;
+  Transform observer;
+  Renderer::CameraFrame observerFrame;
+  std::unique_ptr<Renderer::RaySceneCompiler> diagnosticCompiler=std::make_unique<Renderer::RaySceneCompiler>();
+  std::vector<Renderer::PathSegment> paths;
+  std::chrono::steady_clock::time_point pathRefresh{};
+  std::uint64_t pathSample=0;
   Physics::System physics;
+  Animation::System animation;
   bool running = false, switching = false, paused = false, axes, aabbs, physicsDebug, logNow = false;
   double accumulator = 0, dropped = 0, logElapsed = 0;
   unsigned substeps = 0;
@@ -39,6 +49,7 @@ Assets& Runtime::assets() noexcept { return m_Impl->assets; }
 std::shared_ptr<Scene> Runtime::scene() const noexcept { return m_Impl->scene; }
 Renderer::System& Runtime::renderer() noexcept { return m_Impl->renderer; }
 Physics::System& Runtime::physics() noexcept { return m_Impl->physics; }
+Animation::System& Runtime::animation() noexcept { return m_Impl->animation; }
 JobSystem& Runtime::jobs() noexcept { return m_Impl->jobs; }
 void Runtime::setScene(std::shared_ptr<Scene> scene) {
   if (scene && scene->m_Impl->owner && scene->m_Impl->owner != this)
@@ -58,6 +69,7 @@ bool Runtime::commitScene() {
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{m_Impl->switching};
   try {
     if (previous) previous->m_Impl->events.DispatchLifecycle(false);
+    setSoulMode(false);
     m_Impl->scene = next;
     m_Impl->window.SetMouseCaptured(next && next->CapturesMouse());
     m_Impl->window.Input().ResetCursor();
@@ -86,7 +98,12 @@ void Runtime::suspend() noexcept {
 void Runtime::tick(float dt) {
   if (!std::isfinite(dt) || dt < 0) throw std::invalid_argument("Runtime dt must be finite and nonnegative.");
   m_Impl->substeps = 0;
-  if (!m_Impl->scene || m_Impl->paused) { m_Impl->accumulator = 0; return; }
+  if (!m_Impl->scene) { m_Impl->accumulator = 0; return; }
+  if (m_Impl->paused) {
+    m_Impl->accumulator = 0;
+    m_Impl->animation.update(*m_Impl->scene, m_Impl->assets, 0);
+    return;
+  }
   m_Impl->logElapsed += dt;
   const auto& config = m_Impl->physics.config();
   m_Impl->accumulator += dt;
@@ -102,6 +119,7 @@ void Runtime::tick(float dt) {
     m_Impl->dropped += discarded; m_Impl->accumulator = remainder;
     physicsLog << Log::warn("Substep limit: discarded={:.6f}s total={:.6f}s", discarded, m_Impl->dropped);
   }
+  m_Impl->animation.update(*m_Impl->scene, m_Impl->assets, dt);
 }
 unsigned Runtime::substeps() const noexcept { return m_Impl->substeps; }
 double Runtime::droppedTime() const noexcept { return m_Impl->dropped; }
@@ -129,9 +147,9 @@ void Runtime::render(Renderer::ImageSize size, std::chrono::steady_clock::time_p
   std::optional<Detail::CollisionDebugLines> debug;
   if (m_Impl->scene) {
     const auto camera = m_Impl->scene->camera();
-    const bool geometry = m_Impl->renderer.rayTracingEnabled() || m_Impl->renderer.wireframeEnabled();
+    const bool geometry = m_Impl->renderer.sceneRenderingEnabled() || m_Impl->renderer.wireframeEnabled() || m_Impl->soul;
     if ((geometry || m_Impl->axes || m_Impl->aabbs || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
-      snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry);
+      snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry, m_Impl->axes);
     if (m_Impl->physicsDebug || m_Impl->aabbs)
       debug = Detail::captureCollisionDebug(*m_Impl->scene, m_Impl->physicsDebug, m_Impl->aabbs,
         m_Impl->physicsDebug, &m_Impl->physics, m_Impl->physicsDebug);
@@ -169,7 +187,90 @@ void Runtime::render(Renderer::ImageSize size, std::chrono::steady_clock::time_p
           m.a.id(), m.b.id(), p.pointA.x, p.pointA.y, p.pointA.z, m.normal.x, m.normal.y, m.normal.z, std::max(0.0f, -p.separation), p.normalImpulse);
     }
   }
+  if(m_Impl->soul && snapshot && snapshot->camera) {
+    const auto now=std::chrono::steady_clock::now();
+    if(now>=m_Impl->pathRefresh) {
+      m_Impl->pathRefresh=now+std::chrono::milliseconds(167);
+      const auto scene=m_Impl->diagnosticCompiler->compile(*snapshot);
+      m_Impl->paths.clear();
+      Renderer::IndependentSampler sampler(m_Impl->renderer.rayTracingSettings().seed);
+      Renderer::PathIntegrator integrator({4,4});
+      for(int y=0;y<9;++y) for(int x=0;x<16;++x) {
+        sampler.start(static_cast<std::uint64_t>(y*16+x),m_Impl->pathSample);
+        const Vec2 sample{(x+.5f)*size.width/16,(y+.5f)*size.height/9};
+        integrator.record(snapshot->camera->generateRay(sample,size),scene,sampler,m_Impl->paths);
+      }
+      ++m_Impl->pathSample;
+    }
+    m_Impl->observerFrame.position=m_Impl->observer.position;
+    m_Impl->observerFrame.forward=Motion::getFront(m_Impl->observer);
+    m_Impl->observerFrame.right=Motion::getRight(m_Impl->observer);
+    m_Impl->observerFrame.up=Motion::getUp(m_Impl->observer);
+  }
   m_Impl->renderer.render(snapshot ? &*snapshot : nullptr, size, m_Impl->axes, debug ? &*debug : nullptr,
-                          m_Impl->paused, deadline);
+                          m_Impl->paused, deadline, m_Impl->soul?&m_Impl->observerFrame:nullptr, m_Impl->soul?&m_Impl->paths:nullptr);
+}
+void Runtime::setSoulMode(bool enabled) {
+  if(enabled==m_Impl->soul) return;
+  if(enabled) {
+    if(!m_Impl->scene) return;
+    const auto snapshot=Renderer::SceneSnapshot::capture(*m_Impl->scene,m_Impl->assets,false);
+    if(!snapshot.camera) return;
+    m_Impl->observer={}; m_Impl->observer.position=snapshot.camera->position;
+    Motion::lookAt(m_Impl->observer,m_Impl->observer.position+snapshot.camera->forward,snapshot.camera->up);
+    m_Impl->observerFrame=*snapshot.camera;
+    m_Impl->observerFrame.lens.projection=Projection::Perspective;
+    m_Impl->observerFrame.lens.fovDegrees=60;
+  }
+  m_Impl->soul=enabled; m_Impl->soulLook=false; m_Impl->paths.clear();m_Impl->pathRefresh={};m_Impl->pathSample=0;
+  m_Impl->diagnosticCompiler=std::make_unique<Renderer::RaySceneCompiler>();
+  m_Impl->window.SetMouseCaptured(!enabled && m_Impl->scene && m_Impl->scene->CapturesMouse());
+  m_Impl->window.Input().ResetCursor();m_Impl->renderer.invalidate();
+}
+bool Runtime::soulMode() const noexcept {return m_Impl->soul;}
+const Renderer::CameraFrame* Runtime::soulCamera() const noexcept {return m_Impl->soul?&m_Impl->observerFrame:nullptr;}
+const std::vector<Renderer::PathSegment>& Runtime::soulPaths() const noexcept {return m_Impl->paths;}
+bool Runtime::soulKey(KeyAction action,const KeyEvent& key) {
+  if(!m_Impl->soul) return false;
+  if(key.key==Key::Escape && action==KeyAction::Pressed) {setSoulMode(false);return true;}
+  const float speed=(static_cast<unsigned>(key.modifiers)&static_cast<unsigned>(Modifiers::Shift))?6.f:3.f;
+  const float distance=action==KeyAction::Held?speed*key.dt:0;
+  auto& pose=m_Impl->observer;
+  switch(key.key) {
+    case Key::W:Motion::forward(pose,distance);break;
+    case Key::S:Motion::backward(pose,distance);break;
+    case Key::A:Motion::left(pose,distance);break;
+    case Key::D:Motion::right(pose,distance);break;
+    case Key::Q:Motion::down(pose,distance);break;
+    case Key::E:Motion::up(pose,distance);break;
+    default:return false;
+  }
+  return true;
+}
+bool Runtime::soulMouse(MouseAction action,const MouseEvent& mouse) {
+  if(!m_Impl->soul || mouse.button!=MouseButton::Right) return false;
+  if(action==MouseAction::Pressed || action==MouseAction::Released) {
+    m_Impl->soulLook=action==MouseAction::Pressed;
+    m_Impl->window.SetMouseCaptured(m_Impl->soulLook);m_Impl->window.Input().ResetCursor();
+  }
+  return true;
+}
+bool Runtime::soulMouseMoved(const MouseMoved& mouse) {
+  if(!m_Impl->soul) return false;
+  // Focus loss releases buttons without emitting a normal release transition.
+  if(!m_Impl->window.Input().IsDown(MouseButton::Right)) m_Impl->soulLook=false;
+  if(m_Impl->soulLook) {Motion::yaw(m_Impl->observer,mouse.dx*.1);Motion::pitch(m_Impl->observer,-mouse.dy*.1);}
+  return true;
+}
+void Runtime::toggleProjection() {
+  if(m_Impl->soul) {
+    auto& lens=m_Impl->observerFrame.lens;
+    lens.projection=lens.projection==Projection::Perspective?Projection::Orthographic:Projection::Perspective;
+  } else if(m_Impl->scene) {
+    const auto camera=m_Impl->scene->camera();
+    if(camera.has<Camera>() && camera.has<Transform>()) {
+      auto& lens=camera.get<Camera>();lens.projection=lens.projection==Projection::Perspective?Projection::Orthographic:Projection::Perspective;
+    }
+  }
 }
 } // namespace Jade

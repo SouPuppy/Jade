@@ -1,6 +1,7 @@
 #include "RenderHost.hpp"
 #include "../../Platform/Window.hpp"
 #include "../../../Renderer/RayTracing/Settings.hpp"
+#include <array>
 
 namespace Jade::Detail {
 namespace {
@@ -10,8 +11,8 @@ Renderer::RayTracingSettings cpuSettings(Renderer::RayTracingSettings settings) 
 }
 }
 RenderHost::RenderHost(Window &window, JobSystem& jobs, std::string title, Renderer::Config config)
-    : m_Window(window), m_Title(std::move(title)), m_Device(window, config.vsync), m_Display(m_Device),
-      m_Debug(m_Device), m_Settings(config.rayTracing), m_RayTracing(jobs, cpuSettings(config.rayTracing)), m_Session(&jobs)
+    : m_Window(window), m_Title(std::move(title)), m_Device(window, config.vsync, &jobs), m_Display(m_Device),
+      m_Debug(m_Device), m_DebugOptions(config.debugView), m_Settings(config.rayTracing), m_RayTracing(jobs, cpuSettings(config.rayTracing)), m_Session(&jobs)
 {
   validateRayTracingSettings(m_Settings);
   if (m_Settings.device == Renderer::RayDevice::GPU) {
@@ -95,10 +96,17 @@ Renderer::RenderProgress RenderHost::progress() const
   result.rendererName = m_Settings.device == Renderer::RayDevice::GPU ? m_Compute->name() : "RayTracing";
   return result;
 }
-void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSize size, bool render, bool wireframe,
+void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSize size, Renderer::RenderMode mode, bool wireframe,
                       bool axes, const CollisionDebugLines* colliders, bool paused,
-                      std::chrono::steady_clock::time_point deadline)
+                      std::chrono::steady_clock::time_point deadline, const Renderer::CameraFrame* observer, const std::vector<Renderer::PathSegment>* paths)
 {
+  std::optional<Renderer::SceneSnapshot> view;
+  const auto sourceCamera = snapshot ? snapshot->camera : std::optional<Renderer::CameraFrame>{};
+  if(observer && snapshot) {
+    view=*snapshot; view->camera=*observer; snapshot=&*view;
+    mode=Renderer::RenderMode::Raster;
+  }
+  const bool render = mode == Renderer::RenderMode::RayTracing;
   if (m_Render != render) {
     m_Render = render;
     m_Session.stop();
@@ -112,28 +120,45 @@ void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSi
     m_FrameSize = size;
   }
   const auto name = render ? std::string(m_Settings.device == Renderer::RayDevice::GPU ? m_Compute->name() : "RayTracing") +
-    (wireframe ? " + Wireframe" : "") : (wireframe ? "Wireframe" : "Disabled");
-  m_Window.SetTitle(m_Title + " | " + name);
+    (wireframe ? " + Wireframe" : "") : std::string(Renderer::pipelineName(mode)) + (wireframe ? " + Wireframe" : "");
+  m_Window.SetTitle(m_Title + " | " + name + (observer ? " | Soul" : ""));
   m_Display.begin(size);
   if (snapshot && snapshot->camera) {
-    if (render) {
-      m_Session.submit(*snapshot, size, paused, deadline);
-      if (!paused) {
-        m_Session.waitForFrame();
-        m_Session.rethrowError();
-      }
-      if (auto frame = m_Session.gpuFrame())
-        m_Display.image(frame, m_Settings.exposureEV, m_Settings.output == Renderer::RayOutput::Normal ?
-          Renderer::ImageEncoding::LinearData : Renderer::ImageEncoding::Radiance);
-      else if (auto image = m_Session.image())
-        m_Display.image(*image);
+    Renderer::RenderContext context{m_Device,*snapshot,{size},{m_Settings.output==Renderer::RayOutput::Normal,m_Settings.exposureEV,m_Settings.device==Renderer::RayDevice::CPU,m_Settings.resolutionScale},paused,deadline};
+    // Sampling is only part of a frame: reserve time for importing/presenting
+    // the shared image and returning to the window deadline. The minimum full
+    // sample floor remains enforced by ProgressiveSession; paused accumulation
+    // ignores this deadline and can continue refining the image.
+    constexpr auto presentationReserve=std::chrono::milliseconds(6);
+    if(deadline!=std::chrono::steady_clock::time_point::max())
+      context.deadline=deadline>=std::chrono::steady_clock::time_point::min()+presentationReserve?
+        deadline-presentationReserve:std::chrono::steady_clock::time_point::min();
+    Renderer::RenderPipeline* pipeline=&m_None;
+    switch(mode) {
+      case Renderer::RenderMode::Raster:pipeline=&m_Raster;break;
+      case Renderer::RenderMode::Hybrid:pipeline=&m_Hybrid;break;
+      case Renderer::RenderMode::RayTracing:pipeline=&m_RayPipeline;break;
+      case Renderer::RenderMode::None:break;
     }
+    pipeline->render(context);
     if (wireframe)
       m_Debug.wireframe(*snapshot, size);
     if (axes)
       m_Debug.axes(*snapshot->camera, size);
+    if (axes) m_Debug.scene(*snapshot,size,m_DebugOptions);
     if (colliders)
       m_Debug.colliders(*colliders, *snapshot->camera, size);
+    if(observer && sourceCamera) {
+      m_Debug.frustum(*sourceCamera,*observer,size);
+      if(paths) {
+        const std::array<Vec3,5> colors{{{0,.8f,1},{1,.5f,0},{.2f,1,.2f},{1,.15f,.15f},{.6f,.6f,.6f}}};
+        for(std::size_t i=0;i<colors.size();++i) {
+          std::vector<Vec3> points;
+          for(const auto& segment:*paths) if(static_cast<std::size_t>(segment.kind)==i) points.insert(points.end(),{segment.start,segment.end});
+          m_Debug.paths(points,*observer,size,colors[i]);
+        }
+      }
+    }
   } else
     invalidate();
   m_Display.present();

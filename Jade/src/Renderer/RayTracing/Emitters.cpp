@@ -11,7 +11,7 @@ std::shared_ptr<const EmitterDistribution> compileEmitters(const Renderer::Scene
   for (std::size_t index = 0; index < snapshot.instances.size(); ++index) {
     CheckCancellation(cancellation);
     const auto &input = snapshot.instances[index];
-    if (input.material.emission.maximum() == 0)
+    if (input.unlit || input.material.emission.maximum() == 0)
       continue;
     const auto &mesh = input.mesh->data();
     for (std::size_t p = 0; p < mesh.indices.size() / 3; ++p) {
@@ -67,7 +67,7 @@ bool sameEmitters(const Renderer::SceneSnapshot &a, const Renderer::SceneSnapsho
   for (std::size_t i = 0; i < a.instances.size(); ++i) {
     const auto &x = a.instances[i];
     const auto &y = b.instances[i];
-    if (x.mesh != y.mesh || x.entity != y.entity || x.material.emission != y.material.emission ||
+    if (x.mesh != y.mesh || x.entity != y.entity || x.unlit != y.unlit || x.material.emission != y.material.emission ||
         x.material.twoSidedEmission != y.material.twoSidedEmission ||
         ((x.material.emission.maximum() > 0 || y.material.emission.maximum() > 0) &&
          x.objectToWorld.values != y.objectToWorld.values))

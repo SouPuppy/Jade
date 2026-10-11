@@ -118,7 +118,8 @@ void Application::Run(const RunOptions &options)
     // One processing pass retains the same scene through input, update and present.
     const auto active = m_Impl->runtime.scene();
     // Also covers a module installed after this Scene became active.
-    m_Impl->window.SetMouseCaptured(active && active->CapturesMouse());
+    if(!runtime().soulMode()) m_Impl->window.SetMouseCaptured(active && active->CapturesMouse());
+    else if(!m_Impl->window.Input().IsDown(MouseButton::Right)) m_Impl->window.SetMouseCaptured(false);
     const auto dispatch = [&](auto &&...arguments) {
       const auto flow = m_Impl->events.Dispatch(arguments...);
       if (flow == EventFlow::Stop || !active || m_Impl->stopRequested || m_Impl->window.ShouldClose())
@@ -128,7 +129,7 @@ void Application::Run(const RunOptions &options)
     m_Impl->window.PollEvents();
     for (const auto &transition : m_Impl->window.Input().TakeEvents()) {
       if (const auto *key = std::get_if<Detail::KeyTransition>(&transition)) {
-        const auto flow = dispatch(key->action, key->event);
+        const auto flow = runtime().soulKey(key->action,key->event) ? EventFlow::Stop : dispatch(key->action, key->event);
         if (key->action == KeyAction::Pressed && key->event.key == Key::Escape &&
             flow == EventFlow::Continue && !m_Impl->stopRequested) {
           m_Impl->window.RequestClose();
@@ -138,8 +139,8 @@ void Application::Run(const RunOptions &options)
             !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
           auto& renderer = runtime().renderer();
           if (key->event.key == Key::I) {
-            renderer.setRayTracingEnabled(!renderer.rayTracingEnabled());
-            applicationLog << Log::info("Ray tracing: {}", renderer.rayTracingEnabled() ? "on" : "off");
+            renderer.nextPipeline();
+            applicationLog << Log::info("Pipeline: {}", Renderer::pipelineName(renderer.pipeline()));
           } else {
             renderer.setWireframe(!renderer.wireframeEnabled());
             applicationLog << Log::info("Wireframe: {}", renderer.wireframeEnabled() ? "on" : "off");
@@ -153,7 +154,9 @@ void Application::Run(const RunOptions &options)
         }
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
-          if (key->event.key == Key::F3) {
+          if (key->event.key == Key::F2) {
+            runtime().setSoulMode(!runtime().soulMode());
+          } else if (key->event.key == Key::F3) {
             const bool enabled = !(runtime().axesEnabled() || runtime().aabbsEnabled());
             runtime().setAxes(enabled); runtime().setAabbs(enabled);
             applicationLog << Log::info("Axes/AABB: {}", enabled ? "on" : "off");
@@ -162,30 +165,22 @@ void Application::Run(const RunOptions &options)
           } else if (key->event.key == Key::F5) {
             auto& renderer = runtime().renderer();
             auto settings = renderer.rayTracingSettings();
-            settings.enabled = true;
             settings.output = settings.output == Renderer::RayOutput::Color
                                 ? Renderer::RayOutput::Normal : Renderer::RayOutput::Color;
             renderer.setRayTracingSettings(settings);
             applicationLog << Log::info("Ray output: {}", settings.output == Renderer::RayOutput::Normal
                                                           ? "Normal" : "Color");
           } else if (key->event.key == Key::O && active) {
-            const auto camera = active->camera();
-            if (camera.has<Transform>() && camera.has<Camera>()) {
-              auto &lens = camera.get<Camera>();
-              lens.projection = lens.projection == Projection::Perspective ? Projection::Orthographic
-                                                                           : Projection::Perspective;
-              applicationLog << Log::info("Projection: {}", lens.projection == Projection::Perspective
-                                                                ? "Perspective"
-                                                                : "Orthographic");
-            }
+            runtime().toggleProjection();
           }
         }
       } else if (const auto *mouse = std::get_if<Detail::MouseTransition>(&transition)) {
-        dispatch(mouse->action, mouse->event);
+        if(!runtime().soulMouse(mouse->action,mouse->event)) dispatch(mouse->action, mouse->event);
       } else if (const auto *scroll = std::get_if<MouseScrolled>(&transition)) {
         dispatch(*scroll);
       } else {
-        dispatch(std::get<MouseMoved>(transition));
+        const auto& moved=std::get<MouseMoved>(transition);
+        if(!runtime().soulMouseMoved(moved)) dispatch(moved);
       }
       if (m_Impl->window.ShouldClose() || m_Impl->stopRequested) {
         break;
@@ -219,7 +214,8 @@ void Application::Run(const RunOptions &options)
     for (std::size_t index = 1; index < Detail::InputState::keyCount; ++index) {
       const auto key = static_cast<Key>(index);
       if (m_Impl->window.Input().IsDown(key)) {
-        dispatch(KeyAction::Held, KeyEvent{key, modifiers, dt});
+        const KeyEvent held{key,modifiers,dt};
+        if(!runtime().soulKey(KeyAction::Held,held)) dispatch(KeyAction::Held,held);
       }
       if (m_Impl->stopRequested || m_Impl->window.ShouldClose()) {
         break;
@@ -231,7 +227,8 @@ void Application::Run(const RunOptions &options)
     for (std::size_t index = 1; index < Detail::InputState::buttonCount; ++index) {
       const auto button = static_cast<MouseButton>(index);
       if (m_Impl->window.Input().IsDown(button)) {
-        dispatch(MouseAction::Held, MouseEvent{button, modifiers, dt});
+        const MouseEvent held{button,modifiers,dt};
+        if(!runtime().soulMouse(MouseAction::Held,held)) dispatch(MouseAction::Held,held);
       }
       if (m_Impl->stopRequested || m_Impl->window.ShouldClose()) {
         break;

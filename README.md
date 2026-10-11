@@ -2,6 +2,20 @@
 
 Jade is a C++20 static engine library validated on Windows x64 / MSVC. Application owns the window/input loop; Runtime coordinates Scene, Assets, Renderer and Physics through a shared categorized Job System. Scene owns component data and signature-indexed entity groups. Physics supports Box/Sphere rigid bodies, gravity, angular motion and persistent multi-point contact solving without a window or GPU. Renderer provides CPU progressive path tracing and unlit wireframe; OpenGL 3.3 presents completed images and debug primitives. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
 
+## Render pipelines
+
+Untitled starts in Raster. I cycles Raster ? Hybrid ? RayTracing ? None; F1 wireframe
+and F3/F4 debug drawing remain independent. Hybrid uses raster geometry with real BVH
+shadow rays; RayTracing retains the existing CPU/GPU path tracer. F5 changes color/normal
+output without selecting another pipeline. EngineConfig.renderer.pipeline selects startup;
+the engine's default remains RayTracing for existing consumers. The old ray enable API
+is a compatibility adapter: true selects RayTracing and false selects None.
+
+F2 enables the soul observation camera when debug shortcuts are enabled. The world keeps
+updating, while WASD/Q/E/Shift and right-button look control an independent observer.
+Sparse diagnostic paths come from the game camera. See [Untitled](Demo/Untitled/README.md)
+for controls, pipeline options and rendering limits.
+
 ## Build
 
 Install the Visual Studio or Build Tools **Desktop development with C++** workload, including MSVC x64, the Windows SDK, CMake and Ninja. The first configuration downloads pinned GLFW and GoogleTest dependencies; subsequent configurations reuse each build directory's downloads. The OpenGL loader is included as fixed C source, and shader embedding uses CMake directly. No Python installation or packages are required.
@@ -24,6 +38,14 @@ All maintained files use two spaces for indentation, as configured in `.editorco
 
 ## Demo and build options
 
+`Demo/Untitled` is the playable HD-2D game prototype. Build/run `Untitled.exe` for
+camera-relative WASD movement, Q/E eight-direction camera rotation, Idle/Walk
+sprites, collision and path-traced shadows. It caps presentation at 24 FPS, defaults
+to GPU PathTrace at 480×320 inside a 960×640 window, and enables engine debug shortcuts.
+All thirteen Hormelz character animation packs are bundled inside its own Assets folder.
+See [Untitled](Demo/Untitled/README.md) for controls, performance options and asset details.
+The original `JadeDemo` showcase has moved to `Demo/Showcase`, preserving its scenes and CLI.
+
 ```powershell
 & ./build/windows-debug/bin/JadeDemo.exe
 
@@ -37,9 +59,9 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4`; `--frames N` can be combined with it. F1/I independently toggle Wireframe/image rendering.
+Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4`; `--frames N` can be combined with it. F1 toggles wireframe and I cycles Raster/Hybrid/RayTracing/None.
 
-F3 toggles axes and cyan AABBs together. F5 enables the ray image and switches Color/Normal output. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. Demo RayTracing uses resolutionScale 1.0; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and middle dragging pans the orthographic view. Q/E are unbound. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
+F3 toggles axes and cyan AABBs together. F5 switches Color/Normal output without changing pipeline. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. Demo RayTracing uses resolutionScale 1.0; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and middle dragging pans the orthographic view. Q/E are unbound. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -47,7 +69,7 @@ F3 toggles axes and cyan AABBs together. F5 enables the ray image and switches C
 int main()
 {
   Jade::EngineConfig config;
-  config.debug.shortcuts = true; // Enable Application F3/F4/F5/O shortcuts; F1/I always work.
+  config.debug.shortcuts = true; // Enable Application F2/F3/F4/F5/O shortcuts; F1/I always work.
   Jade::Application app(config);
   auto scene = std::make_shared<Jade::Scene>();
 
@@ -326,7 +348,7 @@ JadeDemo --cpu --scene 1
 JadeDemo --gpu --scene 3 --frames 8
 ```
 
-`--cpu` and `--gpu` are mutually exclusive, select execution and set `rayTracing.enabled = true`. F5 enables the ray image and toggles Color/Normal output when debug shortcuts are enabled; no prior I press is needed. Sampling and bounce controls belong to `RayTracingSettings`; Demo no longer exposes `--output`, `--bounces`, `--rr-start`, `--samples` or `--frame-samples`. `--frames N` limits application frames, `--scene 1|2|3|4` selects the initial scene and `--help` lists options. The old `--renderer` option is removed. Without an execution flag Demo retains its CPU-selected wireframe startup; I/F1 independently toggle image/Wireframe.
+`--cpu` and `--gpu` are mutually exclusive, select execution and set `rayTracing.enabled = true`. F5 toggles Color/Normal output for the selected pipeline when debug shortcuts are enabled. Sampling and bounce controls belong to `RayTracingSettings`; Demo no longer exposes `--output`, `--bounces`, `--rr-start`, `--samples` or `--frame-samples`. `--frames N` limits application frames, `--scene 1|2|3|4` selects the initial scene and `--help` lists options. The old `--renderer` option is removed. Without an execution flag Demo retains its CPU-selected wireframe startup; I cycles Raster/Hybrid/RayTracing/None; F1 independently toggles wireframe.
 
 ```cpp
 Jade::EngineConfig config;
@@ -432,7 +454,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-Bare F1 (Mesh wireframe) and I (image rendering) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F3 (axes/AABBs), F4 (physics/forces/logs), F5 (Color/Normal) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
+Bare F1 (mesh wireframe) and I (Raster/Hybrid/RayTracing/None cycle) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F2 (soul observation camera), F3 (scene axes/AABBs/BVH/frustums/lights), F4 (physics/forces/logs), F5 (Color/Normal) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
 
 ## Events and controls
 
@@ -477,7 +499,7 @@ scene->on<Jade::SceneDeactivated>([&] { dragging = false; });
 scene->on<Jade::SceneActivated>([&] { dragging = false; });
 ```
 
-`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape/F1/I and enabled F3/F4/F5/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
+`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape/F1/I and enabled F2/F3/F4/F5/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
 
 Deactivation runs before committing the pointer; activation runs after. Lifecycle Stop ends listener propagation but does not cancel the switch. Reentrant selections queue another switch. A deactivation exception retains the old scene; an activation exception retains the new scene. Both discard pending requests and propagate the original exception. Application destruction releases ownership without calling lifecycle callbacks. One scene can be active/reserved in only one Application at a time.
 
@@ -496,6 +518,8 @@ Public interfaces are split by purpose, with one optional includes-only entry po
 | Renderer/Common/ | RenderSettings, RenderProgress, SceneSnapshot, camera, HDR Film and Image |
 | Renderer/RayTracing/ | ProgressiveBackend, RayTracing, RayScene/Compiler, RayQuery, Integrator, BSDF and Sampler |
 | Assets/ | Assets, AssetHandle and MeshHandle |
+| Animation/, Graphics/Texture.hpp, Graphics/SpriteRenderer.hpp | Timed sprite clips, Animator, Animation::System, PNG textures and SpriteRenderer |
+| Physics/CharacterController.hpp | Planar character movement and static-collider sliding without RigidBody |
 | Input/, Events/ | Key/button bindings and event contracts |
 | Application.hpp, Color.hpp, Log.hpp, WindowConfig.hpp | Application loop and value/configuration types |
 
@@ -503,7 +527,7 @@ There are no folder aggregation headers. Source `.cpp` files include their match
 
 ## Frame scheduling and logs
 
-`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setRayTracingEnabled(false)` bypasses ray computation. Wireframe, axes and physics overlays remain independent of it. Demo starts with image rendering off, Wireframe on and axes disabled.
+`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setRayTracingEnabled(false)` bypasses ray computation. Wireframe, axes and physics overlays remain independent of it. Showcase starts in None with wireframe on and axes disabled; Untitled starts in Raster with engine debug shortcuts enabled.
 
 ```text
 15:27:07.591522  INFO [Application] - Ready: window=960x640 target_fps=24 vsync=off
@@ -639,6 +663,8 @@ Jade/src/Math/       # Matrix4, Quaternion
 Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
 Jade/src/Renderer/   # Common/ snapshots/images and RayTracing/ transport
+Jade/src/internal/Renderer/Pipeline/ # Shared render passes and built-in pipelines
+Jade/src/internal/Renderer/Device/OpenGL/ # Raster, compute, presentation and line execution
 Jade/src/internal/   # Registry, ProgressiveSession, display/line shaders, platform and input
 Demo/               # Showroom, three-body orbit, pyramid/drop and destruction wall
 assets/             # Bunny OBJ and attribution

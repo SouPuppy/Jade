@@ -13,6 +13,12 @@ PathIntegrator::PathIntegrator(PathIntegratorConfig config) : m_Config(config)
 
 LinearRGB PathIntegrator::Li(const Ray &initial, const RayScene &scene, Sampler &sampler) const
 {
+  return evaluate(initial,scene,sampler,nullptr);
+}
+LinearRGB PathIntegrator::record(const Ray& initial,const RayScene& scene,Sampler& sampler,std::vector<PathSegment>& segments) const {
+  return evaluate(initial,scene,sampler,&segments);
+}
+LinearRGB PathIntegrator::evaluate(const Ray& initial,const RayScene& scene,Sampler& sampler,std::vector<PathSegment>* segments) const {
   LinearRGB radiance, throughput{1, 1, 1};
   Ray ray = initial;
   bool previousDelta = true;
@@ -20,8 +26,15 @@ LinearRGB PathIntegrator::Li(const Ray &initial, const RayScene &scene, Sampler 
   Vec3 previousPosition;
   for (std::uint32_t depth = 0;; ++depth) {
     SurfaceHit hit;
-    if (!scene.intersect(ray, hit))
+    if (!scene.intersect(ray, hit)) {
+      if(segments) segments->push_back({ray.at(ray.tMin),ray.at(std::min(ray.tMax,30.f)),PathSegmentKind::Escape});
       break;
+    }
+    if(segments) segments->push_back({ray.at(ray.tMin),hit.position,depth==0?PathSegmentKind::Primary:PathSegmentKind::Bounce});
+    if (scene.unlit(hit)) {
+      radiance += throughput * scene.spriteSample(hit).color;
+      break;
+    }
     const auto &material = scene.material(hit);
     if (material.twoSidedEmission || hit.frontFace) {
       const float weight =
@@ -55,7 +68,12 @@ LinearRGB PathIntegrator::Li(const Ray &initial, const RayScene &scene, Sampler 
             const float length = Math::length(target);
             shadow.direction = Math::unit(target);
             shadow.tMax = std::nextafter(length, 0.0f);
-            if (!scene.occluded(shadow)) {
+            const bool blocked=scene.occluded(shadow);
+            if(segments) {
+              SurfaceHit blocker;const bool found=blocked && scene.intersect(shadow,blocker);
+              segments->push_back({shadow.origin,found?blocker.position:shadow.at(shadow.tMax),blocked?PathSegmentKind::ShadowBlocked:PathSegmentKind::ShadowVisible});
+            }
+            if (!blocked) {
               const float weight = Math::powerHeuristic(lightPdf, bsdf.pdf(outgoing, direction));
               radiance += throughput * value * emitter.emission *
                           (std::abs(dot(normal, direction)) * weight / lightPdf);
@@ -63,6 +81,34 @@ LinearRGB PathIntegrator::Li(const Ray &initial, const RayScene &scene, Sampler 
           }
         }
       }
+    }
+    if(!bsdf.delta()) for(const auto& light:scene.lights()) {
+      Vec3 target=light.position;
+      float area=1;
+      if(light.type==LightType::Area) {
+        const auto u=sampler.next2D();
+        target=target+light.right*((u.x-.5f)*light.size.x)+light.up*((u.y-.5f)*light.size.y);
+        area=light.size.x*light.size.y;
+      }
+      const auto delta=target-hit.position;
+      const float distance=light.type==LightType::Directional?10000.f:Math::length(delta);
+      if(distance<=0) continue;
+      const auto direction=light.type==LightType::Directional?-light.direction:delta*(1/distance);
+      auto irradiance=light.intensity;
+      if(light.type!=LightType::Directional) irradiance=irradiance*(area/(distance*distance));
+      if(light.type==LightType::Area) {
+        const auto cosine=dot(light.direction,-direction);
+        irradiance=irradiance*(light.twoSided?std::abs(cosine):std::max(0.f,cosine));
+      }
+      const auto value=bsdf.evaluate(outgoing,direction);
+      if(value.maximum()<=0 || irradiance.maximum()<=0) continue;
+      auto shadow=hit.spawn(direction);shadow.tMax=std::nextafter(distance,0.f);
+      const bool blocked=scene.occluded(shadow);
+      if(segments) {
+        SurfaceHit blocker;const bool found=blocked && scene.intersect(shadow,blocker);
+        segments->push_back({shadow.origin,found?blocker.position:shadow.at(std::min(shadow.tMax,30.f)),blocked?PathSegmentKind::ShadowBlocked:PathSegmentKind::ShadowVisible});
+      }
+      if(!blocked) radiance+=throughput*value*irradiance*std::abs(dot(normal,direction));
     }
     const auto sample = bsdf.sample(outgoing, sampler);
     if (!(sample.pdf > 0) || !sample.value.finite() || sample.value.maximum() == 0)

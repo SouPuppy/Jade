@@ -1,13 +1,13 @@
 #include <Jade/Renderer/RayTracing/ComputeRayTracer.hpp>
-#include "Settings.hpp"
-#include "Emitters.hpp"
+#include "../../../../Renderer/RayTracing/Settings.hpp"
+#include "../../../../Renderer/RayTracing/Emitters.hpp"
 #include <Jade/Log.hpp>
-#include "../Common/Math.hpp"
-#include "../../internal/Renderer/Device/OpenGL/OpenGLComputeDevice.hpp"
-#include "../../internal/Renderer/Device/OpenGL/GpuFrame.hpp"
-#include "../../internal/Renderer/Device/OpenGL/OpenGLProgram.hpp"
-#include "../../internal/Renderer/RaySceneAccess.hpp"
-#include "../../internal/Mesh/MeshAccess.hpp"
+#include "../../../../Renderer/Common/Math.hpp"
+#include "OpenGLComputeDevice.hpp"
+#include "GpuFrame.hpp"
+#include "OpenGLProgram.hpp"
+#include "../../RaySceneAccess.hpp"
+#include "../../../Mesh/MeshAccess.hpp"
 #include "JadeShaders.hpp"
 #include <array>
 #include <mutex>
@@ -21,10 +21,11 @@ struct alignas(16) Float4 { float x = 0, y = 0, z = 0, w = 0; };
 struct GpuNode { Float4 low, high; std::array<std::uint32_t, 4> links; };
 struct GpuTriangle { Float4 a, b, c, na, nb, nc; };
 struct GpuInstance { Matrix4 model, inverse; std::array<std::uint32_t, 4> mesh{}; };
-struct GpuMaterial { Float4 color, emission, properties; };
+struct GpuMaterial { Float4 color, emission, properties, region; std::array<std::uint32_t, 4> texture{}; };
 struct GpuEmitter { Float4 a, b, c, normal, emission; };
+struct GpuLight { Float4 position,direction,intensity,right,up; };
 static_assert(sizeof(GpuNode) == 48 && sizeof(GpuTriangle) == 96 && sizeof(GpuInstance) == 144 &&
-              sizeof(GpuMaterial) == 48 && sizeof(GpuEmitter) == 80);
+              sizeof(GpuMaterial) == 80 && sizeof(GpuEmitter) == 80);
 Float4 pack(Vec3 value) { return {value.x, value.y, value.z, 0}; }
 Float4 pack(LinearRGB value, float w = 0) { return {value.r, value.g, value.b, w}; }
 std::uint32_t indexOf(std::size_t index)
@@ -58,24 +59,26 @@ struct ComputeRayTracer::Impl {
   RayTracingSettings config;
   OpenGLComputeDevice device;
   std::unique_ptr<OpenGLProgram> program;
-  std::array<GLuint, 8> buffers{};
+  std::array<GLuint, 10> buffers{};
   GLuint texture = 0, accumulation = 0;
   ImageSize textureSize, accumulationSize;
   bool shared;
   std::array<std::shared_ptr<GpuFrame>, 3> frames;
-  std::uint32_t emitterCount = 0;
+  std::uint32_t emitterCount = 0, lightCount = 0;
   GLint64 maximumBufferBytes = 0;
   GLint maximumTextureSize = 0;
   std::mutex renderMutex;
   RayScene previous;
   bool uploaded = false;
   std::vector<RenderInstance> layout;
+  std::vector<std::shared_ptr<const Texture>> textureLayout;
+  std::unordered_map<const Texture*, std::uint32_t> textureOffsets;
   struct MeshRange { std::uint32_t root, triangle; };
   std::unordered_map<const void *, MeshRange> meshes;
   std::vector<GpuNode> blasNodes;
   std::vector<std::uint32_t> blasOrder;
   std::uint32_t tlasRoot = Invalid;
-  std::array<GLint, 17> uniforms{};
+  std::array<GLint, 18> uniforms{};
 
   explicit Impl(RayTracingSettings input, bool shareWithCurrent) : config(input), device(shareWithCurrent), shared(shareWithCurrent)
   {
@@ -86,7 +89,7 @@ struct ComputeRayTracer::Impl {
       glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
       const char *names[] = {"imageSize", "cameraPosition", "cameraRight", "cameraUp", "cameraForward",
                             "lens", "tlasRoot", "normalShading", "jitter", "seed", "sampleIndex", "emitterCount",
-                            "maxBounces", "rrStartBounce", "pathTracing", "accumulate", "sampleWeight"};
+                            "maxBounces", "rrStartBounce", "pathTracing", "accumulate", "sampleWeight", "lightCount"};
       for (std::size_t i = 0; i < std::size(names); ++i) uniforms[i] = program->Uniform(names[i]);
       glGenBuffers(static_cast<GLsizei>(buffers.size()), buffers.data());
       glGenTextures(1, &texture);
@@ -198,12 +201,40 @@ struct ComputeRayTracer::Impl {
       }
       upload(3, gpuInstances); upload(6, emitterMap);
     }
+    std::vector<std::shared_ptr<const Texture>> textures;
+    for (const auto& instance : instances)
+      if (instance.texture && std::find(textures.begin(), textures.end(), instance.texture) == textures.end())
+        textures.push_back(instance.texture);
+    if (textures != textureLayout) {
+      std::vector<std::uint32_t> texels;
+      textureOffsets.clear();
+      for (const auto& source : textures) {
+        textureOffsets.emplace(source.get(), indexOf(texels.size()));
+        const auto& rgba = source->pixels();
+        for (std::size_t i = 0; i < rgba.size(); i += 4)
+          texels.push_back(static_cast<std::uint32_t>(rgba[i]) | (static_cast<std::uint32_t>(rgba[i+1]) << 8) |
+            (static_cast<std::uint32_t>(rgba[i+2]) << 16) | (static_cast<std::uint32_t>(rgba[i+3]) << 24));
+      }
+      upload(8, texels);
+      textureLayout = textures;
+    } else if (!uploaded && textures.empty()) upload(8, std::vector<std::uint32_t>{});
     std::vector<GpuMaterial> materials;
-    for (const auto &instance : instances)
+    for (const auto &instance : instances) {
+      const auto& region = instance.region;
+      const auto& source = instance.texture;
       materials.push_back({pack(instance.material.baseColor, instance.material.roughness),
         pack(instance.material.emission, instance.material.twoSidedEmission ? 1.0f : 0.0f),
-        {instance.material.ior, static_cast<float>(instance.material.model), 0, 0}});
+        {instance.material.ior, static_cast<float>(instance.material.model), instance.alphaCutoff, instance.unlit ? 1.0f : 0.0f},
+        {region.x, region.y, region.width, region.height},
+        {source ? textureOffsets.at(source.get()) : Invalid, source ? static_cast<std::uint32_t>(source->width()) : 0,
+          source ? static_cast<std::uint32_t>(source->height()) : 0, 0}});
+    }
     upload(4, materials);
+    std::vector<GpuLight> lights;
+    for(const auto& l:scene.lights()) lights.push_back({pack(l.position),pack(l.direction),pack(l.intensity,static_cast<float>(l.type)),
+      {l.right.x,l.right.y,l.right.z,l.size.x},{l.up.x,l.up.y,l.up.z,l.size.y}});
+    for(std::size_t i=0;i<lights.size();++i) {lights[i].position.w=scene.lights()[i].twoSided?1.f:0.f;}
+    lightCount=indexOf(lights.size());upload(9,lights);
     checkGl();
     CheckCancellation(cancellation);
     layout = instances; previous = scene; uploaded = true;
@@ -251,6 +282,7 @@ struct ComputeRayTracer::Impl {
     glUniform1ui(u[11], emitterCount); glUniform1ui(u[12], config.maxBounces); glUniform1ui(u[13], config.rrStartBounce);
     glUniform1i(u[14], config.mode == RayMode::PathTrace); glUniform1i(u[15], progressive);
     glUniform1f(u[16], static_cast<float>(1.0 / (static_cast<double>(request.sampleIndex) + 1)));
+    glUniform1ui(u[17],lightCount);
     device.bindImage(output); device.bindImage(accumulation, 1, GL_READ_WRITE);
     device.dispatch(static_cast<GLuint>((request.size.width + 7) / 8), static_cast<GLuint>((request.size.height + 7) / 8));
     device.readbackBarrier();

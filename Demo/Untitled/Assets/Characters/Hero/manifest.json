@@ -1,0 +1,721 @@
+﻿{
+    "source":  "https://hormelz.itch.io/8-directional-char",
+    "author":  "Hormelz",
+    "license":  "CC0-1.0",
+    "downloaded":  "2026-10-11",
+    "archives":  [
+                     {
+                         "file":  "GirlSampleBlock.rar",
+                         "bytes":  51734,
+                         "sha256":  "36206ddf54d03b448226c59c52e47527d3e41c3dee731c3689df598a40d57233"
+                     },
+                     {
+                         "file":  "GirlSampleBoost.rar",
+                         "bytes":  185462,
+                         "sha256":  "f11b35d0afda6256e4290cab7fc30d3249b558b7422560fbe9d77fa6defacc9e"
+                     },
+                     {
+                         "file":  "GirlSampleFireball.rar",
+                         "bytes":  266014,
+                         "sha256":  "f81ae14ab3c668f8d1ea2f43ff069c3902530bc3cac4abb6b38cf5f3012660c6"
+                     },
+                     {
+                         "file":  "GirlSampleJump.rar",
+                         "bytes":  141708,
+                         "sha256":  "c1c2e41aa8ad64e5465eb8a40a7a00dd91524389fdb424fa2a1d0020eba78492"
+                     },
+                     {
+                         "file":  "GirlSampleMeleeAttack.rar",
+                         "bytes":  132228,
+                         "sha256":  "bdfb7c57c49f98ec54f0a7deba02503e2c41b318d76af95a38796597f04f6177"
+                     },
+                     {
+                         "file":  "GirlSampleReadyIdle.rar",
+                         "bytes":  116239,
+                         "sha256":  "e7f6396d17e536e8f8a0f1248854c5731b8ab19d1b22a7224f65f50325f08431"
+                     },
+                     {
+                         "file":  "GirlSampleRun.rar",
+                         "bytes":  70174,
+                         "sha256":  "5b8feafa171e06f004700652f1268dfc08f154138fbabe5c600c20bf63fdfaca"
+                     },
+                     {
+                         "file":  "GirlSample_Damaged.rar",
+                         "bytes":  132665,
+                         "sha256":  "8afa9ac2c38bbcd07d8d276b5bd2f377400e7b99ed2691dd8ee628bf83f31222"
+                     },
+                     {
+                         "file":  "GirlSample_Death.rar",
+                         "bytes":  314369,
+                         "sha256":  "957cd68bc3e5574bfb8d2eeabeefac90851cf5aef565c7163c540173b269493b"
+                     },
+                     {
+                         "file":  "GirlSample_Push_256Fix.rar",
+                         "bytes":  201381,
+                         "sha256":  "5ea368474e9503f5d253569933d0531bb290a8908535d0c0da01b56d8a920ab9"
+                     },
+                     {
+                         "file":  "GirlSample_Roll_256Fix.rar",
+                         "bytes":  140658,
+                         "sha256":  "7e9bfa81354811b7717a04faccc1ca4959c6cf4f25d19989116a15902a4baa15"
+                     },
+                     {
+                         "file":  "GirlSample_RunningJump_256Fix.rar",
+                         "bytes":  110863,
+                         "sha256":  "d8e3cc7dc4eb55668d16535635032bace6e5b6abb9f9c7512e49e0e8f6c874cd"
+                     },
+                     {
+                         "file":  "GirlSample_Walk_256Fix.rar",
+                         "bytes":  109317,
+                         "sha256":  "21292d57fc9c10e83eef11b94240d62dcd33b0e18fe075e67ce6866f471f3721"
+                     }
+                 ],
+    "sheets":  [
+                   {
+                       "file":  "GirlSample_Block_Down.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "293a074d2d324682a31450779df7856fe375c82f50360f81d1e294a2282b666a"
+                   },
+                   {
+                       "file":  "GirlSample_Block_DownLeft.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "90f518e35ee5b252fbdc26fad4305a73feb39f0068783266bde20e9508c5a2d2"
+                   },
+                   {
+                       "file":  "GirlSample_Block_DownRight.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "c04dc16c676a072a7bc53535b0a7697ced3a3df7c11c5cd7a36c60cf1c734150"
+                   },
+                   {
+                       "file":  "GirlSample_Block_Left.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "b6b9d0f7311126def78f7c2da31a190cc2c8b4ce4a16a2389b43892aec17dc39"
+                   },
+                   {
+                       "file":  "GirlSample_Block_Right.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "88d0b7b5894b23d36328c7eaa248a246525fb4aa2c20a10a708d14936d160596"
+                   },
+                   {
+                       "file":  "GirlSample_Block_Up.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "47ef444eaea66c8ab652b0d420eab4dd5ab5bea0ce6e8db170462768a8faad03"
+                   },
+                   {
+                       "file":  "GirlSample_Block_UpLeft.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "68afbfe1a28f07fbf578dba6852b47413c3fd0a29e879b9e1f1d17e06a8bec9e"
+                   },
+                   {
+                       "file":  "GirlSample_Block_UpRight.png",
+                       "width":  1024,
+                       "height":  256,
+                       "sha256":  "116204aca21429fba1f407a8077a3944a6d47fd846191735e78c2b43c9f4b42e"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_Down.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "133e3a2027becdab33ed7049e2c38943eb3b4e65663dff1c1690e7d24ad46b43"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_DownLeft.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "313718ce69b381e28b7b138f5cb8ab11d1a89e0533557541eb8f9aeba07e4478"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_DownRight.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "5906f6fef2c6540b75a883971fecfbd0aa0d27ab51d9d42f751555583153b1e3"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_Left.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "9d83fb3a5f7124b938a44dc57e1c88ec3863983a083b14476b958e61cbde7c3a"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_Right.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "6aa319aaedf63a87ac12b9f4f8df7bd1621d6496621c1f699f2546d17021fda8"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_Up.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "c2eab3bbb502c48f88a3e8eae67aa4144ecdd398c450be2be9b122ef92870ec8"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_UpLeft.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "cf62cd5ef6b38d68ba50af139a902bf4d025e604053f10cf15e94f847a76c21a"
+                   },
+                   {
+                       "file":  "GirlSample_Boost_UpRight.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "b27679741e1740d209ccd65a46bfa07540b079f74d3afafc33d65e36af253497"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_Down.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "61bcca4b8992e60225c1d561e01a869ccafe9c54a2f467ae7dff624f2971db9f"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_DownLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "64e7792ce4d92f802b9a1b4d8381ecdf980c3abd0442c731a0e8b709af477c45"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_DownRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "b0db25e99b8fa2e23ae6b3b340aecbe291fe95436bf37c5bd8f8ab858abf855f"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_Left.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "76c105f7beb61b30d1965332369d0ca0226e27159e182b91d4c2b994299d92b9"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_Right.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "78824b8a34644cd8dc6975e59a54a24f7dc3cb65f2a68468bd4ede82148d1e25"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_Up.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "ba632881e65e76ba2f0bdc4af85844d14d8fa7610294f05b6a50fdc180880167"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_UpLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "35cb33824503db31aa3b41a40d66b508c6c9ebbd426b90f687510aaed5e9cb19"
+                   },
+                   {
+                       "file":  "GirlSample_Damaged_UpRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "23958c0b95a702ea2f5bdd3ed1b16dcdbfe58e5b827334a7ed128f705a65fa41"
+                   },
+                   {
+                       "file":  "GirlSample_Death_Down.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "deea203b7d15d41a2981b80cc72e38de1324a32461496b78411cec10a74eee78"
+                   },
+                   {
+                       "file":  "GirlSample_Death_DownLeft.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "2b1a695fb9fb75e1df4dcf8f870ea4584ec30819e103a97c7213641ccc2067ae"
+                   },
+                   {
+                       "file":  "GirlSample_Death_DownRight.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "437d4d54b5346c1a6e3a1208e1ff1d984e33acbd74b55e92b8b252673be294d7"
+                   },
+                   {
+                       "file":  "GirlSample_Death_Left.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "99db98b09ad8d7b49763ac06bba743aca58a200e300c2828e879eba6affcaa81"
+                   },
+                   {
+                       "file":  "GirlSample_Death_Right.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "4a7d9d306e703acb4d5b2e6abed08060e64cbae4c762ee03274dbd579840573b"
+                   },
+                   {
+                       "file":  "GirlSample_Death_Up.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "39fd76922709a2da768dbae281a8f020ee7e6d73718f85eca1a369fcebba18f5"
+                   },
+                   {
+                       "file":  "GirlSample_Death_UpLeft.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "d7fa8093b40609489dfeec664fa5afccd3da3ab3e7b3132bacfd8d2ea6feb9cc"
+                   },
+                   {
+                       "file":  "GirlSample_Death_UpRight.png",
+                       "width":  1024,
+                       "height":  1792,
+                       "sha256":  "df98c954ada14013cfc0fe3bde1cead2cc9cd2667cb47179521fa07d66454376"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_Down.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "60c803b0bb72f6a94f791e4c8db2eca3d61c9329f1c4565e33e2c4e0a14ed646"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_DownLeft.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "d4e71a8563b2b2f4de3e2b338061ea5e0f6ce10fc20b167b88bc8d330ef75ebe"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_DownRight.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "e2e9e8b42610f5dc2406d8baf0ec3709227ce8356819ac0a1ed83df77cb5bb01"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_Left.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "4ff7ec8c4d458d0fa983ebaa06055c03995f322eddc1d37dfb4f7598755854b5"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_Right.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "12b2cb2168b1041e2b9b06107e9fb7019bd32c866b30a1bec328a1dcbef654c2"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_Up.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "ef57595a3c8df770b72b0913b7f8056b6bd05b8c9040e3fc1c618e625bcd9cd0"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_UpLeft.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "9617c9c400e962d819118430282f82cce76ccd283f504209809d652693999463"
+                   },
+                   {
+                       "file":  "GirlSample_Fireball_UpRight.png",
+                       "width":  1024,
+                       "height":  1536,
+                       "sha256":  "05306a3a34e329b0d2d52716f1dc493717c7884484117a3475b6516146a3997d"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_Down.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "31f94eae69763593d254ee9efa473f8fcced447695575458f3cef3265bd060bf"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_DownLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "c56044c150e51301605a1781839bac28c578f9ef9d99a7a307e1718e01cb249a"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_DownRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "37f33856e146e96c956c8565c176d2349d66e7dc6ec2fc7f1a1c78bc9499c831"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_Left.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "0c1f58bf178c6004b2260be27c4bec964ca7b1a3bad60230329b75440811c222"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_Right.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "ed2de8b8899e8cc2213c98028f14e10ae7cf368e85de08f651d7fcead1d9bd71"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_Up.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "d4077cdf12762087d6e099856db7d2a95eb4dbbd550a8166050870f9a07c1acc"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_UpLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "ebd976928ad153f38d641330b1606f78e66d1da28bfbff68d2709f5052e15fb7"
+                   },
+                   {
+                       "file":  "GirlSample_Jump_UpRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "293f7f38b5522920d063432bcc6451423e412d14b862515948755038377dab85"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_Down.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "2623082f629a22b25770622210e726fce80e71954bb2e86fdb7629bc88fb091d"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_DownLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "50cceac72f476385647ff027426fb755e3cf8456da4de8db7d2e6eb652d2eb28"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_DownRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "356a9bbe2ada42460adc98854f215bd5c6f5d0bf44db4cb79a3ba053a4f8bea0"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_Left.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "2491d7a832c3b6e51c8ad48023de49ec21de412addb74726823294e7f21a3a4a"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_Right.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "da4ad72c9e7a90fd3e74159b5c1f05e1b969ceac2683bb981015696b9462741b"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_Up.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "7870880d29ade7dfb46221a371756d4b95f468d1954719cc4f16def583cc2ef7"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_UpLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "e2a8f2312de1f6dfd4ca8ca46447a3225d8fc7eca8461baa770a3a5f896b19de"
+                   },
+                   {
+                       "file":  "GirlSample_Melee_UpRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "aead0c99fdcb006e3aa2477e4d1b4cf940e0e9b7d0a4c9b1fdd07ba56660eaaf"
+                   },
+                   {
+                       "file":  "GirlSample_Push_Down.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "89799e6eb4c7f3d0e7264ca8e27e71242f704f5af95a77a1482f1c069d0bcdee"
+                   },
+                   {
+                       "file":  "GirlSample_Push_DownLeft.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "7bc6ba6967c4a3165a1072d252021bcc0644e4c7751dc3b945528485ba093aec"
+                   },
+                   {
+                       "file":  "GirlSample_Push_DownRight.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "174d55009baf7cdd74efdf7e48fbf497d1fdd1057235f665634f5276ba85f08f"
+                   },
+                   {
+                       "file":  "GirlSample_Push_Left.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "747fc928251bd58fbb6f2fdf44f491102fa42ea7a03a19b9fb27f3ff8e30d746"
+                   },
+                   {
+                       "file":  "GirlSample_Push_Right.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "84743cf9d7b6d3c61a2fb1829e98578b9ccbbc7405b6facdb19c467959fe67f6"
+                   },
+                   {
+                       "file":  "GirlSample_Push_Up.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "c4c2b53b5bf95f120d78554322fc75de6b2f518e0f328a6923f71b12b040567c"
+                   },
+                   {
+                       "file":  "GirlSample_Push_UpLeft.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "f6a0d6bd7426bc424011a7c5eae0568e0221fa3298a391e2e8589ff48dddae21"
+                   },
+                   {
+                       "file":  "GirlSample_Push_UpRight.png",
+                       "width":  1024,
+                       "height":  1280,
+                       "sha256":  "250ff9c73cb64b27e8f90c91e1921d385a8dcbe868e1931ffa4c08f59fd0db3a"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_Down.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "de659503db5ebef199576aece256248f9d822e2464b68eaf8715f428aeb124ef"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_DownLeft.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "d5bcae42c0c6576f620fdd9cb0a290d9ca46d7e9671e340e7ac4faf20963cc41"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_DownRight.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "5ba21aec0ca8c6990ad7f96d06da26d351abd8ab4d1ff72704aeb5c3c5a4983e"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_Left.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "818559f5a7d932fc555bd869f885523f61d0870c397f6298f27c7ef3136e7212"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_Right.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "21189d4195d13fd39b24c585c87716c99c79fb93e7497847370794354b92b075"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_Up.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "26c010b2ca788a38f7d52c10423e474a712fcca5d365beecfe7a94166069045c"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_UpLeft.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "34a5a9a06aeb2b430acbedecc9a0a204d576f0b60492dbf6887f0f109fbc16b7"
+                   },
+                   {
+                       "file":  "GirlSample_ReadyIdle_UpRight.png",
+                       "width":  1024,
+                       "height":  1024,
+                       "sha256":  "9a487352a430c6d2f87a66d43f5854789b6ef8138eb8df934e83243ebac69a2b"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_Down.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "25cc811fc11a6a0f29a307504e84e5f7c9abac7058305aa2cc4bf50acbccd639"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_DownLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "31614550bacaf3ab6813c953ce983f72c8cb8123a49dea63e2412430e83fef48"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_DownRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "f73c1f799b5dbdf3becf3b691b4dc99a0bc8f5446bfc85124689a13d24448e84"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_Left.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "3f78dfef347815873dc7005ee0e5afc60b5743f8aa57b9415e61d90edc137a0e"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_Right.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "a61cc72eba04fa831dbf4de6eab4a381710d4162aecb5c67ebcd066dcbbb6418"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_Up.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "467ce0d3a009d29aa38420947826e780fd30d28db864007bc1402a20ff310c13"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_UpLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "a4d3fc70832fc218e6b34410f035f5aaafa502bbc997ba8b05b100b842b62768"
+                   },
+                   {
+                       "file":  "GirlSample_Roll_UpRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "156b11a655dcabad23ee2b2b7fca962387932d38a30c634f215704fc18911eeb"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_Down.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "60b00240964eee0f5695a094fa881d45bb4e765ffe203948c25c93aa990e8d2a"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_DownLeft.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "6142f84beff19204e8e7702d216ded3ee51862534b843bb6657114271ce40ed7"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_DownRight.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "046a596d8f75ff9af69780148e8befcb5a11532dd1c79e417d2e95e976ddde72"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_Left.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "9706d5bb73646073994c16ed1fe4c23fa27cc7282c260731deac9d165efa1dcb"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_Right.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "0a56a7a6b68ac6d30eb752a753fc1d54fd9ab81697539ed3c6a6d1080719e6ef"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_Up.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "f1b301d367b84128929076712c2b18705619592f6bc69db9ba4ab3efd901eb0e"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_UpLeft.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "af36f1bc4f1994f091c9e0d638c578dd81b795358dacb078e156e781931dd4c1"
+                   },
+                   {
+                       "file":  "GirlSample_RunningJump_UpRight.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "a5daaf1079b5e0be6c6d4e169fb7b844dca5184b0641a7ec23adeb65198583ea"
+                   },
+                   {
+                       "file":  "GirlSample_Run_DowlLeft.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "1f0d997c482b319c389914b9e68a3779c7e1026ff8cedb9bdc6fe5ac8fb556cc"
+                   },
+                   {
+                       "file":  "GirlSample_Run_Down.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "e3231fbae0605cd0d58ac7a70dae30e7ad2d265840b13aafd2c0e4d86454fd57"
+                   },
+                   {
+                       "file":  "GirlSample_Run_DownRight.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "f49a52a5c33cfad16495b38a8ab543a8710bb63f5fe3ceda948682e0105c7534"
+                   },
+                   {
+                       "file":  "GirlSample_Run_Left.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "c89d28e947913667ce52c4b5a5f53a41caf67d15207dddb923d68e989b884e69"
+                   },
+                   {
+                       "file":  "GirlSample_Run_Right.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "ddc7f7d35549bf1821c65afefba2e877479d4f5bbc7b28a33317342934a91f39"
+                   },
+                   {
+                       "file":  "GirlSample_Run_Up.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "806c49ec421da29ae185ff2142e14fa3692d786e821339cc73eb903efc1ddd4c"
+                   },
+                   {
+                       "file":  "GirlSample_Run_UpLeft.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "ca9789ffc10b4abbd494677c4ac0f9a68d584a1f9a73accae6ae281dc14395c7"
+                   },
+                   {
+                       "file":  "GirlSample_Run_UpRight.png",
+                       "width":  1024,
+                       "height":  512,
+                       "sha256":  "5770637d5d517a9a958c9a7e82b0feffca34d565782c674c11a4116eadf2f87b"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_Down.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "5f7ee1988005c7a4baa1ce0d828f0eb6b450029676decb93c6022da63e30dd0f"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_DownLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "ebc22954edc8451d0a677015e4ac3d12b07e879aefc70ded5d451b65c9db3454"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_DownRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "b499bb675b179ed8ffd0597558e43be6e60ec8a66f36d92be0032064692dee28"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_Left.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "d45dc59b7d4d87c1b304b01196309b09b1a92b4456046489b18464c6938fdfc9"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_Right.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "11b6dfd084a3355fbee6182f5fee1248ed30b9f1616fc31676a3f5b7258c480e"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_Up.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "9a0bc88ee262e66744edcf002355cee748a076b35147e28f6a0e1f11da3ff86f"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_UpLeft.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "e7ecd4846522d74b94c35549cdc2679999fe159ad43bb5386f6a697fced8aaf3"
+                   },
+                   {
+                       "file":  "GirlSample_Walk_UpRight.png",
+                       "width":  1024,
+                       "height":  768,
+                       "sha256":  "e50302d6e2d724676cf5945a042c34380c1b4e3463c7d354a459d78da3c2232e"
+                   }
+               ],
+    "runtime":  {
+                    "cellSize":  256,
+                    "columns":  4,
+                    "walkFrames":  9,
+                    "idleFrames":  14,
+                    "frameDurationSeconds":  0.083333333333333329,
+                    "timing":  "No source timing metadata; fallback 12 frames/second",
+                    "pivotPixelFromTopLeft":  [
+                                                  128,
+                                                  166
+                                              ],
+                    "directionOrder":  [
+                                           "Up",
+                                           "UpRight",
+                                           "Right",
+                                           "DownRight",
+                                           "Down",
+                                           "DownLeft",
+                                           "Left",
+                                           "UpLeft"
+                                       ]
+                }
+}

@@ -26,12 +26,29 @@ public:
   };
   std::vector<Entry> entries;
   std::unordered_map<std::filesystem::path, MeshHandle> meshes;
+  std::unordered_map<std::filesystem::path, TextureHandle> textures;
 };
 
 } // namespace Detail
 
 Assets::Assets() : m_Store(std::make_shared<Detail::AssetStore>()) {}
 Assets::~Assets() = default;
+
+TextureHandle Assets::LoadTexture(const std::filesystem::path& path)
+try {
+  const auto canonical = std::filesystem::weakly_canonical(std::filesystem::absolute(path));
+  if (const auto found = m_Store->textures.find(canonical); found != m_Store->textures.end()) return found->second;
+  auto texture = Texture::loadPng(canonical);
+  const auto [entry, inserted] = m_Store->textures.emplace(canonical, TextureHandle{});
+  (void)inserted;
+  try { entry->second = add(std::move(texture)); }
+  catch (...) { m_Store->textures.erase(entry); throw; }
+  try { logger << Log::debug("Loaded texture: {}", path.generic_string()); } catch (...) {}
+  return entry->second;
+} catch (const std::exception& error) {
+  try { logger << Log::error("Failed to load texture: {} reason={}", path.generic_string(), error.what()); } catch (...) {}
+  throw;
+}
 
 MeshHandle Assets::add(MeshData data)
 {
