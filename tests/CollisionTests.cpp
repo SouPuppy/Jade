@@ -438,6 +438,68 @@ TEST(CollisionDebug, ApplicationControlsAreOptInAndValidateOnlyWhenDisplayed)
   EXPECT_NO_THROW(app.Run({1}));
 }
 
+TEST(CollisionDebug, NearlyParallelBoxesDrawPersistentSolverAnchorsAndImpulses)
+{
+  Scene scene;
+  const auto a = add(scene, Box{}, {-1, 0, 0}), b = add(scene, Box{});
+  a.add<RigidBody>(); b.add<RigidBody>();
+  Physics::Config config; config.gravity = {};
+  Physics::System simulation(config);
+  simulation.step(scene, 1.0f / 120);
+  b.get<RigidBody>().angularVelocity = {0.0004f, 0.0006f, 0.0002f};
+  b.get<RigidBody>().velocity.z = 0.00012f;
+  for (int step = 0; step < 240; ++step) simulation.step(scene, 1.0f / 120);
+  const auto colliders = Detail::captureColliders(scene);
+  const auto debug = Detail::captureCollisionDebug(scene, false, false, true, &simulation);
+  ASSERT_EQ(debug.contacts.size(), 1u);
+  const auto& manifold = debug.contacts.front();
+  ASSERT_EQ(simulation.contacts().size(), 1u);
+  ASSERT_EQ(manifold.points.size(), 4u);
+  EXPECT_GT(manifold.normal.x, 0.99f);
+  constexpr std::size_t markerVertices = 3 * 16 * 2;
+  ASSERT_EQ(debug.points.size(), manifold.points.size() * markerVertices);
+  ASSERT_EQ(debug.normals.size(), manifold.points.size() * 6);
+  for (std::size_t i = 0; i < manifold.points.size(); ++i) {
+    const auto& contact = manifold.points[i];
+    const auto& solved = simulation.contacts().front().points[i];
+    EXPECT_EQ(contact.pointA, solved.pointA); EXPECT_EQ(contact.pointB, solved.pointB);
+    EXPECT_FLOAT_EQ(contact.normalImpulse, solved.normalImpulse);
+    EXPECT_EQ(contact.frictionImpulse, solved.frictionImpulse);
+    for (std::size_t body = 0; body < 2; ++body) {
+      const auto p = body == 0 ? contact.pointA : contact.pointB;
+      const auto& box = colliders[body];
+      const auto offset = Detail::CollisionVector{p.x, p.y, p.z} - box.center;
+      double surfaceDistance = std::numeric_limits<double>::infinity();
+      for (std::size_t axis = 0; axis < 3; ++axis) {
+        const double coordinate = std::abs(Detail::collisionDot(offset, box.axes[axis]));
+        EXPECT_LE(coordinate, box.halfExtents[axis] + 1e-4);
+        surfaceDistance = std::min(surfaceDistance, std::abs(coordinate - box.halfExtents[axis]));
+      }
+      EXPECT_LT(surfaceDistance, 1e-4);
+      // A tiny rotation must not replace corner anchors with a vertex that
+      // moves macroscopic distances along the middle of the vertical edge.
+      EXPECT_NEAR(std::abs(Detail::collisionDot(offset, box.axes[1])), box.halfExtents.y, 1e-4);
+    }
+    const auto delta = contact.pointB - contact.pointA;
+    const auto tangent = delta - manifold.normal * contact.separation;
+    EXPECT_LE(dot(tangent, tangent), config.contactDistance * config.contactDistance);
+    const auto center = (contact.pointA + contact.pointB) * 0.5f;
+    near(debug.normals[i * 6], center);
+    near(debug.normals[i * 6 + 1], center + manifold.normal * 0.25f);
+    Vec3 markerCenter;
+    for (std::size_t vertex = 0; vertex < markerVertices; ++vertex) {
+      const auto p = debug.points[i * markerVertices + vertex];
+      markerCenter = markerCenter + p;
+      EXPECT_NEAR(std::sqrt(dot(p - center, p - center)), 0.025f, 1e-6f);
+    }
+    near(markerCenter * (1.0f / markerVertices), center);
+  }
+  b.get<Transform>().position.x = 2;
+  EXPECT_TRUE(Detail::captureCollisionDebug(scene, false, false, true, &simulation).contacts.empty());
+  scene.destroy(a);
+  EXPECT_TRUE(simulation.contactSnapshot(scene).empty());
+}
+
 TEST(CollisionDebug, ContactPointsAndNormalsHaveDistinctRedAndGreenPixels)
 {
   WindowConfig config; config.visible = false; config.width = config.height = 256;

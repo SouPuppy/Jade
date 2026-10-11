@@ -103,7 +103,10 @@ void Runtime::tick(float dt) {
 unsigned Runtime::substeps() const noexcept { return m_Impl->substeps; }
 double Runtime::droppedTime() const noexcept { return m_Impl->dropped; }
 void Runtime::setPaused(bool paused) noexcept {
-  if (paused != m_Impl->paused) { m_Impl->paused = paused; suspend(); m_Impl->logNow = true; }
+  if (paused != m_Impl->paused) {
+    m_Impl->paused = paused; m_Impl->accumulator = 0; m_Impl->substeps = 0;
+    m_Impl->logNow = true;
+  }
 }
 bool Runtime::paused() const noexcept { return m_Impl->paused; }
 void Runtime::setAxes(bool enabled) noexcept { m_Impl->axes = enabled; }
@@ -125,13 +128,7 @@ void Runtime::render(Renderer::ImageSize size) {
     if ((geometry || m_Impl->axes || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
       snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry);
     if (m_Impl->physicsDebug) {
-      debug = Detail::captureCollisionDebug(*m_Impl->scene, true, true, true);
-      for (auto& manifold : debug->contacts) for (auto& p : manifold.points)
-        for (const auto& solved : m_Impl->physics.contacts()) if (solved.a == manifold.a && solved.b == manifold.b)
-          for (const auto& q : solved.points) {
-            const auto d = p.pointA - q.pointA;
-            if (dot(d, d) < 1e-6f) { p.normalImpulse = q.normalImpulse; p.frictionImpulse = q.frictionImpulse; }
-          }
+      debug = Detail::captureCollisionDebug(*m_Impl->scene, true, true, true, &m_Impl->physics);
       if (m_Impl->logNow || m_Impl->logElapsed >= 1) {
         m_Impl->logNow = false; m_Impl->logElapsed = std::fmod(m_Impl->logElapsed, 1.0);
         const auto& c = m_Impl->physics.config();

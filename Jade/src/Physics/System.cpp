@@ -35,7 +35,7 @@ struct Body {
   RigidBody properties;
   V velocity, angular, inverseInertia;
   double inverseMass = 0;
-  bool edited = true;
+  bool edited = true, geometryEdited = true;
   V inertia(V value) const {
     V result;
     for (std::size_t i = 0; i < 3; ++i)
@@ -59,14 +59,14 @@ struct Body {
     for (auto& axis : shape.axes) axis = v(q.rotate(axis.vector()));
   }
 };
-Body body(Scene& scene, const Detail::WorldCollider& shape) {
+Body body(const Scene& scene, const Detail::WorldCollider& shape) {
   Body b;
   b.shape = shape;
+  b.pose = shape.entity.get<Transform>();
   if (!shape.entity.has<RigidBody>()) { b.properties.mass = 0; return b; }
   b.properties = shape.entity.get<RigidBody>(); validate(b.properties);
   if (b.properties.mass == 0) return b;
   if (scene.parent(shape.entity)) throw std::invalid_argument("Dynamic RigidBody must be a Scene root.");
-  b.pose = shape.entity.get<Transform>();
   b.pose.rotation = b.pose.rotation.normalized();
   b.inverseMass = 1.0 / b.properties.mass;
   b.velocity = v(b.properties.velocity); b.angular = v(b.properties.angularVelocity);
@@ -106,14 +106,73 @@ struct Cached {
   double impulse = 0;
 };
 bool near(V a, V b, double tolerance = 1e-5) { return collisionLength(a - b) < tolerance; }
-bool same(const Body& a, const Body& b) {
+bool sameGeometry(const Body& a, const Body& b) {
   if (a.shape.entity != b.shape.entity || a.shape.kind != b.shape.kind ||
-      a.properties.mass != b.properties.mass || a.properties.friction != b.properties.friction ||
-      a.properties.restitution != b.properties.restitution || a.shape.radius != b.shape.radius ||
-      !near(a.shape.halfExtents, b.shape.halfExtents) || !near(a.shape.center, b.shape.center) ||
-      a.properties.velocity != b.properties.velocity || a.properties.angularVelocity != b.properties.angularVelocity) return false;
+      a.shape.radius != b.shape.radius || !near(a.shape.halfExtents, b.shape.halfExtents) ||
+      !near(a.shape.center, b.shape.center)) return false;
   for (std::size_t i = 0; i < 3; ++i) if (!near(a.shape.axes[i], b.shape.axes[i])) return false;
   return true;
+}
+bool same(const Body& a, const Body& b) {
+  return sameGeometry(a, b) && a.properties.mass == b.properties.mass &&
+    a.properties.friction == b.properties.friction && a.properties.restitution == b.properties.restitution &&
+    a.properties.velocity == b.properties.velocity && a.properties.angularVelocity == b.properties.angularVelocity;
+}
+// Refresh paired surface anchors instead of replacing them with an arbitrarily
+// far-away intersection of two almost parallel clipping planes each frame.
+bool validAnchor(const Body& a, const Body& b, V localA, V localB, V normal, double margin) {
+  const auto delta = b.shape.center + b.offset(localB) - a.shape.center - a.offset(localA);
+  const double separation = collisionDot(delta, normal);
+  const auto tangent = delta - normal * separation;
+  const double tolerance = margin + 8 * std::numeric_limits<float>::epsilon() *
+    std::max(a.shape.size(), b.shape.size());
+  return separation <= tolerance && collisionDot(tangent, tangent) <= tolerance * tolerance;
+}
+std::vector<ContactPoint> persistentPoints(const Body& a, const Body& b, const Manifold& hit,
+                                          const std::vector<Cached>& cache, double margin) {
+  if (a.geometryEdited || b.geometryEdited || a.shape.kind != Detail::CollisionKind::Box ||
+      b.shape.kind != Detail::CollisionKind::Box) return hit.points;
+  const auto normal = v(hit.normal);
+  std::vector<ContactPoint> points;
+  for (const auto& old : cache) {
+    if (old.a != hit.a || old.b != hit.b || collisionDot(old.normal, normal) < 0.99 ||
+        !validAnchor(a, b, old.localA, old.localB, normal, margin)) continue;
+    const auto pa = a.shape.center + a.offset(old.localA), pb = b.shape.center + b.offset(old.localB);
+    points.push_back({pa.vector(), pb.vector(), static_cast<float>(collisionDot(pb - pa, normal))});
+  }
+  for (const auto& next : hit.points) {
+    const auto duplicate = std::any_of(points.begin(), points.end(), [&](const ContactPoint& kept) {
+      const auto da = v(next.pointA) - v(kept.pointA), db = v(next.pointB) - v(kept.pointB);
+      return collisionDot(da, da) + collisionDot(db, db) < margin * margin * 2;
+    });
+    if (!duplicate) points.push_back(next);
+  }
+  if (points.size() <= 4) return points;
+  // Keep the deepest witness and maximize the covered contact area. Cached
+  // anchors come first so equally good patches retain their original points.
+  const auto deepest = static_cast<std::size_t>(std::min_element(points.begin(), points.end(),
+    [](const ContactPoint& x, const ContactPoint& y) { return x.separation < y.separation; }) - points.begin());
+  std::array<std::size_t, 4> selected{};
+  double best = -1;
+  for (std::size_t i = 0; i < points.size(); ++i)
+    for (std::size_t j = i + 1; j < points.size(); ++j)
+      for (std::size_t k = j + 1; k < points.size(); ++k)
+        for (std::size_t l = k + 1; l < points.size(); ++l) {
+          if (i != deepest && j != deepest && k != deepest && l != deepest) continue;
+          const std::array<V, 4> p{v(points[i].pointA), v(points[j].pointA), v(points[k].pointA), v(points[l].pointA)};
+          double area = 0;
+          for (std::size_t diagonal = 1; diagonal < 4; ++diagonal) {
+            const auto u = p[diagonal] - p[0];
+            const auto w = p[diagonal % 3 + 1] - p[(diagonal + 1) % 3 + 1];
+            area = std::max(area, std::abs(collisionDot(normal, collisionCross(u, w))));
+          }
+          if (area > best + 1e-10 * a.shape.size() * b.shape.size()) {
+            best = area; selected = {i, j, k, l};
+          }
+        }
+  std::vector<ContactPoint> reduced;
+  for (const auto i : selected) reduced.push_back(points[i]);
+  return reduced;
 }
 void positionImpulse(Body& a, Body& b, V ra, V rb, V p) {
   a.shape.center = a.shape.center - p * a.inverseMass;
@@ -149,6 +208,23 @@ System::~System() = default;
 const Config& System::config() const noexcept { return m_Impl->config; }
 const Statistics& System::statistics() const noexcept { return m_Impl->stats; }
 std::span<const Manifold> System::contacts() const noexcept { return m_Impl->contacts; }
+std::vector<Manifold> System::contactSnapshot(const Scene& scene) const {
+  const auto shapes = Detail::captureColliders(scene);
+  bool current = m_Impl->previousDt > 0 && shapes.size() == m_Impl->previous.size();
+  for (std::size_t i = 0; current && i < shapes.size(); ++i) {
+    const auto& pose = shapes[i].entity.get<Transform>(); const auto& old = m_Impl->previous[i];
+    current = pose.position == old.pose.position && pose.rotation == old.pose.rotation &&
+      pose.scale == old.pose.scale && same(body(scene, shapes[i]), old);
+  }
+  if (!current) return manifolds(scene);
+  auto result = m_Impl->contacts;
+  // The solver skips static/static pairs; the debug view still shows them.
+  for (std::size_t i = 0; i < shapes.size(); ++i)
+    for (std::size_t j = i + 1; j < shapes.size(); ++j)
+      if (!m_Impl->previous[i].inverseMass && !m_Impl->previous[j].inverseMass)
+        if (auto hit = Detail::collideManifold(shapes[i], shapes[j], 0)) result.push_back(std::move(*hit));
+  return result;
+}
 void System::reset() noexcept {
   m_Impl->cache.clear(); m_Impl->contacts.clear(); m_Impl->previous.clear();
   m_Impl->previousDt = 0; m_Impl->stats = {};
@@ -162,7 +238,7 @@ void System::applyImpulse(Scene& scene, Entity entity, Vec3 p, Vec3 worldPoint) 
   const auto nextVelocity = (b.velocity + v(p) * b.inverseMass).vector();
   const auto nextAngular = (b.angular + b.inertia(collisionCross(v(worldPoint) - b.shape.center, v(p)))).vector();
   auto& rb = entity.get<RigidBody>(); rb.velocity = nextVelocity; rb.angularVelocity = nextAngular;
-  m_Impl->cache.clear();
+  for (auto& contact : m_Impl->cache) { contact.impulse = 0; contact.tangent = {}; }
 }
 void System::step(Scene& scene, float dt) {
   if (!std::isfinite(dt) || dt <= 0) throw std::invalid_argument("Physics step must be positive and finite.");
@@ -183,6 +259,7 @@ void System::step(Scene& scene, float dt) {
     const auto old = std::find_if(m_Impl->previous.begin(), m_Impl->previous.end(),
       [&](const Body& previous) { return previous.shape.entity == shape.entity; });
     b.edited = old == m_Impl->previous.end() || !same(b, *old);
+    b.geometryEdited = old == m_Impl->previous.end() || !sameGeometry(b, *old);
     if (b.inverseMass > 0) ++stats.dynamicBodies; else ++stats.staticBodies;
     bodies.push_back(b);
   }
@@ -200,13 +277,12 @@ void System::step(Scene& scene, float dt) {
       if (!a.inverseMass && !b.inverseMass) continue;
       const auto hit = Detail::collideManifold(a.shape, b.shape, config.contactDistance);
       if (!hit) continue;
-      contacts.push_back(*hit);
       const auto normal = v(hit->normal);
       const auto seed = std::abs(normal.x) < 0.7 ? V{1, 0, 0} : V{0, 1, 0};
       const auto t1 = Detail::collisionUnit(collisionCross(normal, seed));
       const auto t2 = collisionCross(normal, t1);
       std::vector<bool> used(m_Impl->cache.size());
-      for (const auto& p : hit->points) {
+      for (const auto& p : persistentPoints(a, b, *hit, m_Impl->cache, config.contactDistance)) {
         Constraint c{i, j, normal, t1, t2, a.local(v(p.pointA)), b.local(v(p.pointB))};
         c.friction = std::sqrt(static_cast<double>(a.properties.friction) * b.properties.friction);
         const auto ra = v(p.pointA) - a.shape.center, rb = v(p.pointB) - b.shape.center;
@@ -276,37 +352,25 @@ void System::step(Scene& scene, float dt) {
   // Prepare every output and cache allocation before committing Scene changes.
   std::vector<Cached> cache;
   cache.reserve(constraints.size());
-  for (const auto& c : constraints) {
-    const auto& a = bodies[c.a]; const auto& b = bodies[c.b];
-    cache.push_back({a.shape.entity, b.shape.entity, c.normal, c.localA, c.localB,
-      c.tangent1 * c.tangentImpulse1 + c.tangent2 * c.tangentImpulse2, c.normalImpulse});
-  }
   for (auto& b : bodies) if (b.inverseMass > 0) {
     b.pose.position = b.shape.center.vector();
     b.properties.velocity = b.velocity.vector(); b.properties.angularVelocity = b.angular.vector();
     Detail::updateBounds(b.shape);
   }
-  contacts.clear();
-  for (std::size_t i = 0; i < bodies.size(); ++i)
-    for (std::size_t j = i + 1; j < bodies.size(); ++j)
-      if (bodies[i].inverseMass || bodies[j].inverseMass)
-        if (auto hit = Detail::collideManifold(bodies[i].shape, bodies[j].shape, config.contactDistance)) {
-          for (auto& p : hit->points) {
-            const auto local = bodies[i].local(v(p.pointA));
-            double nearest = 0.04 * 0.04;
-            for (const auto& c : constraints) if (c.a == i && c.b == j) {
-              const auto delta = c.localA - local;
-              const double distance = collisionDot(delta, delta);
-              if (distance < nearest) {
-                nearest = distance; p.normalImpulse = V{c.normalImpulse, 0, 0}.vector().x;
-                p.frictionImpulse = (c.tangent1 * c.tangentImpulse1 + c.tangent2 * c.tangentImpulse2).vector();
-              }
-            }
-          }
-          stats.contacts += hit->points.size();
-          for (const auto& p : hit->points) stats.maximumPenetration = std::max(stats.maximumPenetration, -p.separation);
-          contacts.push_back(std::move(*hit));
-        }
+  for (const auto& c : constraints) {
+    const auto& a = bodies[c.a]; const auto& b = bodies[c.b];
+    if (!validAnchor(a, b, c.localA, c.localB, c.normal, config.contactDistance)) continue;
+    const auto pa = a.shape.center + a.offset(c.localA), pb = b.shape.center + b.offset(c.localB);
+    const auto friction = c.tangent1 * c.tangentImpulse1 + c.tangent2 * c.tangentImpulse2;
+    ContactPoint p{pa.vector(), pb.vector(), V{collisionDot(pb - pa, c.normal), 0, 0}.vector().x,
+      V{c.normalImpulse, 0, 0}.vector().x, friction.vector()};
+    if (contacts.empty() || contacts.back().a != a.shape.entity || contacts.back().b != b.shape.entity)
+      contacts.push_back({a.shape.entity, b.shape.entity, c.normal.vector(), {}});
+    contacts.back().points.push_back(p);
+    cache.push_back({a.shape.entity, b.shape.entity, c.normal, c.localA, c.localB, friction, c.normalImpulse});
+    ++stats.contacts;
+    stats.maximumPenetration = std::max(stats.maximumPenetration, -p.separation);
+  }
   for (const auto& b : bodies) if (b.inverseMass > 0) {
     b.shape.entity.get<Transform>() = b.pose;
     b.shape.entity.get<RigidBody>() = b.properties;

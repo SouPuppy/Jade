@@ -28,7 +28,8 @@ void boxLines(CollisionVector center, const std::array<CollisionVector, 3>& axes
 
 } // namespace
 
-CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts)
+CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts,
+                                         const Physics::System* simulation)
 {
   CollisionDebugLines result;
   if (!shapes && !aabbs && !contacts)
@@ -57,7 +58,7 @@ CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool 
                (collider.bounds.maximum - collider.bounds.minimum) * 0.5, result.aabbs);
   }
   if (contacts) {
-    result.contacts = Physics::manifolds(scene);
+    result.contacts = simulation ? simulation->contactSnapshot(scene) : Physics::manifolds(scene);
     for (const auto& manifold : result.contacts) for (const auto& contact : manifold.points) {
       const auto center = (contact.pointA + contact.pointB) * 0.5f;
       constexpr std::size_t segments = 16;

@@ -1,4 +1,5 @@
 #include <Jade/Jade.hpp>
+#include "internal/Renderer/Debug/CollisionDebug.hpp"
 #include <gtest/gtest.h>
 #include <array>
 #include <cmath>
@@ -85,6 +86,20 @@ TEST(Physics, PyramidRestsForTwentySecondsWithGravityStillEnabled) {
         maxVelocity = std::max(maxVelocity, length(b.velocity));
         maxAngular = std::max(maxAngular, length(b.angularVelocity));
         maxDrift = std::max(maxDrift, length(p.position - settled[i]));
+      }
+      for (const auto& m : system.contacts()) {
+        const auto a = std::find(boxes.begin(), boxes.end(), m.a), b = std::find(boxes.begin(), boxes.end(), m.b);
+        if (a == boxes.end() || b == boxes.end()) continue;
+        const auto ai = a - boxes.begin(), bi = b - boxes.begin();
+        const bool sameRow = (ai < 5 && bi < 5) || (ai >= 5 && ai < 8 && bi >= 5 && bi < 8);
+        if (!sameRow || std::abs(m.normal.x) < 0.99f) continue;
+        for (const auto& point : m.points) {
+          const auto& ta = m.a.get<Transform>(); const auto& tb = m.b.get<Transform>();
+          const auto localA = ta.rotation.conjugate().rotate(point.pointA - ta.position);
+          const auto localB = tb.rotation.conjugate().rotate(point.pointB - tb.position);
+          EXPECT_NEAR(std::abs(localA.y), 0.5f, 0.002f);
+          EXPECT_NEAR(std::abs(localB.y), 0.5f, 0.002f);
+        }
       }
     }
   }
@@ -213,4 +228,28 @@ TEST(Runtime, PauseAndRunBoundariesDoNotAccumulateOldTime) {
   EXPECT_EQ(e.get<Transform>().position, position);
   app.runtime().tick(1.0f/120);
   EXPECT_LT(e.get<Transform>().position.y, position.y);
+}
+
+TEST(Runtime, PausedDebugPreservesSolvedContactsAndRefreshesSceneEdits) {
+  Application app(hidden());
+  auto scene = std::make_shared<Scene>(); floor(*scene);
+  const auto e = scene->create<Block>(); e.get<Transform>().position.y = 0.5f;
+  app.runtime().setScene(scene); app.runtime().tick(1.0f / 120);
+  auto& physics = app.runtime().physics();
+  ASSERT_EQ(physics.contacts().size(), 1u);
+  const auto before = physics.contactSnapshot(*scene);
+  ASSERT_EQ(before.size(), 1u);
+  app.runtime().setPaused(true); app.runtime().tick(10);
+  const auto debug = Detail::captureCollisionDebug(*scene, false, false, true, &physics);
+  ASSERT_EQ(debug.contacts.size(), 1u);
+  ASSERT_EQ(debug.contacts.front().points.size(), before.front().points.size());
+  for (std::size_t i = 0; i < before.front().points.size(); ++i) {
+    EXPECT_EQ(debug.contacts.front().points[i].pointA, before.front().points[i].pointA);
+    EXPECT_EQ(debug.contacts.front().points[i].pointB, before.front().points[i].pointB);
+    EXPECT_FLOAT_EQ(debug.contacts.front().points[i].normalImpulse, before.front().points[i].normalImpulse);
+  }
+  e.get<Transform>().position.y = 10;
+  EXPECT_TRUE(physics.contactSnapshot(*scene).empty());
+  app.runtime().setPaused(false); app.runtime().tick(1.0f / 120);
+  EXPECT_TRUE(physics.contacts().empty());
 }

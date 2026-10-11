@@ -47,6 +47,9 @@ public:
   void reset() noexcept;
   const Statistics& statistics() const noexcept;
   std::span<const Manifold> contacts() const noexcept;
+  // Current solver anchors and impulses, or fresh geometry after Scene edits.
+  // Includes static/static pairs for inspection without stepping the simulation.
+  std::vector<Manifold> contactSnapshot(const Scene& scene) const;
 private:
   struct Impl;
   std::unique_ptr<Impl> m_Impl;

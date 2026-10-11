@@ -15,6 +15,7 @@ struct CollisionDebugLines {
   std::vector<Physics::Manifold> contacts;
 };
 
-CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts = false);
+CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts = false,
+                                         const Physics::System* simulation = nullptr);
 
 } // namespace Jade::Detail

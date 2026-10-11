@@ -1,5 +1,13 @@
 # Windows x64 validation
 
+## Persistent contacts and F4 position regression (2026-10-10)
+
+Debug and Release each passed 201/201 GoogleTest tests across 46 suites. Debug used the normal build/windows-debug/ configuration; Release used build/collision-release/. The normal Debug and Release Demo targets were rebuilt. No commit was created.
+
+The reported middle-row marker was reproduced as an unstable intersection of nearly parallel box faces. Moving one box by 1 micrometer moved that candidate about 3 millimeters along its edge. The previous check that both witnesses lay on box surfaces did not establish temporal stability or correspondence to solver anchors. The regression now verifies retained corner anchors under small rotations, exact debug/solver point and impulse agreement, surface membership, Scene-edit/deletion invalidation and preservation across pause/resume. The existing 20-second pyramid additionally checks that same-row contact anchors remain at vertical-edge endpoints. Release measurements over the last five seconds were 0.000006 m/s linear speed, 0.000011 rad/s angular speed, 0.003221 m penetration and 0.000028 m drift, with gravity enabled and no sleeping.
+
+A hidden-window OpenGL comparison rendered the same captured Scene with freshly clipped candidates and with persistent solver anchors. The unstable middle-edge marker region contained 25 red pixels before and zero after, with GL_NO_ERROR. The surrounding collider geometry was unchanged. The diagnostic camera approximates the reported view; these captures are not edits of the supplied screenshot. Artifacts: .temp/contact-stable-debug-tests.xml/.log, .temp/contact-stable-release-tests.xml/.log, .temp/contact-reclipped.bmp and .temp/contact-stable.bmp.
+
 ## Independent render controls and Archetype Demo (2026-10-10)
 
 Debug and Release each passed 199/199 GoogleTest tests across 46 suites. Engine, Demo and tests rebuilt in both configurations without compiler warnings. Seven affected public headers passed standalone MSVC C++20 /W4 /WX compilation. Renderer::Mode/setMode are removed; render and wireframe flags are independent, with F/I available even when debug shortcuts are disabled.
