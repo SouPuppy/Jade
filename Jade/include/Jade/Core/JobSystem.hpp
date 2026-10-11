@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace Jade {
 namespace Detail { struct JobState; }
@@ -19,7 +20,7 @@ enum class WaitMode { Block, Help };
 struct JobOptions {
   JobCategory category = JobCategory::General;
   std::optional<JobPriority> priority;
-  // Zero chooses approximately four chunks per worker. Explicit grains use bounded fan-out.
+  // Zero selects fine-grained leases, claimed in batches without queue locks.
   std::size_t grainSize = 0;
 };
 struct JobSystemConfig {
@@ -31,9 +32,17 @@ struct JobCategoryStatistics {
   // Counts scheduler work items, including parallel-node expansion and chunks.
   std::uint64_t queued = 0, running = 0, completed = 0, failed = 0, cancelled = 0, stolen = 0;
 };
+struct JobWorkerStatistics {
+  std::uint64_t tasks = 0, stolen = 0, busyNanoseconds = 0, idleNanoseconds = 0;
+  std::uint64_t queueWaitNanoseconds = 0, lockWaitNanoseconds = 0;
+  std::array<std::uint64_t,6> categoryBusyNanoseconds{};
+};
 struct JobStatistics {
   std::uint32_t workerCount = 0;
   std::array<JobCategoryStatistics, 6> categories{};
+  std::vector<JobWorkerStatistics> workers;
+  JobWorkerStatistics helper;
+  std::uint32_t peakRunningWorkers = 0;
 };
 
 class JobHandle final {

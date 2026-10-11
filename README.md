@@ -6,13 +6,12 @@ Jade is a C++20 static engine library validated on Windows x64 / MSVC. Applicati
 
 Untitled starts in Raster. I cycles Raster ? Hybrid ? RayTracing ? None; F1 wireframe
 and F3/F4 debug drawing remain independent. Hybrid uses raster geometry with real BVH
-shadow rays; RayTracing retains the existing CPU/GPU path tracer. F5 changes color/normal
-output without selecting another pipeline. EngineConfig.renderer.pipeline selects startup;
+shadow rays; RayTracing retains the existing CPU/GPU path tracer. F5 toggles an independent normal debug view, including when I selects None, without changing the selected pipeline. EngineConfig.renderer.pipeline selects startup;
 the engine's default remains RayTracing for existing consumers. The old ray enable API
 is a compatibility adapter: true selects RayTracing and false selects None.
 
 F2 enables the soul observation camera when debug shortcuts are enabled. The world keeps
-updating, while WASD/Q/E/Shift and right-button look control an independent observer.
+updating, while WASD, Space/Shift, right-button look, middle-button pan and wheel zoom control an independent observer.
 Sparse diagnostic paths come from the game camera. See [Untitled](Demo/Untitled/README.md)
 for controls, pipeline options and rendering limits.
 
@@ -20,7 +19,7 @@ for controls, pipeline options and rendering limits.
 
 Install the Visual Studio or Build Tools **Desktop development with C++** workload, including MSVC x64, the Windows SDK, CMake and Ninja. The first configuration downloads pinned GLFW and GoogleTest dependencies; subsequent configurations reuse each build directory's downloads. The OpenGL loader is included as fixed C source, and shader embedding uses CMake directly. No Python installation or packages are required.
 
-Open the repository folder in Visual Studio to discover the Windows Debug / Release presets and select `JadeDemo.exe` as the startup target. For command-line builds, use an **x64 Native Tools Command Prompt** or an x64 **Developer PowerShell**:
+Open the repository folder in Visual Studio to discover the Windows Debug / Release presets and select `JadeDemo.exe` as the startup target. In VS Code, run `code .` from the repository root and install the recommended CMake Tools and C/C++ extensions. Select the `Windows x64 Debug` configure preset when prompted. The checked-in `.vscode` configuration provides IntelliSense through CMake Tools, Ctrl+Shift+B to configure/build JadeDemo, and F5 to build/debug the selected JadeDemo, Untitled or JadeSmokeTests launch target. JadeDemo starts in scene 1; each launch uses its executable directory as the working directory. For command-line builds, use an **x64 Native Tools Command Prompt** or an x64 **Developer PowerShell**:
 
 ```powershell
 cmake --preset windows-debug
@@ -59,9 +58,11 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4`; `--frames N` can be combined with it. F1 toggles wireframe and I cycles Raster/Hybrid/RayTracing/None.
+Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4/5, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4|5`; `--frames N` can be combined with it. F1 toggles wireframe and I cycles Raster/Hybrid/RayTracing/None.
 
-F3 toggles axes and cyan AABBs together. F5 switches Color/Normal output without changing pipeline. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. Demo RayTracing uses resolutionScale 1.0; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and middle dragging pans the orthographic view. Q/E are unbound. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
+Scene 5 is a stress test: ten parallel walls, each made of 100 x 100 dynamic unit cubes (100,000 cubes total), spaced 12 units apart and sharing one mesh. A radius-three, mass-3500 glass ball automatically launches toward them at 60 units/second; K fires it again from the current camera. The scene is created on first selection. Its camera frames all ten walls, has a 1000-unit far plane and moves at 30 units/second (5 with Ctrl). R rebuilds the walls and restarts the launch. This workload can run below realtime; no frame-rate target is guaranteed.
+
+F3 toggles axes and cyan AABBs together. F5 toggles the independent normal debug view, including with the scene pipeline set to None. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. Demo RayTracing uses resolutionScale 1.0; presentation targets 24 FPS. WASD/arrows move horizontally, Space ascends, Shift descends, Ctrl slows movement, right dragging turns, the wheel zooms and middle dragging pans either projection. Q/E are unbound. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -79,7 +80,7 @@ int main()
   Jade::Motion::lookAt(pose, {0, 0, 0});
   camera.add<Jade::Camera>();
   scene->setCamera(camera);
-  scene->use<Jade::Module::FreeCameraControl>();
+  scene->use<Jade::Module::FPSCameraControl>();
 
   const auto mesh = app.runtime().assets().add(Jade::MeshData::cube(2.0f));
   auto cube = scene->create();
@@ -348,7 +349,7 @@ JadeDemo --cpu --scene 1
 JadeDemo --gpu --scene 3 --frames 8
 ```
 
-`--cpu` and `--gpu` are mutually exclusive, select execution and set `rayTracing.enabled = true`. F5 toggles Color/Normal output for the selected pipeline when debug shortcuts are enabled. Sampling and bounce controls belong to `RayTracingSettings`; Demo no longer exposes `--output`, `--bounces`, `--rr-start`, `--samples` or `--frame-samples`. `--frames N` limits application frames, `--scene 1|2|3|4` selects the initial scene and `--help` lists options. The old `--renderer` option is removed. Without an execution flag Demo retains its CPU-selected wireframe startup; I cycles Raster/Hybrid/RayTracing/None; F1 independently toggles wireframe.
+`--cpu` and `--gpu` are mutually exclusive, select execution and set `rayTracing.enabled = true`. F5 toggles independent normal debug when debug shortcuts are enabled; it also draws with I set to None and preserves all ray tracing settings. Sampling and bounce controls belong to `RayTracingSettings`; Demo no longer exposes `--output`, `--bounces`, `--rr-start`, `--samples` or `--frame-samples`. `--frames N` limits application frames, `--scene 1|2|3|4` selects the initial scene and `--help` lists options. The old `--renderer` option is removed. Without an execution flag Demo retains its CPU-selected wireframe startup; I cycles Raster/Hybrid/RayTracing/None; F1 independently toggles wireframe.
 
 ```cpp
 Jade::EngineConfig config;
@@ -409,32 +410,48 @@ With config.debug.shortcuts=true, F3 toggles axes/cyan AABBs and F4 independentl
 
 ## Scene modules and controls
 
-Choose one camera control module per Scene. Demo uses free flight:
+There is one camera controller: `Module::FPSCameraControl`. Demo and the F2 observer use the same upright navigation model. Camera pose, lens projection, interaction mode and input bindings have separate responsibilities.
 
 ```cpp
-#include <Jade/Module/FreeCameraControl.hpp>
-
-scene->use<Jade::Module::FreeCameraControl>();
-
-// In a different Scene, use first-person controls:
 #include <Jade/Module/FPSCameraControl.hpp>
-sandbox->use<Jade::Module::FPSCameraControl>();
+#include <Jade/Graphics/CameraControl.hpp>
+
+scene->use<Jade::Module::FPSCameraControl>();
+
+// Optional per-camera settings. Without this component, editor defaults apply.
+auto& controls = scene->camera().add<Jade::CameraControl>();
+controls.viewMode = Jade::ViewMode::Editor;
+controls.speed = 3;
+controls.sensitivity = 0.1;
+controls.bindings.look = Jade::MouseButton::Right;
+controls.bindings.pan = Jade::MouseButton::Middle;
+
+// Continuous captured mouse look uses the SAME controller and movement model:
+controls.viewMode = Jade::ViewMode::FirstPerson;
+// The independent F2 observer has its own settings:
+app.runtime().observerControls().sensitivity = 0.15;
 ```
 
-Both modules target `scene->camera()` at event time, so changing the selected camera needs no rebinding. They can be installed before creating a camera and skip missing components. Scene owns the subscriptions and cancels them on destruction or failed installation. Installing both types in the same Scene throws `std::logic_error`; installing the same type again is a no-op. The former `CameraControl` API has been replaced by `FreeCameraControl`.
+| Input | Default behavior |
+| --- | --- |
+| WASD / arrows | Horizontal movement, 3 units/second |
+| Space | Ascend along parent Y |
+| Left / right Shift | Descend along parent Y; combines with WASD |
+| Ctrl + movement | Slow movement, 1 unit/second, in every direction |
+| Right-button drag | Look left/right/up/down, 0.1 degrees per logical pixel |
+| Middle-button drag | Grab-style image-plane pan in either projection |
+| Wheel | Zoom the active lens |
+| Q / E | Unbound |
 
-| Input | FreeCameraControl | FPSCameraControl |
-| --- | --- | --- |
-| WASD / arrows | Local forward/back/right/left, 3 units/second | Horizontal forward/back/right/left, 3 units/second |
-| Shift+W / Ctrl+W | Forward, 6 / 1 units/second | Horizontal forward, 6 / 1 units/second |
-| Space / Ctrl+Space | Parent Y up/down, 3 units/second | Unbound; Space is available for a character controller |
-| Q / E | Unbound | Unbound; orientation has no roll |
-| Mouse | Left-button look, 0.1 degrees/pixel; middle-button pan in Orthographic | Captured continuous look, 0.1 degrees/pixel; pitch limited to +/-89 degrees |
-| Wheel | Zoom active lens, one Motion::zoom increment per offset | Unbound |
+Yaw turns around fixed parent Y (world Y for root cameras); pitch is clamped to +/-89 degrees and roll is removed. Looking up/down never changes horizontal speed. Combined movement is normalized, opposing inputs cancel, and pressing both WASD and its arrow alias does not double the speed. This is a navigation controller; character jumping, gravity and collision belong to gameplay/physics.
 
-FreeCameraControl resets dragging on scene activation/deactivation, a changed camera and left-button release (including focus loss). FPSCameraControl captures the cursor when its Scene becomes active; switching to another Scene restores that Scene's cursor mode. Installing FPS controls on an already active Scene applies capture on the next Run processing pass. Cursor mode changes, scene switches and focus changes reset the mouse position baseline to avoid jumps. FPS yaw and horizontal movement use parent Y, which is world Y for root cameras. Looking up or down does not change horizontal movement speed. External orientation edits and camera selection are respected, with pitch clamped and roll removed. Neither module applies gravity or collision; FPS jumping awaits a character controller and physics.
+`ViewMode` describes interaction: Editor keeps the cursor free and uses button gestures; FirstPerson captures it for continuous look. Both support the same movement, pitch constraints and wheel zoom. Projection remains `Camera::projection`, independent of ViewMode. Orthographic pan scales by viewHeight/windowHeight; perspective pan scales at `CameraControl::panDistance` using FOV/windowHeight. Pan preserves orientation and follows the current zoom and logical window size, including high-DPI cursor coordinates.
 
-These defaults are fixed in this version. Keyboard modifiers match exactly. Register custom scene events instead when different bindings are needed.
+Settings and bindings belong to the camera entity and can change without reinstalling the module. `bindings[CameraAction]` accepts two physical keys per action; `Key::Unknown`/`MouseButton::Unknown` disable bindings. Shift/Ctrl do not suppress held movement, while Alt/Super combinations remain shortcuts. Typed `KeyHeld<"C-w">` subscriptions still require exact modifiers. Global consumption suppresses corresponding scene camera input.
+
+The module resolves `scene->camera()` for each event, supports installation before a camera exists, skips missing components, and installs once per Scene. Camera/scene/settings/projection changes and focus loss cancel active gestures. F2 suspends scene camera navigation and routes movement, look, pan and wheel to the observer; gameplay updates continue. Exiting F2 restores scene controls without resuming an old drag. Scene destruction and failed module installation release subscriptions, including nested camera control state.
+
+`Graphics/Motion.hpp` remains general Transform math, including unrestricted local-axis rotation. `Graphics/CameraMotion.hpp` provides upright camera look, horizontal/vertical movement and projection-aware pan without input dependencies. The old FreeCameraControl module is removed; replace its include/use with FPSCameraControl.
 
 Any type providing `static void attach(Jade::Scene&)` can be a module; no instance is constructed:
 
@@ -454,7 +471,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-Bare F1 (mesh wireframe) and I (Raster/Hybrid/RayTracing/None cycle) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F2 (soul observation camera), F3 (scene axes/AABBs/BVH/frustums/lights), F4 (physics/forces/logs), F5 (Color/Normal) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
+Bare F1 (mesh wireframe) and I (Raster/Hybrid/RayTracing/None cycle) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F2 (soul observation camera), F3 (scene axes/AABBs/BVH/frustums/lights), F4 (physics/forces/logs), F5 (independent normal debug) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
 
 ## Events and controls
 
@@ -673,4 +690,4 @@ tests/              # ECS, assets, math, input, scheduling and pixel checks
 
 GoogleTest exercises identity generations, ownership, hierarchy, scene switching, component/query mutation, shared immutable resources, OBJ loading, quaternion controls, projections, resize, ray intersections, BSDFs, emissive lighting, deterministic CPU sampling, asynchronous revisions, wireframe, axes and events; OpenGL readback validates presentation/debug output. Tests build independently of Demo. See [Architecture](docs/Architecture.md) for boundaries and [Validation](docs/Validation.md) for recorded checks.
 
-Interactive wheel zoom scales the image-plane span, preserves pose and clip planes, and limits perspective zoom to 1?120 degrees. FreeCameraControl retains scroll beyond the limits so reversing a gesture restores its original projection, including orthographic height. Direct lens edits establish a new zoom reference.
+Interactive wheel zoom scales the image-plane span, preserves pose and clip planes, and limits perspective zoom to 1?120 degrees. Camera navigation retains scroll beyond the limits so reversing a gesture restores its original projection, including orthographic height. Direct lens edits establish a new zoom reference.

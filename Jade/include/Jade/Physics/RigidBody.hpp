@@ -1,5 +1,6 @@
 #pragma once
 #include <Jade/Math/Vector.hpp>
+#include <Jade/Physics/Types.hpp>
 
 namespace Jade {
 // SI units. Velocities are world-space; angularVelocity is radians/second.
@@ -11,5 +12,10 @@ struct RigidBody {
   float mass = 1;
   float friction = 0.6f;
   float restitution = 0;
+  Physics::MotionType motion = Physics::MotionType::Dynamic;
+  Physics::CollisionMode collision = Physics::CollisionMode::Discrete;
+  bool allowSleep = true;
+  float linearDamping = 0, angularDamping = 0;
+  std::uint32_t category = 1, mask = ~std::uint32_t{0};
 };
 } // namespace Jade

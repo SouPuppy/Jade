@@ -2,7 +2,8 @@
 #include <Jade/Application.hpp>
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Graphics/Motion.hpp>
-#include <Jade/Module/FreeCameraControl.hpp>
+#include <Jade/Graphics/CameraControl.hpp>
+#include <Jade/Graphics/CameraMotion.hpp>
 #include <Jade/Module/FPSCameraControl.hpp>
 
 #include <gtest/gtest.h>
@@ -10,6 +11,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -59,7 +61,7 @@ struct Input {
     Key(code, GLFW_RELEASE, mods);
   }
   void Move(double x, double y) { cursor(window, x, y); }
-  void Button(int action) { button(window, GLFW_MOUSE_BUTTON_LEFT, action, 0); }
+  void Button(int action) { button(window, GLFW_MOUSE_BUTTON_RIGHT, action, 0); }
 };
 
 Jade::Entity AddCamera(Jade::Scene &scene)
@@ -358,484 +360,298 @@ TEST(ApplicationDebug, MissingCameraAndComponentsAreIgnored)
   EXPECT_NO_THROW(app.Run({1}));
 }
 
-TEST(FreeCameraControl, MovementUsesDtAndExactBindingsWithoutDuplicateInstallation)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FreeCameraControl>();
-  scene->use<Jade::Module::FreeCameraControl>();
-  auto &pose = scene->camera().get<Jade::Transform>();
-  float elapsed = 0;
-  scene->on<Jade::FrameUpdate>([&](const auto &event) { elapsed += event.dt; });
-  struct Movement {
-    int key;
-    int mods;
-    Jade::Vec3 direction;
-    float speed = 3;
-  };
-  const std::array movements{Movement{GLFW_KEY_W, 0, {0, 0, -1}},
-                             Movement{GLFW_KEY_S, 0, {0, 0, 1}},
-                             Movement{GLFW_KEY_A, 0, {-1, 0, 0}},
-                             Movement{GLFW_KEY_D, 0, {1, 0, 0}},
-                             Movement{GLFW_KEY_UP, 0, {0, 0, -1}},
-                             Movement{GLFW_KEY_DOWN, 0, {0, 0, 1}},
-                             Movement{GLFW_KEY_LEFT, 0, {-1, 0, 0}},
-                             Movement{GLFW_KEY_RIGHT, 0, {1, 0, 0}},
-                             Movement{GLFW_KEY_SPACE, 0, {0, 1, 0}},
-                             Movement{GLFW_KEY_SPACE, GLFW_MOD_CONTROL, {0, -1, 0}},
-                             Movement{GLFW_KEY_W, GLFW_MOD_SHIFT, {0, 0, -1}, 6},
-                             Movement{GLFW_KEY_W, GLFW_MOD_CONTROL, {0, 0, -1}, 1}};
-  Input input;
-  for (const auto &movement : movements) {
-    pose.position = {0, 0, 5};
-    elapsed = 0;
-    input.Key(movement.key, GLFW_PRESS, movement.mods);
-    app.Run({2});
-    EXPECT_GT(elapsed, 0);
-    ExpectNear(pose.position, Jade::Vec3{0, 0, 5} + movement.direction * (elapsed * movement.speed));
-    input.Key(movement.key, GLFW_RELEASE);
-  }
-}
-
-TEST(FreeCameraControl, FollowsSelectedCameraForMovementAndZoomWithQEUnbound)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FreeCameraControl>();
-  const auto first = scene->camera(), second = AddCamera(*scene);
-  float elapsed = 0;
-  scene->on<Jade::FrameUpdate>([&](const auto &event) {
-    elapsed += event.dt;
-    if (event.frame == 1)
-      scene->setCamera(second);
-  });
-  Input input;
-  input.Key(GLFW_KEY_W, GLFW_PRESS);
-  app.Run({2});
-  EXPECT_EQ(first.get<Jade::Transform>().position, (Jade::Vec3{0, 0, 5}));
-  ExpectNear(second.get<Jade::Transform>().position, {0, 0, 5 - 3 * elapsed});
-  input.Key(GLFW_KEY_W, GLFW_RELEASE);
-  elapsed = 0;
-  input.Key(GLFW_KEY_E, GLFW_PRESS);
-  app.Run({2});
-  Jade::Transform expected;
-  // Q/E never change camera orientation.
-  ExpectNear(Jade::Motion::getUp(second.get<Jade::Transform>()), Jade::Motion::getUp(expected));
-  input.Key(GLFW_KEY_E, GLFW_RELEASE);
-  elapsed = 0;
-  input.Key(GLFW_KEY_Q, GLFW_PRESS);
-  app.Run({2});
-
-  ExpectNear(Jade::Motion::getUp(second.get<Jade::Transform>()), Jade::Motion::getUp(expected));
-  input.Key(GLFW_KEY_Q, GLFW_RELEASE);
-  const float firstFov = first.get<Jade::Camera>().fovDegrees;
-  auto zoomed = second.get<Jade::Camera>();
-  Jade::Motion::zoom(zoomed, 2);
-  input.scroll(input.window, 0, 2);
-  app.Run({1});
-  EXPECT_FLOAT_EQ(first.get<Jade::Camera>().fovDegrees, firstFov);
-  EXPECT_FLOAT_EQ(second.get<Jade::Camera>().fovDegrees, zoomed.fovDegrees);
-}
-
-TEST(FreeCameraControl, DragUsesPixelDeltasAndResetsOnReleaseFocusAndCameraChange)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FreeCameraControl>();
-  const auto first = scene->camera(), second = AddCamera(*scene);
-  Input input;
-  input.Move(0, 0);
-  input.Button(GLFW_PRESS);
-  input.Move(20, -10);
-  input.Button(GLFW_RELEASE);
-  input.Move(40, -20);
-  app.Run({1});
-  Jade::Transform expected;
-  Jade::Motion::yaw(expected, 2);
-  Jade::Motion::pitch(expected, 1);
-  ExpectNear(Jade::Motion::getFront(first.get<Jade::Transform>()), Jade::Motion::getFront(expected));
-  input.Button(GLFW_PRESS);
-  app.Run({1});
-  scene->setCamera(second);
-  input.Move(60, -30);
-  app.Run({1});
-  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), {0, 0, -1});
-  input.Button(GLFW_RELEASE);
-  input.Button(GLFW_PRESS);
-  input.Move(70, -30);
-  app.Run({1});
-  Jade::Transform turned;
-  Jade::Motion::yaw(turned, 1);
-  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), Jade::Motion::getFront(turned));
-  input.focus(input.window, GLFW_FALSE);
-  app.Run({1});
-  input.focus(input.window, GLFW_TRUE);
-  input.Move(100, 0);
-  input.Move(120, 0);
-  app.Run({1});
-  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), Jade::Motion::getFront(turned));
-}
-
-TEST(FreeCameraControl, SceneReactivationResetsDragAndDoesNotRetainOwner)
-{
-  Jade::Application app(Hidden());
-  auto a = SelectScene(app), b = std::make_shared<Jade::Scene>();
-  b->setCamera(AddCamera(*b));
-  a->use<Jade::Module::FreeCameraControl>();
-  b->use<Jade::Module::FreeCameraControl>();
-  Input input;
-  input.Move(0, 0);
-  input.Button(GLFW_PRESS);
-  app.Run({1});
-  app.runtime().setScene(b);
-  input.Move(20, 0);
-  app.Run({1});
-  ExpectNear(Jade::Motion::getFront(b->camera().get<Jade::Transform>()), {0, 0, -1});
-  app.runtime().setScene(a);
-  input.Move(40, 0);
-  app.Run({1});
-  ExpectNear(Jade::Motion::getFront(a->camera().get<Jade::Transform>()), {0, 0, -1});
-  const auto connection = a->on<Jade::FrameUpdate>([] {});
-  std::weak_ptr<Jade::Scene> weak = a;
-  app.runtime().setScene(nullptr);
-  a.reset();
-  EXPECT_TRUE(weak.expired());
-  EXPECT_FALSE(connection.connected());
-}
-
-TEST(FreeCameraControl, InstallationNeedsNoCameraAndMissingComponentsAreSafe)
-{
-  Jade::Application app(Hidden());
-  auto scene = std::make_shared<Jade::Scene>();
-  scene->use<Jade::Module::FreeCameraControl>();
-  app.runtime().setScene(scene);
-  Input input;
-  input.Key(GLFW_KEY_W, GLFW_PRESS);
-  input.Move(0, 0);
-  input.Button(GLFW_PRESS);
-  input.Move(20, 0);
-  input.scroll(input.window, 0, 1);
-  EXPECT_NO_THROW(app.Run({2}));
-  const auto camera = AddCamera(*scene);
-  scene->setCamera(camera);
-  input.Move(40, 0);
-  app.Run({1});
-  ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()), {0, 0, -1});
-  camera.remove<Jade::Transform>();
-  input.Move(60, 0);
-  EXPECT_NO_THROW(app.Run({2}));
-  camera.remove<Jade::Camera>();
-  input.scroll(input.window, 0, 1);
-  EXPECT_NO_THROW(app.Run({1}));
-  scene->destroy(camera);
-  EXPECT_NO_THROW(app.Run({1}));
-}
-
-TEST(FreeCameraControl, ScrollOutAndBackPastZoomLimitsRestoresProjectionAndPose)
-{
-  Jade::Application app(Hidden());
-  auto scene = std::make_shared<Jade::Scene>();
-  const auto camera = AddCamera(*scene);
-  scene->setCamera(camera);
-  scene->use<Jade::Module::FreeCameraControl>();
-  app.runtime().setScene(scene);
-  Input input;
-  const auto pose = camera.get<Jade::Transform>();
-  for (auto projection : {Jade::Projection::Perspective, Jade::Projection::Orthographic}) {
-    auto &lens = camera.get<Jade::Camera>();
-    lens.projection = projection;
-    lens.fovDegrees = 60;
-    lens.viewHeight = 6;
-    const auto original = lens;
-    for (int i = 0; i < 4; ++i) {
-      input.scroll(input.window, 0, -20);
-      app.Run({1});
-    }
-    if (projection == Jade::Projection::Perspective)
-      EXPECT_LE(lens.fovDegrees, 120);
-    for (int i = 0; i < 4; ++i) {
-      input.scroll(input.window, 0, 20);
-      app.Run({1});
-    }
-    EXPECT_NEAR(lens.fovDegrees, original.fovDegrees, 1e-4);
-    EXPECT_NEAR(lens.viewHeight, original.viewHeight, 1e-4);
-    EXPECT_EQ(camera.get<Jade::Transform>().position, pose.position);
-    EXPECT_EQ(camera.get<Jade::Transform>().rotation, pose.rotation);
-  }
-}
-
-TEST(CameraControlModules, RejectsMixedControlsAndRollsBackFailedDependencies)
-{
-  Jade::Scene free, fps, retry;
-  free.use<Jade::Module::FreeCameraControl>();
-  EXPECT_THROW(free.use<Jade::Module::FPSCameraControl>(), std::logic_error);
-  EXPECT_NO_THROW(free.use<Jade::Module::FreeCameraControl>());
-  fps.use<Jade::Module::FPSCameraControl>();
-  EXPECT_THROW(fps.use<Jade::Module::FreeCameraControl>(), std::logic_error);
-  EXPECT_NO_THROW(fps.use<Jade::Module::FPSCameraControl>());
-  EXPECT_THROW(retry.use<FailingFPSModule>(), std::runtime_error);
-  EXPECT_NO_THROW(retry.use<Jade::Module::FreeCameraControl>());
-}
-
-TEST(FPSCameraControl, MovementIsHorizontalAndKeepsFullSpeedWhileLookingUp)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FPSCameraControl>();
-  scene->use<Jade::Module::FPSCameraControl>();
-  auto &pose = scene->camera().get<Jade::Transform>();
-  pose.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, -45) *
-                  Jade::Quaternion::angleAxis({1, 0, 0}, 60);
-  Jade::Motion::roll(pose, 30);
-  float elapsed = 0;
-  scene->on<Jade::FrameUpdate>([&](const auto &event) { elapsed += event.dt; });
-  const float diagonal = std::sqrt(0.5f);
-  const Jade::Vec3 front{diagonal, 0, -diagonal}, right{diagonal, 0, diagonal};
-  struct Movement {
-    int key;
-    int mods;
-    Jade::Vec3 direction;
-    float speed = 3;
-  };
-  const std::array movements{Movement{GLFW_KEY_W, 0, front},
-                             Movement{GLFW_KEY_S, 0, -front},
-                             Movement{GLFW_KEY_A, 0, -right},
-                             Movement{GLFW_KEY_D, 0, right},
-                             Movement{GLFW_KEY_UP, 0, front},
-                             Movement{GLFW_KEY_DOWN, 0, -front},
-                             Movement{GLFW_KEY_LEFT, 0, -right},
-                             Movement{GLFW_KEY_RIGHT, 0, right},
-                             Movement{GLFW_KEY_W, GLFW_MOD_SHIFT, front, 6},
-                             Movement{GLFW_KEY_W, GLFW_MOD_CONTROL, front, 1}};
-  Input input;
-  for (const auto &movement : movements) {
-    pose.position = {0, 7, 5};
-    elapsed = 0;
-    input.Key(movement.key, GLFW_PRESS, movement.mods);
-    app.Run({2});
-    EXPECT_GT(elapsed, 0);
-    ExpectNear(pose.position, Jade::Vec3{0, 7, 5} + movement.direction * (elapsed * movement.speed));
-    EXPECT_FLOAT_EQ(pose.position.y, 7);
-    ExpectNear(Jade::Motion::getRight(pose), right);
-    input.Key(movement.key, GLFW_RELEASE);
-  }
-}
-
-TEST(FPSCameraControl, MouseLookNeedsNoButtonClampsPitchAndYawsAroundParentUp)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FPSCameraControl>();
-  // Install on an already active Scene, then synchronize capture before input.
-  app.Run({1});
-  Input input;
-  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
-  auto &pose = scene->camera().get<Jade::Transform>();
-  input.Move(0, 0);
-  input.Move(20, -10);
-  app.Run({1});
-  Jade::Transform expected;
-  Jade::Motion::yaw(expected, 2);
-  Jade::Motion::pitch(expected, 1);
-  ExpectNear(Jade::Motion::getFront(pose), Jade::Motion::getFront(expected));
-  input.Move(20, -10000);
-  app.Run({1});
-  expected.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, -2) *
-                      Jade::Quaternion::angleAxis({1, 0, 0}, 89);
-  ExpectNear(Jade::Motion::getFront(pose), Jade::Motion::getFront(expected));
-  input.Move(320, -11000);
-  app.Run({1});
-  expected.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, -32) *
-                      Jade::Quaternion::angleAxis({1, 0, 0}, 89);
-  ExpectNear(Jade::Motion::getFront(pose), Jade::Motion::getFront(expected));
-  EXPECT_NEAR(Jade::Motion::getRight(pose).y, 0, 1e-6);
-  input.Move(320, 11000);
-  app.Run({1});
-  expected.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, -32) *
-                      Jade::Quaternion::angleAxis({1, 0, 0}, -89);
-  ExpectNear(Jade::Motion::getFront(pose), Jade::Motion::getFront(expected));
-  const auto stationary = pose.rotation;
-  input.Move(320, 11000); // Zero mouse delta must not rewrite orientation.
-  app.Run({3});
-  EXPECT_EQ(pose.rotation, stationary);
-}
-
-TEST(FPSCameraControl, RollAndFlightKeysDoNotChangePoseOrHandleJump)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FPSCameraControl>();
-  app.Run({1});
-  Input input;
-  const auto initial = scene->camera().get<Jade::Transform>();
-  for (const int key : {GLFW_KEY_Q, GLFW_KEY_E, GLFW_KEY_SPACE}) {
-    input.Key(key, GLFW_PRESS);
-    app.Run({2});
-    input.Key(key, GLFW_RELEASE);
-  }
-  input.Key(GLFW_KEY_SPACE, GLFW_PRESS, GLFW_MOD_CONTROL);
-  app.Run({2});
-  input.Key(GLFW_KEY_SPACE, GLFW_RELEASE);
-  const auto &pose = scene->camera().get<Jade::Transform>();
-  ExpectNear(pose.position, initial.position);
-  ExpectNear(Jade::Motion::getUp(pose), Jade::Motion::getUp(initial));
-  // Space remains available to a future character controller.
-  int jumps = 0;
-  scene->on<Jade::KeyPressed<"Space">>([&] { ++jumps; });
-  input.Tap(GLFW_KEY_SPACE);
-  app.Run({1});
-  EXPECT_EQ(jumps, 1);
-}
-
-TEST(FPSCameraControl, FollowsCameraChangesAndExternalPoseEditsWithoutRetainingComponents)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FPSCameraControl>();
-  app.Run({1});
-  const auto first = scene->camera(), second = AddCamera(*scene);
-  Input input;
-  input.Move(0, 0);
-  input.Move(20, 0);
-  app.Run({1});
-  scene->setCamera(second);
-  input.Move(40, 0);
-  app.Run({1});
-  Jade::Transform expected;
-  Jade::Motion::yaw(expected, 2);
-  ExpectNear(Jade::Motion::getFront(first.get<Jade::Transform>()), Jade::Motion::getFront(expected));
-  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), Jade::Motion::getFront(expected));
-  auto &pose = second.get<Jade::Transform>();
-  pose.rotation = Jade::Quaternion::angleAxis({1, 0, 0}, 90);
-  Jade::Motion::roll(pose, 45);
-  app.Run({1});
-  EXPECT_NEAR(Jade::Motion::getRight(pose).y, 0, 1e-6);
-  EXPECT_LT(Jade::Motion::getFront(pose).y, 1);
-  input.Key(GLFW_KEY_W, GLFW_PRESS);
-  second.remove<Jade::Transform>();
-  input.Move(60, 0);
-  EXPECT_NO_THROW(app.Run({2}));
-  scene->destroy(second);
-  input.Move(80, 0);
-  EXPECT_NO_THROW(app.Run({2}));
-}
-
-TEST(FPSCameraControl, CaptureAndMouseBaselineFollowSceneAndFocusLifecycle)
-{
-  Jade::Application app(Hidden());
-  auto fps = std::make_shared<Jade::Scene>(), free = std::make_shared<Jade::Scene>();
-  fps->use<Jade::Module::FPSCameraControl>();
-  free->use<Jade::Module::FreeCameraControl>();
-  app.runtime().setScene(fps);
-  Input input;
-  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
-  input.Key(GLFW_KEY_W, GLFW_PRESS);
-  input.Move(0, 0);
-  input.Move(20, -10);
-  EXPECT_NO_THROW(app.Run({2})); // Empty scenes can install and receive input.
-  const auto camera = AddCamera(*fps);
-  fps->setCamera(camera);
-  input.Key(GLFW_KEY_W, GLFW_RELEASE);
-  input.focus(input.window, GLFW_FALSE);
-  input.Move(500, 500);
-  app.Run({1});
-  input.focus(input.window, GLFW_TRUE);
-  input.Move(1000, 1000);
-  input.Move(1020, 1000);
-  app.Run({1});
-  Jade::Transform expected;
-  Jade::Motion::yaw(expected, 2);
-  ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()), Jade::Motion::getFront(expected));
-  app.runtime().setScene(free);
-  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
-  app.runtime().setScene(fps);
-  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
-  input.Move(5000, 5000);
-  app.Run({1});
-  ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()), Jade::Motion::getFront(expected));
-  std::weak_ptr<Jade::Scene> weak = fps;
-  const auto connection = fps->on<Jade::FrameUpdate>([] {});
-  app.runtime().setScene(nullptr);
-  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
-  fps.reset();
-  EXPECT_TRUE(weak.expired());
-  EXPECT_FALSE(connection.connected());
-}
-
-TEST(FreeCameraControl, OrthographicMiddleDragTracksPixelsZoomAndCameraAxes)
-{
-  Jade::Application app(Hidden());
-  const auto scene = SelectScene(app);
-  scene->use<Jade::Module::FreeCameraControl>();
-  auto& pose = scene->camera().get<Jade::Transform>();
-  auto& lens = scene->camera().get<Jade::Camera>();
-  lens.projection = Jade::Projection::Orthographic;
-  lens.viewHeight = 6;
-  Jade::Motion::yaw(pose, 35);
-  Jade::Motion::pitch(pose, 20);
-  const auto orientation = pose.rotation;
-  const auto start = pose.position;
-  const auto right = Jade::Motion::getRight(pose), up = Jade::Motion::getUp(pose);
-  Input input;
-  int width = 0, height = 0;
-  glfwGetWindowSize(input.window, &width, &height);
-  input.Move(0, 0);
-  input.button(input.window, GLFW_MOUSE_BUTTON_MIDDLE, GLFW_PRESS, 0);
-  input.Move(width / 4.0, height / 4.0);
-  input.button(input.window, GLFW_MOUSE_BUTTON_MIDDLE, GLFW_RELEASE, 0);
-  input.Move(width / 2.0, height / 2.0);
-  app.Run({1});
-  ExpectNear(pose.position, start - right * (6.0f * width / height / 4) + up * 1.5f);
-  EXPECT_EQ(pose.rotation, orientation);
-
-  // Resizing and zooming change world units per cursor unit, not drag direction.
-  glfwSetWindowSize(input.window, 240, 180);
-  glfwPollEvents();
-  glfwGetWindowSize(input.window, &width, &height);
-  lens.viewHeight = 3;
-  const auto resizedStart = pose.position;
-  input.Move(0, 0);
-  input.button(input.window, GLFW_MOUSE_BUTTON_MIDDLE, GLFW_PRESS, 0);
-  input.Move(0, height / 3.0);
-  input.button(input.window, GLFW_MOUSE_BUTTON_MIDDLE, GLFW_RELEASE, 0);
-  app.Run({1});
-  ExpectNear(pose.position, resizedStart + up);
-  EXPECT_EQ(pose.rotation, orientation);
-}
-
-TEST(FreeCameraControl, MiddlePanResetsOnFocusCameraSceneAndProjectionChanges)
+TEST(FPSCameraControl, MovementUsesDtAndModifiersDoNotDisableBindings)
 {
   Jade::Application app(Hidden());
   auto scene = SelectScene(app);
-  scene->use<Jade::Module::FreeCameraControl>();
-  const auto first = scene->camera(), second = AddCamera(*scene);
-  first.get<Jade::Camera>().projection = Jade::Projection::Orthographic;
-  second.get<Jade::Camera>().projection = Jade::Projection::Orthographic;
+  scene->use<Jade::Module::FPSCameraControl>();
+  scene->use<Jade::Module::FPSCameraControl>();
+  auto& pose = scene->camera().get<Jade::Transform>();
+  float elapsed = 0;
+  scene->on<Jade::FrameUpdate>([&](const auto& frame) { elapsed += frame.dt; });
+  struct Movement { int key, mods; Jade::Vec3 direction; float speed = 3; };
+  const std::array movements{
+    Movement{GLFW_KEY_W, 0, {0,0,-1}}, Movement{GLFW_KEY_S, 0, {0,0,1}},
+    Movement{GLFW_KEY_A, 0, {-1,0,0}}, Movement{GLFW_KEY_D, 0, {1,0,0}},
+    Movement{GLFW_KEY_UP, 0, {0,0,-1}}, Movement{GLFW_KEY_DOWN, 0, {0,0,1}},
+    Movement{GLFW_KEY_LEFT, 0, {-1,0,0}}, Movement{GLFW_KEY_RIGHT, 0, {1,0,0}},
+    Movement{GLFW_KEY_SPACE, 0, {0,1,0}}, Movement{GLFW_KEY_LEFT_SHIFT, GLFW_MOD_SHIFT, {0,-1,0}},
+    Movement{GLFW_KEY_RIGHT_SHIFT, GLFW_MOD_SHIFT, {0,-1,0}},
+    Movement{GLFW_KEY_W, GLFW_MOD_SHIFT, {0,0,-1}},
+    Movement{GLFW_KEY_D, GLFW_MOD_CONTROL, {1,0,0}, 1}};
   Input input;
-  input.Move(0, 0);
-  const auto press = [&] { input.button(input.window, GLFW_MOUSE_BUTTON_MIDDLE, GLFW_PRESS, 0); };
-  const auto release = [&] { input.button(input.window, GLFW_MOUSE_BUTTON_MIDDLE, GLFW_RELEASE, 0); };
-  press(); app.Run({1});
-  scene->setCamera(second);
-  input.Move(20, 10); app.Run({1});
-  ExpectNear(second.get<Jade::Transform>().position, {0, 0, 5});
-  release(); press(); app.Run({1});
-  input.focus(input.window, GLFW_FALSE); app.Run({1});
-  input.focus(input.window, GLFW_TRUE);
-  input.Move(40, 20); input.Move(60, 30); app.Run({1});
-  ExpectNear(second.get<Jade::Transform>().position, {0, 0, 5});
-  press(); app.Run({1});
-  app.runtime().setScene(nullptr); app.runtime().setScene(scene);
-  input.Move(80, 40); app.Run({1});
-  ExpectNear(second.get<Jade::Transform>().position, {0, 0, 5});
-  release(); press(); app.Run({1});
-  second.get<Jade::Camera>().projection = Jade::Projection::Perspective;
-  input.Move(100, 50); app.Run({1});
-  second.get<Jade::Camera>().projection = Jade::Projection::Orthographic;
-  input.Move(120, 60); app.Run({1});
-  ExpectNear(second.get<Jade::Transform>().position, {0, 0, 5});
-  release();
-  second.get<Jade::Camera>().projection = Jade::Projection::Perspective;
-  press(); input.Move(140, 70); app.Run({1});
-  ExpectNear(second.get<Jade::Transform>().position, {0, 0, 5});
+  for (const auto& movement : movements) {
+    pose.position = {0,0,5}; elapsed = 0;
+    input.Key(movement.key, GLFW_PRESS, movement.mods);
+    app.Run({2});
+    EXPECT_GT(elapsed, 0);
+    ExpectNear(pose.position, Jade::Vec3{0,0,5} + movement.direction * (elapsed * movement.speed));
+    input.Key(movement.key, GLFW_RELEASE);
+  }
+}
+
+TEST(FPSCameraControl, CombinesDirectionsNormalizesDiagonalsAndDeduplicatesAliases)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  auto& pose = scene->camera().get<Jade::Transform>();
+  float elapsed = 0;
+  scene->on<Jade::FrameUpdate>([&](const auto& frame) { elapsed += frame.dt; });
+  Input input;
+  input.Key(GLFW_KEY_W, GLFW_PRESS); input.Key(GLFW_KEY_UP, GLFW_PRESS);
+  input.Key(GLFW_KEY_D, GLFW_PRESS); input.Key(GLFW_KEY_LEFT_SHIFT, GLFW_PRESS, GLFW_MOD_SHIFT);
+  app.Run({3});
+  const float distance = 3 * elapsed / std::sqrt(3.0f);
+  ExpectNear(pose.position, {distance, -distance, 5-distance});
+  input.Key(GLFW_KEY_W, GLFW_RELEASE); input.Key(GLFW_KEY_UP, GLFW_RELEASE);
+  input.Key(GLFW_KEY_D, GLFW_RELEASE); input.Key(GLFW_KEY_LEFT_SHIFT, GLFW_RELEASE);
+  const auto start = pose.position;
+  input.Key(GLFW_KEY_W, GLFW_PRESS); input.Key(GLFW_KEY_S, GLFW_PRESS);
+  input.Key(GLFW_KEY_SPACE, GLFW_PRESS); input.Key(GLFW_KEY_LEFT_SHIFT, GLFW_PRESS, GLFW_MOD_SHIFT);
+  app.Run({3}); ExpectNear(pose.position, start);
+}
+
+TEST(FPSCameraControl, EditorLookClampsPitchLocksUpAndDoesNotFlip)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  auto& pose = scene->camera().get<Jade::Transform>();
+  Input input;
+  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
+  input.Move(0,0); input.Move(20,-10); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(pose), {0,0,-1});
+  input.Button(GLFW_PRESS); input.Move(40,-20); app.Run({1});
+  Jade::Transform expected; Jade::CameraMotion::look(expected,2,1);
+  ExpectNear(Jade::Motion::getFront(pose), Jade::Motion::getFront(expected));
+  input.Move(40,-10000); app.Run({1});
+  EXPECT_NEAR(Jade::Motion::getFront(pose).y, std::sin(89.0 * std::acos(-1.0) / 180), 1e-6);
+  input.Move(340,-11000); app.Run({1});
+  EXPECT_NEAR(Jade::Motion::getRight(pose).y, 0, 1e-6);
+  EXPECT_GT(Jade::Motion::getUp(pose).y, 0);
+  input.Move(340,11000); app.Run({1});
+  EXPECT_LT(Jade::Motion::getFront(pose).y, -0.99f);
+  EXPECT_GT(Jade::Motion::getUp(pose).y, 0);
+  input.Button(GLFW_RELEASE); input.Move(400,12000); app.Run({1});
+  const auto stationary = pose.rotation; app.Run({3}); EXPECT_EQ(pose.rotation, stationary);
+}
+
+TEST(FPSCameraControl, MovementStaysHorizontalWhenLookingUpAndRemovesExternalRoll)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  auto& pose = scene->camera().get<Jade::Transform>();
+  Jade::CameraMotion::look(pose,45,89); Jade::Motion::roll(pose,70);
+  float elapsed = 0;
+  scene->on<Jade::FrameUpdate>([&](const auto& frame) { elapsed += frame.dt; });
+  Input input; input.Key(GLFW_KEY_W, GLFW_PRESS); app.Run({3});
+  const float distance = 3 * elapsed / std::sqrt(2.0f);
+  ExpectNear(pose.position, {distance,0,5-distance});
+  EXPECT_NEAR(Jade::Motion::getRight(pose).y, 0, 1e-6);
+}
+
+TEST(FPSCameraControl, FirstPersonIsAnInteractionModeAndCaptureFollowsCameraAndScene)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  const auto first = scene->camera(), second = AddCamera(*scene);
+  first.add<Jade::CameraControl>().viewMode = Jade::ViewMode::FirstPerson;
+  app.Run({1}); Input input;
+  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
+  input.Move(0,0); input.Move(20,-10); app.Run({1});
+  Jade::Transform expected; Jade::CameraMotion::look(expected,2,1);
+  ExpectNear(Jade::Motion::getFront(first.get<Jade::Transform>()), Jade::Motion::getFront(expected));
+  scene->setCamera(second); app.Run({1});
+  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
+  scene->setCamera(first); app.Run({1});
+  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
+  input.focus(input.window, GLFW_FALSE); app.Run({1}); input.focus(input.window, GLFW_TRUE);
+  input.Move(1000,1000); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(first.get<Jade::Transform>()), Jade::Motion::getFront(expected));
+  app.runtime().setScene(nullptr);
+  EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
+}
+
+TEST(FPSCameraControl, BindingsBelongToCameraAndCanChangeWithoutReinstallation)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  auto& settings = scene->camera().add<Jade::CameraControl>();
+  settings.bindings[Jade::CameraAction::Forward] = {Jade::Key::I, Jade::Key::Unknown};
+  settings.bindings.look = Jade::MouseButton::Left; settings.sensitivity = 0.5;
+  settings.bindings.wheelZoom = false;
+  Input input; input.Move(0,0); input.Button(GLFW_PRESS); input.Move(20,0); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(scene->camera().get<Jade::Transform>()), {0,0,-1});
+  input.button(input.window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0); input.Move(40,0); app.Run({1});
+  Jade::Transform expected; Jade::CameraMotion::look(expected,10,0);
+  ExpectNear(Jade::Motion::getFront(scene->camera().get<Jade::Transform>()), Jade::Motion::getFront(expected));
+  const auto start = scene->camera().get<Jade::Transform>().position;
+  input.Key(GLFW_KEY_W, GLFW_PRESS); app.Run({2}); input.Key(GLFW_KEY_W, GLFW_RELEASE);
+  ExpectNear(scene->camera().get<Jade::Transform>().position, start);
+  const auto fov = scene->camera().get<Jade::Camera>().fovDegrees;
+  input.scroll(input.window,0,2); app.Run({1}); EXPECT_FLOAT_EQ(scene->camera().get<Jade::Camera>().fovDegrees,fov);
+  float elapsed = 0; scene->on<Jade::FrameUpdate>([&](const auto& frame) { elapsed += frame.dt; });
+  input.Key(GLFW_KEY_I, GLFW_PRESS); app.Run({2});
+  ExpectNear(scene->camera().get<Jade::Transform>().position, start + Jade::Motion::getFront(expected) * (elapsed*3));
+}
+
+TEST(FPSCameraControl, GlobalConsumptionSuppressesHeldMovement)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  app.on<Jade::KeyHeld<"w">>([] { return Jade::EventFlow::Stop; });
+  Input input; input.Key(GLFW_KEY_W, GLFW_PRESS); app.Run({3});
+  ExpectNear(scene->camera().get<Jade::Transform>().position, {0,0,5});
+}
+
+TEST(FPSCameraControl, ConsumedFrameDoesNotCarryMovementIntoTheNextFrame)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  Input input;
+  app.on<Jade::FrameUpdate>([&](const auto& frame) {
+    if (frame.frame == 2) {
+      input.Key(GLFW_KEY_W, GLFW_RELEASE);
+      return Jade::EventFlow::Stop;
+    }
+    return Jade::EventFlow::Continue;
+  });
+  input.Key(GLFW_KEY_W, GLFW_PRESS); app.Run({3});
+  ExpectNear(scene->camera().get<Jade::Transform>().position, {0,0,5});
+}
+
+TEST(FPSCameraControl, DragResetsOnFocusCameraSceneAndSettingsChanges)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  const auto second = AddCamera(*scene);
+  Input input; input.Move(0,0); input.Button(GLFW_PRESS); app.Run({1});
+  scene->setCamera(second); input.Move(20,0); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), {0,0,-1});
+  input.Button(GLFW_RELEASE); input.Button(GLFW_PRESS); app.Run({1});
+  input.focus(input.window,GLFW_FALSE); app.Run({1}); input.focus(input.window,GLFW_TRUE);
+  input.Move(100,0); input.Move(120,0); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), {0,0,-1});
+  input.Button(GLFW_PRESS); app.Run({1});
+  app.runtime().setScene(nullptr); app.runtime().setScene(scene); input.Move(140,0); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), {0,0,-1});
+  input.Button(GLFW_RELEASE); input.Button(GLFW_PRESS); app.Run({1});
+  second.add<Jade::CameraControl>().sensitivity=0.2; input.Move(160,0); app.Run({1});
+  ExpectNear(Jade::Motion::getFront(second.get<Jade::Transform>()), {0,0,-1});
+}
+
+TEST(FPSCameraControl, MiddlePanTracksOrthographicPixelsAndPerspectiveDepth)
+{
+  Jade::Application app(Hidden()); auto scene = SelectScene(app);
+  scene->use<Jade::Module::FPSCameraControl>();
+  auto& pose = scene->camera().get<Jade::Transform>(); auto& lens = scene->camera().get<Jade::Camera>();
+  Jade::CameraMotion::look(pose,35,20); app.Run({1});
+  Input input; int width=0,height=0; glfwGetWindowSize(input.window,&width,&height);
+  for (const auto projection : {Jade::Projection::Orthographic,Jade::Projection::Perspective}) {
+    lens.projection=projection; app.Run({1});
+    const auto orientation=pose.rotation;
+    const auto start=pose.position;
+    const auto right=Jade::Motion::getRight(pose), up=Jade::Motion::getUp(pose);
+    const float span=projection==Jade::Projection::Orthographic?6.0f:20*std::tan(std::acos(-1.0f)/6);
+    input.Move(0,0); input.button(input.window,GLFW_MOUSE_BUTTON_MIDDLE,GLFW_PRESS,0);
+    input.Move(width/4.0,height/4.0); input.button(input.window,GLFW_MOUSE_BUTTON_MIDDLE,GLFW_RELEASE,0);
+    input.Move(width/2.0,height/2.0); app.Run({1});
+    ExpectNear(pose.position,start-right*(span*width/height/4)+up*(span/4));
+    EXPECT_EQ(pose.rotation,orientation);
+  }
+  lens.projection=Jade::Projection::Orthographic; lens.viewHeight=3; app.Run({1});
+  glfwSetWindowSize(input.window,240,180); glfwPollEvents(); glfwGetWindowSize(input.window,&width,&height);
+  const auto start=pose.position;
+  input.Move(0,0); input.button(input.window,GLFW_MOUSE_BUTTON_MIDDLE,GLFW_PRESS,0);
+  input.Move(0,height/3.0); input.button(input.window,GLFW_MOUSE_BUTTON_MIDDLE,GLFW_RELEASE,0); app.Run({1});
+  ExpectNear(pose.position,start+Jade::Motion::getUp(pose));
+}
+
+TEST(FPSCameraControl, ProjectionChangeCancelsPanUntilANewPress)
+{
+  Jade::Application app(Hidden()); auto scene=SelectScene(app); scene->use<Jade::Module::FPSCameraControl>();
+  auto& lens=scene->camera().get<Jade::Camera>(); Input input;
+  input.Move(0,0); input.button(input.window,GLFW_MOUSE_BUTTON_MIDDLE,GLFW_PRESS,0); app.Run({1});
+  lens.projection=Jade::Projection::Orthographic; input.Move(20,10); app.Run({1});
+  ExpectNear(scene->camera().get<Jade::Transform>().position,{0,0,5});
+  input.Move(40,20); app.Run({1}); ExpectNear(scene->camera().get<Jade::Transform>().position,{0,0,5});
+}
+
+TEST(FPSCameraControl, ScrollReversalRestoresBothProjectionsEvenPastLimits)
+{
+  Jade::Application app(Hidden()); auto scene=SelectScene(app); scene->use<Jade::Module::FPSCameraControl>();
+  Input input; app.Run({1}); const auto pose=scene->camera().get<Jade::Transform>();
+  for (auto projection : {Jade::Projection::Perspective,Jade::Projection::Orthographic}) {
+    auto& lens=scene->camera().get<Jade::Camera>(); lens.projection=projection;
+    lens.fovDegrees=60; lens.viewHeight=6; const auto original=lens;
+    for(int i=0;i<4;++i) {input.scroll(input.window,0,-20);app.Run({1});}
+    for(int i=0;i<4;++i) {input.scroll(input.window,0,20);app.Run({1});}
+    EXPECT_NEAR(lens.fovDegrees,original.fovDegrees,1e-4); EXPECT_NEAR(lens.viewHeight,original.viewHeight,1e-4);
+    EXPECT_EQ(scene->camera().get<Jade::Transform>().rotation,pose.rotation);
+    EXPECT_EQ(scene->camera().get<Jade::Transform>().position,pose.position);
+  }
+}
+
+TEST(FPSCameraControl, MissingComponentsAndSceneOwnershipAreSafe)
+{
+  Jade::Application app(Hidden()); auto scene=std::make_shared<Jade::Scene>();
+  scene->use<Jade::Module::FPSCameraControl>(); app.runtime().setScene(scene);
+  Input input; input.Key(GLFW_KEY_W,GLFW_PRESS); input.Button(GLFW_PRESS);
+  input.Move(0,0);input.Move(20,0); input.scroll(input.window,0,1); EXPECT_NO_THROW(app.Run({2}));
+  const auto camera=AddCamera(*scene);scene->setCamera(camera);input.Move(40,0);app.Run({1});
+  ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()),{0,0,-1});
+  camera.remove<Jade::Transform>();input.Move(60,0);EXPECT_NO_THROW(app.Run({2}));
+  camera.remove<Jade::Camera>();input.scroll(input.window,0,1);EXPECT_NO_THROW(app.Run({1}));
+  scene->destroy(camera);EXPECT_NO_THROW(app.Run({1}));
+  const auto connection=scene->on<Jade::FrameUpdate>([]{});std::weak_ptr<Jade::Scene> weak=scene;
+  app.runtime().setScene(nullptr);scene.reset();EXPECT_TRUE(weak.expired());EXPECT_FALSE(connection.connected());
+}
+
+TEST(FPSCameraControl, FailedDependencyRollsBackControlsAndAllowsRetry)
+{
+  Jade::Application app(Hidden());auto scene=SelectScene(app);
+  scene->camera().add<Jade::CameraControl>().viewMode=Jade::ViewMode::FirstPerson;
+  EXPECT_THROW(scene->use<FailingFPSModule>(),std::runtime_error);
+  app.Run({1});Input input;EXPECT_EQ(glfwGetInputMode(input.window,GLFW_CURSOR),GLFW_CURSOR_NORMAL);
+  scene->use<Jade::Module::FPSCameraControl>();app.Run({1});
+  EXPECT_EQ(glfwGetInputMode(input.window,GLFW_CURSOR),GLFW_CURSOR_DISABLED);
+}
+
+TEST(CameraObserver, SharesControlsAndIsolatesGamePoseZoomAndDrag)
+{
+  Jade::Application app(Hidden(true));auto scene=SelectScene(app);scene->use<Jade::Module::FPSCameraControl>();
+  Input input; input.Move(0,0); input.Button(GLFW_PRESS);app.Run({1});
+  const auto gamePose=scene->camera().get<Jade::Transform>(); const auto gameLens=scene->camera().get<Jade::Camera>();
+  app.runtime().setSoulMode(true); app.Run({1});
+  input.Move(0,0); input.Button(GLFW_RELEASE);input.Button(GLFW_PRESS); input.Move(20,-10000);
+  input.scroll(input.window,0,2);app.Run({1});
+  ASSERT_NE(app.runtime().soulCamera(),nullptr);
+  EXPECT_GT(app.runtime().soulCamera()->up.y,0); EXPECT_NEAR(app.runtime().soulCamera()->right.y,0,1e-6);
+  EXPECT_LT(app.runtime().soulCamera()->lens.fovDegrees,gameLens.fovDegrees);
+  const auto start=app.runtime().soulCamera()->position;
+  float elapsed=0;scene->on<Jade::FrameUpdate>([&](const auto& f){elapsed+=f.dt;});
+  input.Key(GLFW_KEY_SPACE,GLFW_PRESS);app.Run({2});input.Key(GLFW_KEY_SPACE,GLFW_RELEASE);
+  ExpectNear(app.runtime().soulCamera()->position,start+Jade::Vec3{0,3*elapsed,0});
+  const auto afterUp=app.runtime().soulCamera()->position;elapsed=0;
+  input.Key(GLFW_KEY_LEFT_SHIFT,GLFW_PRESS,GLFW_MOD_SHIFT);app.Run({2});input.Key(GLFW_KEY_LEFT_SHIFT,GLFW_RELEASE);
+  ExpectNear(app.runtime().soulCamera()->position,afterUp-Jade::Vec3{0,3*elapsed,0});
+  EXPECT_EQ(scene->camera().get<Jade::Transform>().position,gamePose.position);
+  EXPECT_EQ(scene->camera().get<Jade::Transform>().rotation,gamePose.rotation);
+  EXPECT_EQ(scene->camera().get<Jade::Camera>(),gameLens);
+  input.focus(input.window,GLFW_FALSE);app.Run({1});input.focus(input.window,GLFW_TRUE);
+  const auto front=app.runtime().soulCamera()->forward;
+  input.Move(1000,1000);input.Move(1020,1000);app.Run({1});ExpectNear(app.runtime().soulCamera()->forward,front);
+  app.runtime().setSoulMode(false);input.Move(1040,1000);app.Run({1});
+  EXPECT_EQ(scene->camera().get<Jade::Transform>().rotation,gamePose.rotation);
+}
+
+TEST(CameraMotion, InvalidUpdatesAreAtomicAndGeneralMotionStillAllowsRoll)
+{
+  Jade::Transform pose;pose.position={1,2,3};const auto initial=pose;
+  const auto nan=std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(Jade::CameraMotion::look(pose,nan,0),std::invalid_argument);
+  EXPECT_THROW(Jade::CameraMotion::move(pose,{1,0,0},std::numeric_limits<float>::infinity()),std::invalid_argument);
+  EXPECT_THROW(Jade::CameraMotion::pan(pose,{},nan,0,100),std::invalid_argument);
+  EXPECT_EQ(pose.position,initial.position);EXPECT_EQ(pose.rotation,initial.rotation);
+  Jade::Motion::roll(pose,180);EXPECT_LT(Jade::Motion::getUp(pose).y,0);
+  Jade::CameraMotion::constrain(pose);EXPECT_GT(Jade::Motion::getUp(pose).y,0);
 }

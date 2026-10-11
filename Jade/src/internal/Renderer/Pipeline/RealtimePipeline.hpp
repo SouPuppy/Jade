@@ -41,4 +41,15 @@ private:
   bool m_Hybrid;
   std::vector<std::unique_ptr<Renderer::RenderPass>> m_Passes;
 };
+// Normals are geometry diagnostics, independent of lighting/shadows/transport.
+class NormalDebugPipeline final : public Renderer::RenderPipeline {
+public:
+  const char* name() const noexcept override { return "Normals"; }
+  void render(Renderer::RenderContext& c) override {
+    c.settings.normals = true;
+    c.device.prepareScene(c.scene, c.target, false);
+    c.device.drawGeometry(c.scene, c.settings);
+    c.device.composite(c.settings);
+  }
+};
 }

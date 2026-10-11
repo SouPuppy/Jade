@@ -15,8 +15,8 @@ V support(const WorldCollider& box, V direction) {
     p = p + box.axes[i] * (collisionDot(direction, box.axes[i]) >= 0 ? box.halfExtents[i] : -box.halfExtents[i]);
   return p;
 }
-std::vector<V> clip(const std::vector<V>& in, V center, V axis, double extent) {
-  std::vector<V> out;
+Physics::SmallList<V,16> clip(const Physics::SmallList<V,16>& in, V center, V axis, double extent) {
+  Physics::SmallList<V,16> out;
   if (in.empty()) return out;
   auto previous = in.back();
   double pd = collisionDot(previous - center, axis) - extent;
@@ -68,7 +68,7 @@ std::optional<Physics::Manifold> boxes(const WorldCollider& a, const WorldCollid
     const auto c = inc.center + inc.axes[f] * (collisionDot(inc.axes[f], n) >= 0 ? -inc.halfExtents[f] : inc.halfExtents[f]);
     const auto u = inc.axes[(f + 1) % 3] * inc.halfExtents[(f + 1) % 3];
     const auto v = inc.axes[(f + 2) % 3] * inc.halfExtents[(f + 2) % 3];
-    std::vector<V> polygon{c - u - v, c + u - v, c + u + v, c - u + v};
+    Physics::SmallList<V,16> polygon{c - u - v, c + u - v, c + u + v, c - u + v};
     for (std::size_t i = 0; i < 3; ++i) if (i != face) {
       polygon = clip(polygon, center, ref.axes[i], ref.halfExtents[i]);
       polygon = clip(polygon, center, -ref.axes[i], ref.halfExtents[i]);
@@ -83,6 +83,7 @@ std::optional<Physics::Manifold> boxes(const WorldCollider& a, const WorldCollid
     // Keep four well-spread witnesses, rather than the first four clipped vertices.
     if (result.points.size() > 4) {
       auto points = std::move(result.points);
+      result.points.clear();
       result.points.push_back(points.front());
       points.erase(points.begin());
       while (result.points.size() < 4) {

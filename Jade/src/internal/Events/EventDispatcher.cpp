@@ -106,7 +106,7 @@ std::shared_ptr<bool> EventDispatcher::Connect(KeyAction action, KeyChord chord,
   slot->action = action;
   slot->chord = chord;
   slot->keyHandler = std::move(handler);
-  slot->binding = std::format("{}<{}>", EventName(action), ChordName(chord));
+  slot->binding = std::format("{}<{}>", EventName(action), chord.key == Key::Unknown ? "*" : ChordName(chord));
   return Add(std::move(slot));
 }
 
@@ -126,7 +126,7 @@ std::shared_ptr<bool> EventDispatcher::Connect(MouseAction action, MouseButton b
   slot->mouseAction = action;
   slot->button = button;
   slot->buttonHandler = std::move(handler);
-  slot->binding = std::format("{}<{}>", EventName(action), ButtonName(button));
+  slot->binding = std::format("{}<{}>", EventName(action), button == MouseButton::Unknown ? "*" : ButtonName(button));
   return Add(std::move(slot));
 }
 
@@ -203,7 +203,7 @@ EventFlow EventDispatcher::Dispatch(KeyAction action, const KeyEvent& event)
 {
   const auto result = DispatchTo(EventName(action), [&](const Slot& slot) {
     return slot.keyHandler && slot.action == action
-      && slot.chord == KeyChord{event.key, event.modifiers};
+      && (slot.chord.key == Key::Unknown || slot.chord == KeyChord{event.key, event.modifiers});
   }, [&](const Slot& slot) { return slot.keyHandler(event); });
   try {
     if (action == KeyAction::Held) {
@@ -236,7 +236,8 @@ EventFlow EventDispatcher::Dispatch(MouseAction action, const MouseEvent& event)
 {
   const auto result = DispatchTo(EventName(action), [&](const Slot& slot) {
     // A button binding matches regardless of modifiers, including a changed modifier on release.
-    return slot.buttonHandler && slot.mouseAction == action && slot.button == event.button;
+    return slot.buttonHandler && slot.mouseAction == action &&
+      (slot.button == MouseButton::Unknown || slot.button == event.button);
   }, [&](const Slot& slot) { return slot.buttonHandler(event); });
   if (action == MouseAction::Held) {
     m_Logger << Log::trace("{}: button={} dt={:.4f}s handlers={} consumed_by={}",

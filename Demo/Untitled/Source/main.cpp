@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
       if (option == "--help") {
         std::cout << "Untitled [--pipeline raster|hybrid|tracing|none] [--soul] [--device cpu|gpu] [--scale 0.1..1] [--frames N] [--hidden] [--benchmark]\n"
           "WASD: camera-relative movement | Q/E: rotate 45 degrees | R: reset | Esc: exit\n"
-          "Engine debug: I Raster/Hybrid/RayTracing/None | F1 wireframe | F2 soul camera | F3 scene bounds | F4 collisions | F5 color/normals | O projection | P pause\n";
+          "Engine debug: I Raster/Hybrid/RayTracing/None | F1 wireframe | F2 soul camera | F3 scene bounds | F4 collisions | F5 normal debug | O projection | P pause\n";
         return 0;
       }
       if (option == "--soul") { soul = true; continue; }
@@ -44,10 +44,11 @@ int main(int argc, char* argv[]) {
       const std::string_view value(argv[++i]);
       if (option == "--pipeline") {
         using Jade::Renderer::RenderMode;
-        if(value=="raster") config.renderer.pipeline=RenderMode::Raster;
-        else if(value=="hybrid") config.renderer.pipeline=RenderMode::Hybrid;
-        else if(value=="tracing") config.renderer.pipeline=RenderMode::RayTracing;
-        else if(value=="none") config.renderer.pipeline=RenderMode::None;
+
+        if (value == "raster") config.renderer.pipeline = RenderMode::Raster;
+        else if (value == "hybrid") config.renderer.pipeline = RenderMode::Hybrid;
+        else if (value == "tracing") config.renderer.pipeline = RenderMode::RayTracing;
+        else if (value == "none") config.renderer.pipeline = RenderMode::None;
         else throw std::invalid_argument("Pipeline must be raster, hybrid, tracing or none.");
       } else if (option == "--device") {
         if (value != "cpu" && value != "gpu") throw std::invalid_argument("Device must be cpu or gpu.");

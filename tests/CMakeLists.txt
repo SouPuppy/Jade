@@ -10,6 +10,7 @@ add_executable(JadeSmokeTests
   ComponentTests.cpp
   ArchetypeTests.cpp
   PhysicsTests.cpp
+  WorldPhysicsTests.cpp
   CollisionTests.cpp
   MeshTests.cpp
   RendererTests.cpp

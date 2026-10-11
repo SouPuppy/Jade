@@ -30,7 +30,7 @@ No download, Python, Aseprite installation or network access is required to play
 | F2 | Enter/leave the soul observation camera; the world keeps running |
 | F3 | Toggle scene axes/AABBs, entity axes, BVH, camera frustums and light directions |
 | F4 | Toggle collision, contact and physics debug drawing |
-| F5 | Switch color / normal output without changing the selected pipeline |
+| F5 | Toggle independent normal debug, including when I selects None |
 | O | Switch orthographic / perspective projection |
 
 Engine debug shortcuts and Debug logging are enabled by default. Debug overlays
@@ -38,7 +38,10 @@ start hidden. The game initially uses an orthographic camera with a 45° pitch.
 
 ## Rendering and animation
 
-The window is 960×640 with a 24 FPS cap. GPU PathTrace defaults to a 0.5 resolution
+The window is 960 x 640 with a 24 FPS cap and starts in Raster. Raster uses depth
+testing, alpha-cutout sprites, shadow maps, HDR lighting and tone mapping. Hybrid
+shares the raster passes and uses real BVH shadow queries instead of shadow maps.
+It does not add traced reflections or indirect lighting. GPU PathTrace defaults to a 0.5 resolution
 scale (480×320), at least one complete sample per frame and four bounces. Remaining
 frame time can be used for more samples. Frames do not accumulate old character poses.
 GPU initialization failure is logged and falls back to CPU. Hybrid CPU shadows use
@@ -47,8 +50,8 @@ geometry remains at window resolution. Actual performance is
 hardware-dependent.
 
 ```powershell
-& ./build/windows-release/bin/Untitled.exe --device cpu --scale 0.25
-& ./build/windows-release/bin/Untitled.exe --device gpu --scale 0.375
+& ./build/windows-release/bin/Untitled.exe --pipeline hybrid --device cpu --scale 0.25
+& ./build/windows-release/bin/Untitled.exe --pipeline tracing --device gpu --scale 0.375
 & ./build/windows-release/bin/Untitled.exe --benchmark --hidden --frames 1441
 ```
 
@@ -78,8 +81,8 @@ jumping, steps, slopes or rigid-body pushing. Gameplay state mapping stays in Un
 ## Soul observation mode
 
 F2 creates a Runtime-owned free camera without editing the game's selected camera.
-WASD flies, Q/E moves down/up, Shift accelerates, and holding the right mouse button
-turns the view. These controls are consumed before gameplay input. O changes only the
+WASD/arrows move horizontally, Space ascends, Shift descends, Ctrl slows movement, and holding the right mouse button
+turns the view with pitch limited to +/-89 degrees and no roll. Middle-button drag pans, and the wheel zooms in either projection. These controls are consumed before gameplay input. O changes only the
 observer projection. The game, physics and animation continue; P still controls pause.
 F2 or Esc returns to the selected game pipeline and restores mouse capture. I changes
 the pipeline to use after leaving the observer.

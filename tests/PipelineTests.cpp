@@ -81,7 +81,11 @@ TEST(Pipeline, ModeCycleConsumptionAndF5PreserveSelectedPipeline) {
   tap(GLFW_KEY_I,GLFW_MOD_SHIFT);app.Run({1});EXPECT_EQ(renderer.pipeline(),RenderMode::Raster);
   for(const auto next:{RenderMode::Hybrid,RenderMode::RayTracing,RenderMode::None,RenderMode::Raster}) {
     tap(GLFW_KEY_I);app.Run({1});EXPECT_EQ(renderer.pipeline(),next);
+    const auto settings=renderer.rayTracingSettings();
+    const bool debug=renderer.normalDebugEnabled();
     tap(GLFW_KEY_F5);app.Run({1});EXPECT_EQ(renderer.pipeline(),next);
+    EXPECT_EQ(renderer.normalDebugEnabled(),!debug);
+    EXPECT_EQ(renderer.rayTracingSettings(),settings);
     EXPECT_EQ(renderer.sceneRenderingEnabled(),next!=RenderMode::None);
     if(next!=RenderMode::RayTracing) EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
   }

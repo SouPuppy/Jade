@@ -98,7 +98,8 @@ Renderer::RenderProgress RenderHost::progress() const
 }
 void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSize size, Renderer::RenderMode mode, bool wireframe,
                       bool axes, const CollisionDebugLines* colliders, bool paused,
-                      std::chrono::steady_clock::time_point deadline, const Renderer::CameraFrame* observer, const std::vector<Renderer::PathSegment>* paths)
+                      std::chrono::steady_clock::time_point deadline, const Renderer::CameraFrame* observer,
+                      const std::vector<Renderer::PathSegment>* paths, bool normalDebug)
 {
   std::optional<Renderer::SceneSnapshot> view;
   const auto sourceCamera = snapshot ? snapshot->camera : std::optional<Renderer::CameraFrame>{};
@@ -106,7 +107,7 @@ void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSi
     view=*snapshot; view->camera=*observer; snapshot=&*view;
     mode=Renderer::RenderMode::Raster;
   }
-  const bool render = mode == Renderer::RenderMode::RayTracing;
+  const bool render = !normalDebug && mode == Renderer::RenderMode::RayTracing;
   if (m_Render != render) {
     m_Render = render;
     m_Session.stop();
@@ -119,7 +120,8 @@ void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSi
     invalidate();
     m_FrameSize = size;
   }
-  const auto name = render ? std::string(m_Settings.device == Renderer::RayDevice::GPU ? m_Compute->name() : "RayTracing") +
+  const auto name = normalDebug ? std::string("Normals") + (wireframe ? " + Wireframe" : "") :
+    render ? std::string(m_Settings.device == Renderer::RayDevice::GPU ? m_Compute->name() : "RayTracing") +
     (wireframe ? " + Wireframe" : "") : std::string(Renderer::pipelineName(mode)) + (wireframe ? " + Wireframe" : "");
   m_Window.SetTitle(m_Title + " | " + name + (observer ? " | Soul" : ""));
   m_Display.begin(size);
@@ -140,6 +142,7 @@ void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSi
       case Renderer::RenderMode::RayTracing:pipeline=&m_RayPipeline;break;
       case Renderer::RenderMode::None:break;
     }
+    if (normalDebug) pipeline = &m_NormalDebug;
     pipeline->render(context);
     if (wireframe)
       m_Debug.wireframe(*snapshot, size);

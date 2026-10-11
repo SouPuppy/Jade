@@ -289,7 +289,14 @@ struct RasterScene::Impl {
   void drawGeometry(const SceneSnapshot& scene,PipelineSettings settings) {
     if(!scene.camera) return;
     if(rayMode && settings.cpuRayShadows && !settings.normals) cpuShadows(scene,settings);
-    glUseProgram(raster.Handle());glUniform1i(raster.Uniform("cpuRayShadows"),rayMode && settings.cpuRayShadows?1:0);
+    glUseProgram(raster.Handle());
+    // Geometry diagnostics can draw without executing the shadow pass first.
+    glDisable(GL_BLEND);glDisable(GL_CULL_FACE);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glDepthFunc(GL_LESS);
+    glUniform1i(raster.Uniform("spriteAtlas"),0);glUniform1i(raster.Uniform("shadowMaps"),1);
+    glUniform1i(raster.Uniform("rayData"),2);glUniform1i(raster.Uniform("rayShadows"),rayMode?1:0);
+    glUniform2f(raster.Uniform("atlasSize"),static_cast<float>(atlasWidth),static_cast<float>(atlasHeight));
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D_ARRAY,atlas);
+    glUniform1i(raster.Uniform("cpuRayShadows"),rayMode && settings.cpuRayShadows?1:0);
     glUniform1i(raster.Uniform("cpuShadowMaps"),3);glUniform2f(raster.Uniform("targetSize"),static_cast<float>(size.width),static_cast<float>(size.height));
     glBindFramebuffer(GL_FRAMEBUFFER,fbo);glViewport(0,0,size.width,size.height);
     glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);

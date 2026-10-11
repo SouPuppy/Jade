@@ -6,25 +6,27 @@ Application owns a global main-thread dispatcher; each Scene owns a dispatcher f
 
 ```cpp
 Jade::EngineConfig config;
-config.debug.shortcuts = true; // F2: soul observer, F3: axes/AABB, F4: physics/forces/logs, F5: Color/Normal, O: projection. F1/I always work.
+config.debug.shortcuts = true; // F2: soul observer, F3: axes/AABB, F4: physics/forces/logs, F5: normal debug, O: projection. F1/I always work.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
-scene->use<Jade::Module::FreeCameraControl>();
+scene->use<Jade::Module::FPSCameraControl>();
 ```
 
-Include Jade/Module/FreeCameraControl.hpp or Jade/Jade.hpp. FreeCameraControl installs WASD/arrows, Shift/Ctrl+W, Space/Ctrl+Space, left-button look, orthographic middle-button panning and wheel zoom. It resolves the selected camera for each event, uses dt for held motion, and resets dragging on camera changes and scene activation/deactivation. Missing components are skipped. Repeated use of the same module type on a Scene is a no-op; subscriptions remain across reactivation and expire with the Scene. See [module contracts and fixed control defaults](../README.md#scene-modules-and-controls).
+Include Jade/Module/FPSCameraControl.hpp or Jade/Jade.hpp. The single controller installs upright WASD/arrows movement, Space ascent, Shift descent, Ctrl slow movement, right-button look, middle-button pan and wheel zoom. CameraControl is an optional component on the selected camera that owns ViewMode, physical key/button bindings and speed/sensitivity. Editor uses drag gestures; FirstPerson uses captured continuous look. Both limit pitch to +/-89 degrees, remove roll and keep horizontal movement at full speed while pitched. Projection is an independent Camera property. See [camera controls](../README.md#scene-modules-and-controls).
 
-For first-person controls, include Jade/Module/FPSCameraControl.hpp and use `scene->use<Jade::Module::FPSCameraControl>()` instead. It keeps WASD/arrows and Shift/Ctrl+W on the horizontal plane, captures the cursor for continuous mouse look, clamps pitch to +/-89 degrees and removes roll. Space, Ctrl+Space, Q/E and wheel are unbound; physics and jumping belong to a future character controller. A Scene rejects installing both control types. Both modules use the existing Scene::on events, skip missing components and release subscriptions with their Scene.
+Held input is combined once per FrameUpdate, with normalized diagonals, cancellation of opposing directions and deduplication of key aliases. Modifier changes do not disable physical movement keys. Global Stop consumption still prevents scene navigation. The module resolves the current camera per event, skips missing components, installs once, and cancels gestures on focus/camera/scene/settings/projection changes. It does not apply character physics.
 
 Unmodified KeyPressed F1 toggles mesh wireframe; I cycles Raster ? Hybrid ? RayTracing ? None ? Raster, including when debug shortcuts are disabled. Repeats, modified keys and consumed events do not invoke defaults. Wireframe is independent of the selected image pipeline. None clears the image but permits enabled debug overlays. Physics and input continue. Scene selection preserves the selected pipeline and overlay flags.
 
-The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing FreeCameraControl. FreeCameraControl can also be used with debug disabled.
+The Application debug flag defaults to false in both builds and is independent of Events/terminal logging. These shortcuts are default actions after global and scene propagation, so handlers can consume or override them without installing FPSCameraControl. FPSCameraControl can also be used with debug disabled.
 
-Orthographic middle-button drag translates along the camera's right/up axes without changing rotation. Translation is viewHeight / windowHeight per cursor unit, so the image follows the mouse at the current zoom and after resize. MouseMoved.windowHeight uses logical window coordinates, matching cursor deltas on high-DPI displays. Middle release, focus loss, scene/camera changes and leaving Orthographic cancel the pan; a fresh press is required. Left look and wheel zoom remain available; Q/E have no default binding.
+Middle-button drag pans along camera right/up without changing rotation. Orthographic scale is viewHeight/windowHeight; perspective scale is 2*panDistance*tan(FOV/2)/windowHeight. Logical window height matches cursor deltas on high-DPI displays. Releasing the button or changing focus, camera, scene, settings or projection cancels the gesture until a fresh press.
+
+Scene also supports `on(KeyAction, callback)` and `on(MouseAction, callback)` to observe all physical keys/buttons for one action, regardless of modifiers. They share ordering, EventFlow::Stop, rollback and connection lifetime with typed subscriptions. Exact typed chord matching is unchanged. Camera navigation uses action observers to read per-camera bindings at event time.
 
 ## Public API
 
-These examples show custom bindings; avoid installing equivalent callbacks alongside FreeCameraControl unless both actions are intended.
+These examples show custom bindings; avoid installing equivalent callbacks alongside FPSCameraControl unless both actions are intended.
 
 ```cpp
 auto scene = app.runtime().scene(); // Select a scene and explicit camera first.
@@ -150,7 +152,7 @@ Jade::Motion::zoom(lens, 1.0); // One positive scroll offset: zoom in.
 
 Forward/backward and right/left use Transform's current unit axes, including roll. Up/down follow parent Y even after banking. Moving position retains quaternion orientation without keeping a look-at target.
 
-Angles are increments in degrees about the current local axes. Positive yaw turns right, positive pitch looks up and positive roll banks clockwise along front. Every increment composes and normalizes a quaternion; pitch can pass through the poles and complete a flip. Mouse yaw/pitch follows the current local axes; Q/E are unbound in FreeCameraControl. Motion::lookAt(pose, target, up) replaces rotation once, with target/up in parent coordinates (world coordinates for a root). Mouse Y grows downward, so the example negates dy. Distances/angles must be finite; failed helper updates preserve prior state.
+Angles are increments in degrees about the current local axes. Positive yaw turns right, positive pitch looks up and positive roll banks clockwise along front. Every increment composes and normalizes a quaternion; pitch can pass through the poles and complete a flip. Mouse yaw/pitch follows the current local axes; Q/E are unbound in FPSCameraControl; its look gestures use CameraMotion rather than unrestricted local-axis Motion. Motion::lookAt(pose, target, up) replaces rotation once, with target/up in parent coordinates (world coordinates for a root). Mouse Y grows downward, so the example negates dy. Distances/angles must be finite; failed helper updates preserve prior state.
 
 Zoom scales the active projection parameter by exp(-scroll * 0.1), bounding each scroll increment to [-100, 100]. Perspective FOV stays in [1, 179] degrees; orthographic visible height stays in [0.01, 10000] world units. The camera pose, projection mode and near/far planes stay intact. A zero increment leaves the camera unchanged, and nonfinite increments are rejected before mutation.
 
@@ -169,7 +171,7 @@ scene->on<Jade::KeyPressed<"Escape">>([] {
 scene->on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 ```
 
-With config.debug.shortcuts=true, unconsumed bare F3 toggles axes and cyan AABBs together: if either is enabled, both turn off; otherwise both turn on. F4 independently toggles orange Collider outlines, red contact points, green normals, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow lengths encode direction only; near-zero forces are hidden and unsolved total forces are unavailable. F5 toggles the selected pipeline output between Color and Normal, preserving device, transport and quality settings; changing output resets image samples. It preserves the selected pipeline, including None. Wireframe remains independent. O switches camera projection while preserving both zoom values, pose and clip planes. All overlays work with image/Wireframe disabled. Repeat and modified keys do not trigger defaults; EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. Initial visibility uses config.debug.axes/aabbs/physics. Runtime provides independent setAxes(), setAabbs() and setPhysicsDebug() controls. Logging reports field count, integration method, bodies, contacts and forces at most once per second.
+With config.debug.shortcuts=true, unconsumed bare F3 toggles axes and cyan AABBs together: if either is enabled, both turn off; otherwise both turn on. F4 independently toggles orange Collider outlines, red contact points, green normals, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow lengths encode direction only; near-zero forces are hidden and unsolved total forces are unavailable. F5 toggles an independent normal debug view that draws even with I set to None and wireframe/other diagnostics disabled. It preserves the selected pipeline and all RayTracingSettings, including output, device, transport and quality. The diagnostic draws geometry normals directly without lighting, shadow passes or ray transport; turning it off restores the selected pipeline. Renderer::setNormalDebug()/normalDebugEnabled() and EngineConfig::renderer.normalDebug expose this state. Wireframe remains independent. O switches camera projection while preserving both zoom values, pose and clip planes. All overlays work with image/Wireframe disabled. Repeat and modified keys do not trigger defaults; EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. Initial visibility uses config.debug.axes/aabbs/physics. Runtime provides independent setAxes(), setAabbs() and setPhysicsDebug() controls. Logging reports field count, integration method, bodies, contacts and forces at most once per second.
 
 Unconsumed Escape leaves soul observation if active; otherwise it closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
@@ -221,16 +223,12 @@ record. Subscription IDs restart with each dispatcher and persist across Runs.
 
 ## Files and extension boundary
 
-Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains the public camera movement and zoom helpers with a matching source implementation. Module/FreeCameraControl.hpp and Module/FPSCameraControl.hpp expose reusable scene controls; their engine implementations use Scene::on and Motion. Application.hpp and Core/Scene.hpp adapt typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.
+Input/Key.hpp, Input/MouseButton.hpp and Events/*.hpp contain only public input/event/connection contracts and the compile-time parsers. Graphics/Motion.hpp contains general Transform movement/rotation and lens zoom helpers with a matching source implementation. Graphics/CameraControl.hpp defines per-camera settings and bindings; Graphics/CameraMotion.hpp defines input-free upright operations. Module/FPSCameraControl.hpp exposes the single scene controller. Its implementation and the Runtime observer share internal/Input/CameraNavigation. Application.hpp and Core/Scene.hpp adapt typed or argument-free callables. State, queues and dispatch storage live under src/internal/Input and src/internal/Events. The GLFW adapter lives under src/internal/Platform/GLFW. Camera, Transform and Mesh data depend on no input backend.
 
 The current event set is keyboard/button transitions and held events, MouseMoved, MouseScrolled, FrameUpdate and scene-only SceneActivated/SceneDeactivated. Resize and text events can be added as separate event types and backend adapters without changing mesh/component contracts. The current on() reports unsupported event types at compile time.
 
 ## Soul camera input
 
-With debug.shortcuts enabled, an unconsumed bare F2 press toggles Runtime's observer.
-The game camera stays selected in Scene. WASD/Q/E/Shift movement and right-button look
-are intercepted before global and scene input handlers while the observer is active;
-FrameUpdate, physics and animation continue. O changes the observer lens, and I changes
-the game pipeline restored on exit. F2 or Esc leaves observation; Esc closes the app
-when observation is inactive. Focus loss releases look capture and scene switches clear
-observer state. Sparse paths are sampled from the game camera, not the observer.
+With debug.shortcuts enabled, an unconsumed bare F2 press toggles Runtime's independent observer. The game camera stays selected in Scene. WASD/arrows, Space/Shift, Ctrl slow movement, right-button look, middle-button pan and wheel zoom use the same CameraNavigation implementation as scene cameras. Runtime::observerControls() configures the observer independently; Editor is the default ViewMode. Observer navigation input is intercepted before global and scene input handlers, and wheel input never changes the game lens. FrameUpdate, physics and animation continue; scene camera navigation is suspended.
+
+O changes the observer lens, and I changes the game pipeline restored on exit. F2 or Esc leaves observation; Esc closes the app when observation is inactive. Focus loss cancels gestures and scene switches clear observer state. Entering/exiting observation cancels any scene drag. Sparse paths are sampled from the game camera, not the observer.

@@ -341,6 +341,73 @@ TEST(RenderMode, DisabledGeometryStillSimulatesAndAllowsIndependentDebugOverlays
   EXPECT_THROW(app.Run({1}), std::invalid_argument);
 }
 
+TEST(RenderMode, F5DrawsNormalsWithoutMainRenderingAndSurvivesThePipelineCycle)
+{
+  for (const auto device : {RayDevice::CPU, RayDevice::GPU}) {
+    auto config = hidden(true);
+    config.renderer.pipeline = RenderMode::None;
+    config.renderer.rayTracing.device = device;
+    config.renderer.rayTracing.exposureEV = 4;
+    Application app(config);
+    auto scene = MakeTestScene(app);
+    auto& pose = scene->camera().get<Transform>();
+    pose = {}; pose.position = {0, 0, 3};
+    auto& lens = scene->camera().get<Camera>();
+    lens.projection = Projection::Orthographic; lens.viewHeight = 2;
+    auto object = scene->create<Archetype<Transform, Geometry, Material>>();
+    object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+    auto& renderer = app.runtime().renderer();
+    const auto pixel = [] {
+      std::array<unsigned char, 4> result{};
+      glReadBuffer(GL_FRONT); glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, result.data());
+      EXPECT_EQ(glGetError(), GL_NO_ERROR);
+      return result;
+    };
+    const auto expectNormals = [&] {
+      // The hidden window's presented front buffer is not retained by all drivers.
+      // Read the actual geometry output texture, which the debug pass composites.
+      ASSERT_NE(glGetTexImage, nullptr);
+      GLint width=0, height=0;
+      glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+      glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+      ASSERT_GT(width, 0); ASSERT_GT(height, 0);
+      std::vector<float> colors(static_cast<std::size_t>(width)*height*4);
+      glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, colors.data());
+      EXPECT_EQ(glGetError(), GL_NO_ERROR);
+      const auto offset = (static_cast<std::size_t>(height/2)*width + width/2)*4;
+      EXPECT_NEAR(colors[offset], .5f, .001f);
+      EXPECT_NEAR(colors[offset + 1], .5f, .001f);
+      EXPECT_NEAR(colors[offset + 2], 1, .001f);
+    };
+    app.Run({2});
+    EXPECT_EQ(pixel()[2], 0);
+    const auto settings = renderer.rayTracingSettings();
+    tap(GLFW_KEY_F5); app.Run({2});
+    EXPECT_TRUE(renderer.normalDebugEnabled());
+    EXPECT_EQ(renderer.pipeline(), RenderMode::None);
+    EXPECT_FALSE(renderer.sceneRenderingEnabled());
+    EXPECT_FALSE(renderer.rayTracingEnabled());
+    EXPECT_FALSE(renderer.wireframeEnabled());
+    EXPECT_EQ(renderer.rayTracingSettings(), settings);
+    EXPECT_EQ(renderer.progress().rendererName, "Normals");
+    EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
+    expectNormals();
+    for (const auto mode : {RenderMode::Raster, RenderMode::Hybrid, RenderMode::RayTracing, RenderMode::None}) {
+      tap(GLFW_KEY_I); app.Run({2});
+      EXPECT_EQ(renderer.pipeline(), mode);
+      EXPECT_TRUE(renderer.normalDebugEnabled());
+      EXPECT_FALSE(renderer.progress().inFlight);
+      EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
+      expectNormals();
+    }
+    tap(GLFW_KEY_F5); app.Run({2});
+    EXPECT_FALSE(renderer.normalDebugEnabled());
+    EXPECT_EQ(renderer.pipeline(), RenderMode::None);
+    EXPECT_EQ(renderer.rayTracingSettings(), settings);
+    EXPECT_EQ(pixel()[2], 0);
+  }
+}
+
 
 TEST(RenderMode, WorkerFailureReleasesIntegratorLockAndAllowsRecovery)
 {
@@ -372,7 +439,7 @@ TEST(RenderMode, RealPathTracingAndWheelInputSurviveRepeatedRenderToggles)
 {
   Application app(hidden(true));
   auto scene = MakeTestScene(app);
-  scene->use<Module::FreeCameraControl>();
+  scene->use<Module::FPSCameraControl>();
   auto object = scene->create();
   object.add<Geometry>(app.runtime().assets().add(MeshData::cube()));
   object.add<Material>(Materials::Gold());

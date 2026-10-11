@@ -1,4 +1,5 @@
 #include "BroadPhase.hpp"
+#include "SpatialIndex.hpp"
 #include <algorithm>
 #include <numeric>
 
@@ -9,23 +10,18 @@ std::vector<ColliderPair> broadPhase(std::span<const WorldCollider> shapes, doub
     throw std::invalid_argument("Invalid broad phase margin or dynamic mask.");
   std::vector<std::size_t> order(shapes.size());
   std::iota(order.begin(), order.end(), std::size_t{0});
-  std::sort(order.begin(), order.end(), [&](auto a, auto b) {
-    const auto x = shapes[a].bounds.minimum.x, y = shapes[b].bounds.minimum.x;
-    return x == y ? a < b : x < y;
-  });
-  std::vector<std::vector<ColliderPair>> output(order.size());
+  SpatialIndex tree; tree.update(shapes, order, 0);
+  constexpr std::size_t batch = 128;
+  std::vector<std::vector<ColliderPair>> output((order.size()+batch-1)/batch);
   const auto scan = [&](std::size_t index) {
-    const auto a = order[index];
-    for (auto next = index + 1; next < order.size(); ++next) {
-      const auto b = order[next];
-      if (shapes[a].bounds.maximum.x + margin < shapes[b].bounds.minimum.x) break;
-      if (!dynamic.empty() && !dynamic[a] && !dynamic[b]) continue;
-      if (shapes[a].bounds.overlaps(shapes[b].bounds, margin))
-        output[index].push_back({std::min(a, b), std::max(a, b)});
-    }
+    for (auto a = index*batch; a < std::min(shapes.size(),(index+1)*batch); ++a)
+      tree.query(shapes[a].bounds,margin,[&](auto b) {
+        if (b <= a || (!dynamic.empty() && !dynamic[a] && !dynamic[b])) return;
+        if (shapes[a].bounds.overlaps(shapes[b].bounds,margin)) output[index].push_back({a,b});
+      });
   };
-  if (jobs) jobs->wait(jobs->parallelFor(order.size(), scan, {JobCategory::Physics}), WaitMode::Help);
-  else for (std::size_t i = 0; i < order.size(); ++i) scan(i);
+  if (jobs && output.size() > 1) jobs->wait(jobs->parallelFor(output.size(),scan,{JobCategory::Physics,{},1}),WaitMode::Help);
+  else for (std::size_t i = 0; i < output.size(); ++i) scan(i);
   std::size_t count = 0;
   for (const auto& pairs : output) count += pairs.size();
   std::vector<ColliderPair> pairs; pairs.reserve(count);

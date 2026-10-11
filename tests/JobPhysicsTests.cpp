@@ -102,7 +102,7 @@ TEST(JobPhysics, WorkerFailureDoesNotCommitAndEntityRecyclingRemainsSafe) {
 }
 
 TEST(JobPhysics, SharedSchedulerKeepsPhysicsAndRayTracingDeterministic) {
-  Stacks fixture; JobSystem jobs({3}); Physics::System physics(jobs);
+  Stacks fixture; JobSystem jobs({3}); Physics::Config config; config.parallelThreshold = 1; Physics::System physics(jobs,config);
   Assets assets;
   const auto camera = fixture.scene.create(); camera.add<Transform>().position = {0, 2, 10}; camera.add<Camera>();
   fixture.scene.setCamera(camera);

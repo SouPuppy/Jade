@@ -69,7 +69,7 @@ std::shared_ptr<Scene> CreateScene(Vec3 eye)
   camera.get<Transform>().position = eye;
   Motion::lookAt(camera.get<Transform>(), {});
   scene->setCamera(camera);
-  scene->use<Module::FreeCameraControl>();
+  scene->use<Module::FPSCameraControl>();
   return scene;
 }
 
@@ -156,6 +156,55 @@ std::shared_ptr<Scene> CreateDestruction(MeshHandle cubeMesh, MeshHandle sphereM
   return scene;
 }
 
+std::shared_ptr<Scene> CreateWallStress(MeshHandle cubeMesh, MeshHandle sphereMesh, MeshHandle lightMesh)
+{
+  constexpr int columns = 100, rows = 100, walls = 10;
+  constexpr float columnSpacing = 1.04f, wallSpacing = 12;
+  constexpr float ballRadius = 3, launchSpeed = 60;
+  constexpr float centerZ = -(walls - 1) * wallSpacing * 0.5f;
+  auto scene = CreateScene({140, 110, 180});
+  auto camera = scene->camera();
+  Motion::lookAt(camera.get<Transform>(), {0, rows * 0.5f, centerZ});
+  camera.get<Camera>().farPlane = 1000;
+  auto& controls = camera.add<CameraControl>();
+  controls.speed = 30;
+  controls.slowSpeed = 5;
+  controls.panDistance = 200;
+  CreateBox(*scene, cubeMesh, Vec3{0, -0.5f, centerZ}, Materials::Diffuse({0.35f, 0.38f, 0.42f}),
+    Vec3{140, 1, 160});
+  // Keep columns separated initially, as in Scene 4, to avoid a single
+  // 100,000-body solver island before the projectile hits the walls.
+  for (int wall = 0; wall < walls; ++wall) {
+    const float depth = static_cast<float>(wall) / (walls - 1);
+    for (int row = 0; row < rows; ++row) {
+      const float height = static_cast<float>(row) / (rows - 1);
+      const auto material = Materials::Diffuse({0.85f - 0.35f * height,
+        0.3f + 0.4f * height, 0.12f + 0.3f * depth});
+      for (int column = 0; column < columns; ++column)
+        CreateBox<StackBox>(*scene, cubeMesh,
+          Vec3{(column - (columns - 1) * 0.5f) * columnSpacing, row + 0.5f, -wall * wallSpacing}, material);
+    }
+  }
+  CreateObject<Model>(*scene, lightMesh, Vec3{0, 120, centerZ}, Materials::Emissive({18, 18, 18}),
+    Vec3{110, 0.2f, 130});
+  const auto ball = CreateBall<DestructionBall>(*scene, sphereMesh, Vec3{0, rows * 0.5f, 10},
+    Materials::Glass(), Vec3{ballRadius, ballRadius, ballRadius});
+  auto& body = ball.get<RigidBody>();
+  body.mass = 3500;
+  body.friction = 0.35f;
+  body.restitution = 0.1f;
+  body.velocity = {0, 0, -launchSpeed};
+  scene->on<KeyPressed<"K">>([scenePtr = scene.get(), ball, ballRadius, launchSpeed] {
+    const auto& pose = scenePtr->camera().get<Transform>();
+    const auto direction = Motion::getFront(pose);
+    ball.get<Transform>().position = pose.position + direction * (ballRadius + 1.5f);
+    auto& body = ball.get<RigidBody>();
+    body.velocity = direction * launchSpeed;
+    body.angularVelocity = {};
+  });
+  return scene;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -165,7 +214,7 @@ int main(int argc, char** argv)
     RunOptions run;
     int initialScene = 3;
     std::optional<Renderer::RayDevice> device;
-    constexpr auto usage = "Usage: JadeDemo [--cpu|--gpu] [--frames N] [--scene 1|2|3|4]";
+    constexpr auto usage = "Usage: JadeDemo [--cpu|--gpu] [--frames N] [--scene 1|2|3|4|5]";
     for (int argument = 1; argument < argc; ++argument) {
       const std::string_view option(argv[argument]);
       if (option == "--help") { std::cout << usage << '\n'; return 0; }
@@ -183,8 +232,8 @@ int main(int argc, char** argv)
           throw std::invalid_argument("--frames requires a positive frame count.");
       } else if (option == "--scene") {
         const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), initialScene);
-        if (error != std::errc{} || end != value.data() + value.size() || initialScene < 1 || initialScene > 4)
-          throw std::invalid_argument("--scene requires 1, 2, 3 or 4.");
+        if (error != std::errc{} || end != value.data() + value.size() || initialScene < 1 || initialScene > 5)
+          throw std::invalid_argument("--scene requires 1, 2, 3, 4 or 5.");
       } else throw std::invalid_argument(usage);
     }
 
@@ -217,6 +266,7 @@ int main(int argc, char** argv)
     CreateBox(*showroom, lightMesh, Vec3{0, 4, 0}, lamp, Vec3{4, 0.1f, 3});
 
     std::shared_ptr<Scene> destruction;
+    std::shared_ptr<Scene> wallStress;
     auto orbit = CreateOrbit(sphereMesh);
     bool moonGravity = false;
     auto stack = CreateStack(runtime, cubeMesh, sphereMesh, lightMesh, 9.81f);
@@ -226,6 +276,10 @@ int main(int argc, char** argv)
     app.on<KeyPressed<"4">>([&] {
       if (!destruction) destruction = CreateDestruction(cubeMesh, sphereMesh, lightMesh);
       return select(destruction);
+    });
+    app.on<KeyPressed<"5">>([&] {
+      if (!wallStress) wallStress = CreateWallStress(cubeMesh, sphereMesh, lightMesh);
+      return select(wallStress);
     });
     app.on<KeyPressed<"3">>([&] { return select(stack); });
     app.on<KeyPressed<"G">>([&] {
@@ -240,13 +294,20 @@ int main(int argc, char** argv)
         destruction = CreateDestruction(cubeMesh, sphereMesh, lightMesh);
         return select(destruction);
       }
+      if (wallStress && runtime.scene() == wallStress) {
+        wallStress = CreateWallStress(cubeMesh, sphereMesh, lightMesh);
+        return select(wallStress);
+      }
       if (runtime.scene() == stack) {
         stack = CreateStack(runtime, cubeMesh, sphereMesh, lightMesh, moonGravity ? 1.62f : 9.81f);
         return select(stack);
       }
       return EventFlow::Stop;
     });
-    if (initialScene == 4) {
+    if (initialScene == 5) {
+      wallStress = CreateWallStress(cubeMesh, sphereMesh, lightMesh);
+      runtime.setScene(wallStress);
+    } else if (initialScene == 4) {
       destruction = CreateDestruction(cubeMesh, sphereMesh, lightMesh);
       runtime.setScene(destruction);
     } else runtime.setScene(initialScene == 1 ? showroom : initialScene == 2 ? orbit : stack);

@@ -20,6 +20,12 @@ struct Body {
   V velocity, angular, inverseInertia;
   double inverseMass = 0;
   bool edited = true, geometryEdited = true;
+  V momentum() const {
+    V result;
+    for (std::size_t i = 0; i < 3; ++i) if (inverseInertia[i] > 0)
+      result = result + shape.axes[i] * (collisionDot(shape.axes[i],angular)/inverseInertia[i]);
+    return result;
+  }
   V inertia(V value) const {
     V result;
     for (std::size_t i = 0; i < 3; ++i)
@@ -43,8 +49,12 @@ struct Body {
       return;
     const auto q = rotation(angle);
     pose.rotation = (q * pose.rotation).normalized();
-    for (auto &axis : shape.axes)
-      axis = v(q.rotate(axis.vector()));
+    // Reconstruct from the authoritative orientation; repeated float rotations
+    // of the old basis otherwise accumulate scale/shear and corrupt inertia.
+    shape.axes[0] = Detail::collisionUnit(v(pose.rotation.rotate({1,0,0})));
+    auto y = v(pose.rotation.rotate({0,1,0}));
+    shape.axes[1] = Detail::collisionUnit(y-shape.axes[0]*collisionDot(y,shape.axes[0]));
+    shape.axes[2] = Detail::collisionUnit(collisionCross(shape.axes[0],shape.axes[1]));
   }
 };
 Body body(const Scene &scene, const Detail::WorldCollider &shape);

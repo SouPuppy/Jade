@@ -16,6 +16,7 @@ struct Config {
   bool vsync = false;
   bool wireframe = false;
   DebugViewOptions debugView;
+  bool normalDebug = false;
 };
 class System final {
 public:
@@ -36,6 +37,9 @@ public:
   bool rayTracingEnabled() const noexcept;
   void setWireframe(bool enabled) noexcept;
   bool wireframeEnabled() const noexcept;
+  // Independent debug view; works even when the selected pipeline is None.
+  void setNormalDebug(bool enabled) noexcept;
+  bool normalDebugEnabled() const noexcept;
 private:
   friend class Jade::Runtime;
   System(Window&, JobSystem&, Config, std::string title);

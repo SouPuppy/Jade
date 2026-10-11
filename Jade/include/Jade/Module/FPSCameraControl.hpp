@@ -6,10 +6,10 @@ class Scene;
 
 namespace Module {
 
-// Horizontal movement and captured mouse look, with pitch limited to +/-89 degrees
-// and no roll. Movement and yaw use parent Y (world Y for root cameras).
-// Jump, gravity and collision belong to a future character controller.
-// A Scene may install either FreeCameraControl or FPSCameraControl.
+// The single upright camera controller. Defaults to editor interaction:
+// WASD/arrows, Space up, Shift down, Ctrl slow, right-drag look, middle-drag pan,
+// wheel zoom. Optional CameraControl on the selected camera configures bindings,
+// speed and Editor/FirstPerson interaction. No gravity or collision is applied.
 struct FPSCameraControl {
   static void attach(Scene& scene);
 };

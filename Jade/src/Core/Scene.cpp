@@ -4,8 +4,7 @@
 #include "../internal/Core/SceneTransforms.hpp"
 
 #include <Jade/Graphics/Camera.hpp>
-#include <Jade/Module/FreeCameraControl.hpp>
-#include <Jade/Module/FPSCameraControl.hpp>
+#include <Jade/Graphics/CameraControl.hpp>
 
 #include <atomic>
 #include <format>
@@ -23,14 +22,25 @@ Scene::Scene() : m_Registry(std::make_shared<Detail::Registry>()), m_Impl(std::m
 Scene::~Scene() = default;
 Physics::Environment& Scene::physics() noexcept { return m_Impl->physics; }
 const Physics::Environment& Scene::physics() const noexcept { return m_Impl->physics; }
+Physics::World& Scene::physicsWorld() {
+  if (!m_Impl->physicsWorld) {
+    m_Impl->physicsWorld = std::make_unique<Physics::World>();
+    m_Impl->physicsWorld->setFields(m_Impl->physics.fields); m_Impl->physicsWorld->setIntegration(m_Impl->physics.integration);
+    m_Impl->physicsFields = m_Impl->physics.fields; m_Impl->physicsIntegration = m_Impl->physics.integration;
+  }
+  return *m_Impl->physicsWorld;
+}
+Physics::BodyID Scene::physicsBody(Entity entity) const {
+  RequireOwned(entity);
+  const auto& bindings = m_Impl->physicsBindings;
+  const auto it = std::lower_bound(bindings.begin(),bindings.end(),entity.id(),[](const auto& b,auto id) { return b.entity.id() < id; });
+  if (it == bindings.end() || it->entity != entity) return {};
+  return it->body;
+}
 
 void Scene::InstallModule(std::type_index type, std::function<void()> attach)
 {
   for (const auto& module : m_Impl->modules) {
-    if ((type == typeid(Module::FreeCameraControl) && module.type == typeid(Module::FPSCameraControl)) ||
-        (type == typeid(Module::FPSCameraControl) && module.type == typeid(Module::FreeCameraControl))) {
-      throw std::logic_error("A Scene may use either FreeCameraControl or FPSCameraControl, not both.");
-    }
     if (module.type == type) {
       if (!module.installed) {
         throw std::logic_error("Scene module installation cannot recursively install the same type.");
@@ -40,6 +50,7 @@ void Scene::InstallModule(std::type_index type, std::function<void()> attach)
   }
   const auto index = m_Impl->modules.size();
   const auto checkpoint = m_Impl->events.SubscriptionCheckpoint();
+  const auto navigation = m_Impl->cameraNavigation;
   m_Impl->modules.push_back({type});
   try {
     attach();
@@ -48,6 +59,7 @@ void Scene::InstallModule(std::type_index type, std::function<void()> attach)
   } catch (...) {
     // Cancellation invokes no user destructors; pruning remains deferred.
     m_Impl->events.RollbackSubscriptions(checkpoint);
+    m_Impl->cameraNavigation = navigation;
     while (m_Impl->modules.size() > index) m_Impl->modules.pop_back();
     throw;
   }
@@ -55,11 +67,9 @@ void Scene::InstallModule(std::type_index type, std::function<void()> attach)
 
 bool Scene::CapturesMouse() const noexcept
 {
-  for (const auto& module : m_Impl->modules) {
-    if (module.installed && module.type == typeid(Module::FPSCameraControl))
-      return true;
-  }
-  return false;
+  const auto selected = camera();
+  return m_Impl->cameraNavigation && selected.has<Transform>() && selected.has<CameraControl>() &&
+    selected.get<CameraControl>().viewMode == ViewMode::FirstPerson;
 }
 
 bool Scene::owns(Entity entity) const noexcept
@@ -136,7 +146,10 @@ void Scene::setCamera(Entity camera)
   if (camera.id() != 0 && (!owns(camera) || !camera.has<Transform>() || !camera.has<Camera>())) {
     throw std::invalid_argument("Active camera requires Transform and Camera in this Scene.");
   }
-  m_Impl->camera = camera;
+  if (m_Impl->camera != camera) {
+    m_Impl->camera = camera;
+    if (m_Impl->cameraNavigation) m_Impl->cameraNavigation->reset();
+  }
 }
 
 EventConnection Scene::Connect(KeyAction action, KeyChord chord, std::function<EventFlow(const KeyEvent&)> handler)

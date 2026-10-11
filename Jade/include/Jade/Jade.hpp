@@ -14,6 +14,7 @@
 #include <Jade/Core/TaskGraph.hpp>
 #include <Jade/Physics/RigidBody.hpp>
 #include <Jade/Physics/System.hpp>
+#include <Jade/Physics/World.hpp>
 #include <Jade/Physics/Environment.hpp>
 #include <Jade/Renderer/System.hpp>
 #include <Jade/Assets/AssetHandle.hpp>
@@ -30,6 +31,8 @@
 #include <Jade/Events/MouseMoved.hpp>
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/Graphics/Camera.hpp>
+#include <Jade/Graphics/CameraControl.hpp>
+#include <Jade/Graphics/CameraMotion.hpp>
 #include <Jade/Graphics/Mesh.hpp>
 #include <Jade/Graphics/MeshData.hpp>
 #include <Jade/Materials/Presets.hpp>
@@ -43,7 +46,6 @@
 #include <Jade/Math/Matrix4.hpp>
 #include <Jade/Math/Quaternion.hpp>
 #include <Jade/Math/Vector.hpp>
-#include <Jade/Module/FreeCameraControl.hpp>
 #include <Jade/Module/FPSCameraControl.hpp>
 #include <Jade/WindowConfig.hpp>
 #include <Jade/Physics/Collider.hpp>

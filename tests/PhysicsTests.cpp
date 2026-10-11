@@ -75,7 +75,8 @@ TEST(Physics, PyramidRestsForTwentySecondsWithGravityStillEnabled) {
     }
   }
   JobSystem jobs({3});
-  Physics::System system(jobs);
+  Physics::Config quality; quality.sleeping = false;
+  Physics::System system(jobs,quality);
   std::array<Vec3, 9> settled;
   double maxVelocity = 0, maxAngular = 0, maxDrift = 0;
   float maxPenetration = 0;

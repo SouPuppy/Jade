@@ -23,7 +23,8 @@
 
 namespace Jade {
 
-namespace Physics { struct Environment; }
+namespace Physics { struct Environment; class World; class System; struct BodyID; }
+namespace Module { struct FPSCameraControl; }
 
 template<class... T>
 class SceneView final {
@@ -76,6 +77,8 @@ public:
   Scene& operator=(const Scene&) = delete;
   Physics::Environment& physics() noexcept;
   const Physics::Environment& physics() const noexcept;
+  Physics::World& physicsWorld();
+  Physics::BodyID physicsBody(Entity entity) const;
 
   // Installs static void TModule::attach(Scene&) once per type and Scene.
   // Failed installations cancel new subscriptions and may be retried.
@@ -150,9 +153,32 @@ public:
     }
   }
 
+  // Observe an action across all physical keys/buttons, regardless of modifiers.
+  // Typed chord subscriptions above still match modifiers exactly.
+  template<class Callback>
+  EventConnection on(KeyAction action, Callback&& callback)
+  {
+    using Function = std::decay_t<Callback>;
+    auto function = std::make_shared<Function>(std::forward<Callback>(callback));
+    return Connect(action, {}, [function](const KeyEvent& event) {
+      return Detail::InvokeEventCallback(*function, event);
+    });
+  }
+  template<class Callback>
+  EventConnection on(MouseAction action, Callback&& callback)
+  {
+    using Function = std::decay_t<Callback>;
+    auto function = std::make_shared<Function>(std::forward<Callback>(callback));
+    return Connect(action, MouseButton::Unknown, [function](const MouseEvent& event) {
+      return Detail::InvokeEventCallback(*function, event);
+    });
+  }
+
 private:
   friend class Application;
   friend class Runtime;
+  friend class Physics::System;
+  friend struct Module::FPSCameraControl;
   template<class... T> SceneView<T...> QueryTypes(Detail::ComponentList<T...>) const {
     return SceneView<T...>(Snapshot({typeid(T)...}));
   }

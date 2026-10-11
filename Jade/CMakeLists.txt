@@ -31,6 +31,8 @@ add_library(Jade STATIC
   src/internal/Physics/Dynamics/Body.cpp
   src/internal/Physics/Solver/ContactSolver.hpp
   src/internal/Physics/Solver/ContactSolver.cpp
+  src/internal/Physics/Solver/ContactSimd.cpp
+  src/internal/Physics/Solver/ContactAvx2.cpp
   include/Jade/Core/JobSystem.hpp
   include/Jade/Core/TaskGraph.hpp
   src/Core/JobSystem.cpp
@@ -46,6 +48,16 @@ add_library(Jade STATIC
   src/Core/Runtime.cpp
   src/Renderer/System.cpp
   src/Physics/System.cpp
+  include/Jade/Physics/World.hpp
+  include/Jade/Physics/Types.hpp
+  include/Jade/Physics/SmallList.hpp
+  src/Physics/World.cpp
+  src/Physics/WorldStep.cpp
+  src/Physics/WorldQueries.cpp
+  src/Physics/WorldSnapshot.cpp
+  src/internal/Physics/WorldImpl.hpp
+  src/internal/Physics/SpatialIndex.hpp
+  src/internal/Physics/SpatialIndex.cpp
   src/internal/Physics/Manifold.hpp
   src/internal/Physics/Manifold.cpp
   include/Jade/Physics/Collider.hpp
@@ -75,9 +87,12 @@ add_library(Jade STATIC
   src/Graphics/builtins/Sphere.cpp
   src/Graphics/Mesh.cpp
   src/Graphics/Motion.cpp
+  src/Graphics/CameraMotion.cpp
   src/internal/Core/Registry.cpp
   src/internal/Events/EventDispatcher.cpp
   src/internal/Input/InputState.cpp
+  src/internal/Input/CameraNavigation.cpp
+  src/internal/Input/CameraNavigation.hpp
   src/internal/Mesh/ObjLoader.cpp
   src/internal/Platform/GLFW/GlfwInput.cpp
   src/internal/Platform/GLFW/GlfwRuntime.cpp
@@ -87,7 +102,6 @@ add_library(Jade STATIC
   src/internal/Renderer/Device/OpenGL/OpenGLProgram.cpp
   src/Math/Matrix4.cpp
   src/Math/Quaternion.cpp
-  src/Module/FreeCameraControl.cpp
   src/Module/FPSCameraControl.cpp
   include/Jade/Application.hpp
   include/Jade/Assets/AssetHandle.hpp
@@ -104,6 +118,8 @@ add_library(Jade STATIC
   include/Jade/Events/MouseMoved.hpp
   include/Jade/Events/MouseScrolled.hpp
   include/Jade/Graphics/Camera.hpp
+  include/Jade/Graphics/CameraControl.hpp
+  include/Jade/Graphics/CameraMotion.hpp
   include/Jade/Graphics/Mesh.hpp
   include/Jade/Graphics/Motion.hpp
   include/Jade/Graphics/Vertex.hpp
@@ -114,7 +130,6 @@ add_library(Jade STATIC
   include/Jade/Math/Matrix4.hpp
   include/Jade/Math/Quaternion.hpp
   include/Jade/Math/Vector.hpp
-  include/Jade/Module/FreeCameraControl.hpp
   include/Jade/Module/FPSCameraControl.hpp
   include/Jade/WindowConfig.hpp
   src/Assets/Assets.hpp
@@ -143,7 +158,6 @@ add_library(Jade STATIC
   src/internal/Renderer/Device/OpenGL/OpenGLProgram.hpp
   src/Math/Matrix4.hpp
   src/Math/Quaternion.hpp
-  src/Module/FreeCameraControl.hpp
   src/Module/FPSCameraControl.hpp
   include/Jade/Graphics/Geometry.hpp
   include/Jade/Materials/Material.hpp
@@ -196,6 +210,7 @@ add_library(Jade STATIC
   src/internal/Renderer/Host/RenderHost.hpp
 )
 add_library(Jade::Jade ALIAS Jade)
+set_source_files_properties(src/internal/Physics/Solver/ContactAvx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
 target_include_directories(Jade PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(Jade PRIVATE
   GLFW_INCLUDE_NONE

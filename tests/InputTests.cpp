@@ -867,7 +867,7 @@ TEST(Application, AxisGizmoDefaultsOffAndF3TogglesOncePerUnconsumedPress)
   }
 }
 
-TEST(Application, F5TogglesOutputWithoutChangingPipelineOrWireframe)
+TEST(Application, F5TogglesIndependentNormalDebugAndPreservesRenderSettings)
 {
   for (const auto device : {Jade::Renderer::RayDevice::CPU, Jade::Renderer::RayDevice::GPU}) {
     auto config = HiddenInputApplication();
@@ -888,12 +888,13 @@ TEST(Application, F5TogglesOutputWithoutChangingPipelineOrWireframe)
     input.Send(GLFW_KEY_F5, GLFW_PRESS);
     input.Send(GLFW_KEY_F5, GLFW_REPEAT);
     app.Run({1});
-    expected.output = Jade::Renderer::RayOutput::Normal;
     expected.enabled = false;
+    EXPECT_TRUE(renderer.normalDebugEnabled());
     EXPECT_EQ(renderer.rayTracingSettings(), expected);
     EXPECT_EQ(renderer.pipeline(), Jade::Renderer::RenderMode::None);
     EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
     EXPECT_TRUE(renderer.wireframeEnabled());
+    EXPECT_EQ(renderer.progress().rendererName, "Normals + Wireframe");
     input.Send(GLFW_KEY_I, GLFW_PRESS);
     input.Send(GLFW_KEY_I, GLFW_RELEASE);
     app.Run({1});
@@ -904,17 +905,19 @@ TEST(Application, F5TogglesOutputWithoutChangingPipelineOrWireframe)
     input.Send(GLFW_KEY_F5, GLFW_PRESS, GLFW_MOD_SHIFT);
     app.Run({1});
     EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    EXPECT_TRUE(renderer.normalDebugEnabled());
     const auto consumed = app.runtime().scene()->on<Jade::KeyPressed<"F5">>([] { return Jade::EventFlow::Stop; });
     input.Send(GLFW_KEY_F5, GLFW_RELEASE);
     input.Send(GLFW_KEY_F5, GLFW_PRESS);
     app.Run({1});
     EXPECT_EQ(renderer.rayTracingSettings(), expected);
+    EXPECT_TRUE(renderer.normalDebugEnabled());
     consumed.disconnect();
     input.Send(GLFW_KEY_F5, GLFW_RELEASE);
     input.Send(GLFW_KEY_F5, GLFW_PRESS);
     app.Run({1});
-    expected.output = Jade::Renderer::RayOutput::Color;
     expected.enabled = false;
+    EXPECT_FALSE(renderer.normalDebugEnabled());
     EXPECT_EQ(renderer.rayTracingSettings(), expected);
     EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
 
@@ -925,7 +928,13 @@ TEST(Application, F5TogglesOutputWithoutChangingPipelineOrWireframe)
     input.Send(GLFW_KEY_F5, GLFW_PRESS);
     app.Run({1});
     EXPECT_TRUE(renderer.rayTracingEnabled());
-    EXPECT_EQ(renderer.rayTracingSettings().output, Jade::Renderer::RayOutput::Normal);
+    EXPECT_TRUE(renderer.normalDebugEnabled());
+    EXPECT_EQ(renderer.rayTracingSettings().output, Jade::Renderer::RayOutput::Color);
+    EXPECT_FALSE(renderer.progress().samplesPerPixel.has_value());
+    input.Send(GLFW_KEY_F5, GLFW_RELEASE);
+    input.Send(GLFW_KEY_F5, GLFW_PRESS);
+    app.Run({2});
+    EXPECT_FALSE(renderer.normalDebugEnabled());
     EXPECT_EQ(renderer.progress().samplesPerPixel, 1u);
     expected.enabled = false;
     renderer.setRayTracingSettings(expected);
@@ -940,4 +949,5 @@ TEST(Application, F5TogglesOutputWithoutChangingPipelineOrWireframe)
   input.Send(GLFW_KEY_F5, GLFW_PRESS);
   app.Run({1});
   EXPECT_EQ(app.runtime().renderer().rayTracingSettings(), settings);
+  EXPECT_FALSE(app.runtime().renderer().normalDebugEnabled());
 }

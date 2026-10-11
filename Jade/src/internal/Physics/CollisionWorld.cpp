@@ -78,7 +78,7 @@ std::vector<WorldCollider> captureColliders(const Scene& scene)
   std::vector<WorldCollider> result;
   for (const auto entity : scene.query<Collider, Transform>()) {
     if (entity.get<Collider>().empty()) continue;
-    result.push_back(resolveCollider(entity, transforms.Resolve(entity).model));
+    result.push_back(resolveCollider(entity, scene.parent(entity) ? transforms.Resolve(entity).model : ModelMatrix(entity.get<Transform>())));
   }
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.entity.id() < b.entity.id(); });
   return result;

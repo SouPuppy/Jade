@@ -12,11 +12,12 @@ Config validated(Config config) {
 }
 struct System::Impl {
   bool wireframe;
+  bool normalDebug;
   RenderMode mode;
   bool soul=false;
   Detail::RenderHost host;
   Impl(Window& window, JobSystem& jobs, Config config, std::string title)
-    : wireframe(config.wireframe), mode(config.rayTracing.enabled ? config.pipeline : RenderMode::None),
+    : wireframe(config.wireframe), normalDebug(config.normalDebug), mode(config.rayTracing.enabled ? config.pipeline : RenderMode::None),
       host(window, jobs, std::move(title), [&]{config.rayTracing.enabled=mode==RenderMode::RayTracing;return config;}()) {}
 };
 System::System(Window& window, JobSystem& jobs, Config config, std::string title)
@@ -50,6 +51,11 @@ void System::nextPipeline() {
 }
 bool System::sceneRenderingEnabled() const noexcept {return pipeline()!=RenderMode::None;}
 RenderProgress System::progress() const {
+  if(m_Impl->normalDebug) {
+    RenderProgress result;
+    result.rendererName = std::string("Normals") + (m_Impl->wireframe ? " + Wireframe" : "") + (m_Impl->soul ? " | Soul" : "");
+    return result;
+  }
   if(m_Impl->soul) {RenderProgress result;result.rendererName="Raster | Soul";return result;}
   auto result = rayTracingEnabled() ? m_Impl->host.progress() : RenderProgress{};
   if (rayTracingEnabled()) {
@@ -64,13 +70,15 @@ void System::setRayTracingEnabled(bool enabled) noexcept {
   m_Impl->host.setRayTracingEnabled(enabled);
 }
 void System::setWireframe(bool enabled) noexcept { m_Impl->wireframe = enabled; }
-void System::start() { m_Impl->host.start(rayTracingEnabled()); }
+void System::setNormalDebug(bool enabled) noexcept { m_Impl->normalDebug = enabled; }
+bool System::normalDebugEnabled() const noexcept { return m_Impl->normalDebug; }
+void System::start() { m_Impl->host.start(rayTracingEnabled() && !normalDebugEnabled()); }
 void System::stop() noexcept { m_Impl->host.stop(); }
 void System::invalidate() noexcept { m_Impl->host.invalidate(); }
 void System::rethrowError() { m_Impl->host.rethrowError(); }
 void System::render(const SceneSnapshot* snapshot, ImageSize size, bool axes, const Detail::CollisionDebugLines* debug,
                     bool paused, std::chrono::steady_clock::time_point deadline, const CameraFrame* observer, const std::vector<PathSegment>* paths) {
   m_Impl->soul=observer!=nullptr;
-  m_Impl->host.draw(snapshot, size, pipeline(), m_Impl->wireframe, axes, debug, paused, deadline, observer, paths);
+  m_Impl->host.draw(snapshot, size, pipeline(), m_Impl->wireframe, axes, debug, paused, deadline, observer, paths, m_Impl->normalDebug);
 }
 } // namespace Jade::Renderer

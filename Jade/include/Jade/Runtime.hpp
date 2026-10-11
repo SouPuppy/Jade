@@ -6,6 +6,8 @@
 #include <Jade/Events/Keyboard.hpp>
 #include <Jade/Events/Mouse.hpp>
 #include <Jade/Events/MouseMoved.hpp>
+#include <Jade/Events/MouseScrolled.hpp>
+#include <Jade/Graphics/CameraControl.hpp>
 #include <memory>
 #include <chrono>
 
@@ -39,6 +41,9 @@ public:
   bool soulMode() const noexcept;
   const Renderer::CameraFrame* soulCamera() const noexcept;
   const std::vector<Renderer::PathSegment>& soulPaths() const noexcept;
+  // Observer and scene cameras use the same control settings and navigation.
+  CameraControl& observerControls() noexcept;
+  const CameraControl& observerControls() const noexcept;
 private:
   friend class Application;
   Runtime(Window&, const EngineConfig&);
@@ -46,6 +51,10 @@ private:
   bool soulKey(KeyAction,const KeyEvent&);
   bool soulMouse(MouseAction,const MouseEvent&);
   bool soulMouseMoved(const MouseMoved&);
+  bool soulScrolled(const MouseScrolled&);
+  bool capturesMouse() const noexcept;
+  void updateObserver(float dt);
+  void beginCameraFrame() noexcept;
   void toggleProjection();
   void begin();
   void end() noexcept;

@@ -5,6 +5,9 @@
 
 namespace Jade::Motion {
 
+// General Transform operations. Interactive upright cameras use CameraMotion;
+// these local rotations intentionally remain unrestricted for other entities.
+
 Vec3 getFront(const Transform& transform);
 Vec3 getRight(const Transform& transform);
 Vec3 getUp(const Transform& transform);

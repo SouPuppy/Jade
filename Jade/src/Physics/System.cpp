@@ -1,261 +1,204 @@
 #include <Jade/Physics/System.hpp>
-#include <Jade/Core/Transform.hpp>
+#include <Jade/Physics/World.hpp>
+#include "../Core/Scene.hpp"
+#include "../internal/Core/SceneTransforms.hpp"
+#include "../internal/Physics/WorldImpl.hpp"
 #include "../internal/Physics/Manifold.hpp"
-#include "../internal/Physics/Solver/ContactSolver.hpp"
 #include "../internal/Physics/BroadPhase.hpp"
-#include <Jade/Core/TaskGraph.hpp>
-#include <algorithm>
-#include <map>
-#include <numbers>
 
 namespace Jade::Physics {
 namespace {
 using namespace Internal;
-} // namespace
-
+bool samePose(const Transform& a,const Transform& b) { return a.position == b.position && a.rotation == b.rotation && a.scale == b.scale; }
+bool sameSettings(const RigidBody& a,const RigidBody& b) {
+  return a.mass == b.mass && a.friction == b.friction && a.restitution == b.restitution && a.motion == b.motion && a.collision == b.collision &&
+    a.allowSleep == b.allowSleep && a.linearDamping == b.linearDamping && a.angularDamping == b.angularDamping && a.category == b.category && a.mask == b.mask;
+}
+bool sameShape(const Detail::WorldCollider& a,const Detail::WorldCollider& b) {
+  if (a.kind != b.kind || a.radius != b.radius || collisionLength(a.halfExtents-b.halfExtents) > 1e-5) return false;
+  return true;
+}
+bool sameWorldShape(const Detail::WorldCollider& a,const Detail::WorldCollider& b) {
+  if (!sameShape(a,b) || collisionLength(a.center-b.center) > 1e-5) return false;
+  for (unsigned k = 0; k < 3; ++k) if (collisionLength(a.axes[k]-b.axes[k]) > 1e-5) return false;
+  return true;
+}
+BodyDescription describe(const Scene& scene,const Detail::WorldCollider& shape,Quaternion rotation) {
+  const auto entity = shape.entity; BodyDescription d; d.position = shape.center; d.rotation = rotation;
+  d.shape = shape.kind == Detail::CollisionKind::Sphere ? Collider{Sphere{static_cast<float>(shape.radius)}} : Collider{Box{shape.halfExtents.vector()}};
+  if (!entity.has<RigidBody>()) { d.motion = MotionType::Static; return d; }
+  const auto& rb = entity.get<RigidBody>(); validate(rb);
+  d.motion = rb.mass == 0 && rb.motion == MotionType::Dynamic ? MotionType::Static : rb.motion;
+  if (d.motion != MotionType::Static && scene.parent(entity)) throw std::invalid_argument("Moving physics bodies require a Scene root.");
+  d.mass = rb.mass; d.velocity = v(rb.velocity); d.angularVelocity = v(rb.angularVelocity);
+  d.friction = rb.friction; d.restitution = rb.restitution; d.allowSleep = rb.allowSleep;
+  d.linearDamping = rb.linearDamping; d.angularDamping = rb.angularDamping; d.collision = rb.collision; d.category = rb.category; d.mask = rb.mask;
+  validateDescription(d); return d;
+}
+}
 struct System::Impl {
-  JobSystem* jobs = nullptr;
   Config config;
+  JobSystem* jobs = nullptr;
+  const Scene* current = nullptr;
   Statistics stats;
   std::vector<Manifold> contacts;
-  std::vector<Cached> cache;
-  std::vector<Body> previous;
-  std::vector<BodyForceSnapshot> forces;
   std::vector<std::shared_ptr<const ForceField>> fields;
   Integration integration = Integration::SemiImplicitEuler;
-  double previousDt = 0;
-  explicit Impl(Config c) : config(c) {}
+  explicit Impl(Config c) : config(c) { validateConfig(c); }
 };
-System::System(Config config) : m_Impl(std::make_unique<Impl>(config)) {
-  if (!std::isfinite(config.fixedStep) || config.fixedStep <= 0 || config.maxSubsteps == 0 ||
-      config.velocityIterations == 0 || config.positionIterations == 0 ||
-      !std::isfinite(config.contactDistance) || !std::isfinite(config.penetrationSlop) ||
-      config.penetrationSlop < 0 || config.contactDistance < config.penetrationSlop)
-    throw std::invalid_argument("Invalid Physics configuration.");
-}
+System::System(Config c) : m_Impl(std::make_unique<Impl>(c)) {}
+System::System(JobSystem& jobs,Config c) : System(c) { m_Impl->jobs = &jobs; }
 System::~System() = default;
-System::System(JobSystem& jobs, Config config) : System(config) { m_Impl->jobs = &jobs; }
 const Config& System::config() const noexcept { return m_Impl->config; }
 const Statistics& System::statistics() const noexcept { return m_Impl->stats; }
 std::span<const Manifold> System::contacts() const noexcept { return m_Impl->contacts; }
-std::vector<BodyForceSnapshot> System::forceSnapshot(const Scene& scene) const {
-  const auto& environment = scene.physics();
-  environment.validate(scene);
-  const auto shapes = Detail::captureColliders(scene);
-  std::vector<Body> states; states.reserve(shapes.size());
-  bool current = m_Impl->previousDt > 0 && shapes.size() == m_Impl->previous.size() &&
-    environment.fields == m_Impl->fields && environment.integration == m_Impl->integration;
-  for (std::size_t i = 0; i < shapes.size(); ++i) {
-    states.push_back(body(scene, shapes[i]));
-    if (current) {
-      const auto& pose = shapes[i].entity.get<Transform>(); const auto& old = m_Impl->previous[i];
-      current = pose.position == old.pose.position && pose.rotation == old.pose.rotation &&
-        pose.scale == old.pose.scale && same(states.back(), old);
-    }
+void System::reset() noexcept { m_Impl->current = nullptr; m_Impl->stats = {}; m_Impl->contacts.clear(); m_Impl->fields.clear(); }
+void System::synchronize(Scene& scene) {
+  scene.physics().validate(scene);
+  for (auto e : scene.query<RigidBody>()) {
+    if (e.has<Collider>() && e.get<Collider>().empty()) continue;
+    validate(e.get<RigidBody>());
+    if ((e.get<RigidBody>().mass > 0 || e.get<RigidBody>().motion == MotionType::Kinematic) && (!e.has<Transform>() || !e.has<Collider>()))
+      throw std::invalid_argument("Moving RigidBody requires Transform and Collider.");
   }
-  if (current) return m_Impl->forces;
-  const auto samples = sampleForces(environment, fieldBodies(states));
-  std::vector<BodyForceSnapshot> result; result.reserve(states.size());
-  for (std::size_t i = 0; i < states.size(); ++i) if (states[i].inverseMass > 0)
-    result.push_back({states[i].shape.entity, states[i].shape.center.vector(), samples[i].vector()});
-  return result;
+  // Resolve and validate the complete authoring input before issuing World edits.
+  const auto shapes = Detail::captureColliders(scene); Detail::SceneTransforms transforms(scene);
+  std::vector<BodyDescription> descriptions; descriptions.reserve(shapes.size());
+  for (const auto& shape : shapes) descriptions.push_back(describe(scene,shape,
+    scene.parent(shape.entity) ? transforms.Resolve(shape.entity).rotation : shape.entity.get<Transform>().rotation.normalized()));
+  auto& world = scene.physicsWorld(); world.setJobSystem(m_Impl->jobs);
+  if (!(world.config() == m_Impl->config)) world.configure(m_Impl->config);
+  auto& bindings = scene.m_Impl->physicsBindings;
+  std::vector<Scene::Impl::PhysicsBinding> next; next.reserve(shapes.size()); world.reserve(shapes.size());
+  for (std::size_t i = 0; i < shapes.size(); ++i) {
+    const auto& shape = shapes[i]; const auto e = shape.entity; const auto& pose = e.get<Transform>();
+    auto it = std::lower_bound(bindings.begin(),bindings.end(),e.id(),[](const auto& b,auto id) { return b.entity.id() < id; });
+    Scene::Impl::PhysicsBinding binding;
+    if (it == bindings.end() || it->entity != e || !world.contains(it->body)) {
+      binding.entity = e; binding.body = world.create(descriptions[i]); world.bind(binding.body,e);
+    } else {
+      binding = *it;
+      const auto rb = e.has<RigidBody>() ? e.get<RigidBody>() : RigidBody{};
+      const bool settingsChanged = binding.rigid != e.has<RigidBody>() || (e.has<RigidBody>() && !sameSettings(rb,binding.authored));
+      if (settingsChanged || !sameShape(shape,binding.shape)) {
+        auto d = descriptions[i]; const auto state = world.state(binding.body);
+        if (samePose(pose,binding.published)) { d.position = state.position; d.rotation = state.rotation; }
+        if (e.has<RigidBody>() && rb.velocity == binding.authored.velocity) d.velocity = state.velocity;
+        if (e.has<RigidBody>() && rb.angularVelocity == binding.authored.angularVelocity) d.angularVelocity = state.angularVelocity;
+        world.update(binding.body,d);
+      } else {
+        if (!samePose(pose,binding.published) || (descriptions[i].motion == MotionType::Static && !sameWorldShape(shape,binding.shape)))
+          world.teleport(binding.body,descriptions[i].position,descriptions[i].rotation);
+        if (e.has<RigidBody>() && (rb.velocity != binding.authored.velocity || rb.angularVelocity != binding.authored.angularVelocity))
+          world.setVelocity(binding.body,v(rb.velocity),v(rb.angularVelocity));
+        if (!world.state(binding.body).enabled) world.setEnabled(binding.body,true);
+      }
+    }
+    binding.published = pose; binding.rigid = e.has<RigidBody>(); if (binding.rigid) binding.authored = e.get<RigidBody>(); binding.shape = shape;
+    next.push_back(binding);
+  }
+  // Empty colliders suspend an existing binding, preserving the runtime state.
+  const auto activeCount = next.size();
+  for (const auto& b : bindings) {
+    const auto it = std::lower_bound(next.begin(),next.begin()+activeCount,b.entity.id(),[](const auto& x,auto id) { return x.entity.id() < id; });
+    if (it != next.begin()+activeCount && it->entity == b.entity) continue;
+    if (b.entity.valid() && b.entity.has<Collider>() && b.entity.get<Collider>().empty()) {
+      if (world.contains(b.body) && world.state(b.body).enabled) world.setEnabled(b.body,false);
+      next.push_back(b);
+    } else if (world.contains(b.body)) world.destroy(b.body);
+  }
+  std::sort(next.begin(),next.end(),[](const auto& a,const auto& b) { return a.entity.id() < b.entity.id(); }); bindings.swap(next);
+  if (scene.m_Impl->physicsFields != scene.physics().fields) {
+    world.setFields(scene.physics().fields); scene.m_Impl->physicsFields = scene.physics().fields;
+  }
+  if (scene.m_Impl->physicsIntegration != scene.physics().integration) {
+    world.setIntegration(scene.physics().integration); scene.m_Impl->physicsIntegration = scene.physics().integration;
+  }
+}
+void System::advance(Scene& scene,double dt) { scene.physicsWorld().step(dt); }
+void System::publish(Scene& scene) {
+  auto& world = scene.physicsWorld(); auto& bindings = scene.m_Impl->physicsBindings;
+  for (auto& b : bindings) {
+    if (!b.entity.valid() || !world.contains(b.body)) continue;
+    const auto state = world.state(b.body); if (!state.enabled) continue;
+    const auto d = world.description(b.body);
+    if (d.motion != MotionType::Static) {
+      auto& pose = b.entity.get<Transform>(); pose.position = state.position.vector(); pose.rotation = state.rotation;
+      auto& rb = b.entity.get<RigidBody>(); rb.velocity = state.velocity.vector(); rb.angularVelocity = state.angularVelocity.vector();
+      b.authored = rb;
+    }
+    b.published = b.entity.get<Transform>(); b.shape.center = state.position;
+    b.shape.axes = {v(state.rotation.rotate({1,0,0})),v(state.rotation.rotate({0,1,0})),v(state.rotation.rotate({0,0,1}))}; Detail::updateBounds(b.shape);
+  }
+  std::vector<Entity> entities;
+  for (const auto& b : bindings) { if (entities.size() <= b.body.slot) entities.resize(b.body.slot+1); entities[b.body.slot] = b.entity; }
+  std::vector<Manifold> contacts; contacts.reserve(world.contacts().size());
+  for (const auto& c : world.contacts()) {
+    if (c.a.slot >= entities.size() || c.b.slot >= entities.size()) continue;
+    Manifold m{entities[c.a.slot],entities[c.b.slot],c.normal.vector(),{}};
+    for (unsigned i = 0; i < c.count; ++i) {
+      const auto& p = c.points[i]; m.points.push_back({p.pointA.vector(),p.pointB.vector(),static_cast<float>(p.separation),static_cast<float>(p.normalImpulse),p.frictionImpulse.vector()});
+    }
+    if (m.a.id() > m.b.id()) { std::swap(m.a,m.b); m.normal = -m.normal; for (auto& p : m.points) { std::swap(p.pointA,p.pointB); p.frictionImpulse = -p.frictionImpulse; } }
+    contacts.push_back(m);
+  }
+  std::sort(contacts.begin(),contacts.end(),[](const auto& a,const auto& b) { return a.a.id() == b.a.id() ? a.b.id() < b.b.id() : a.a.id() < b.a.id(); });
+  m_Impl->contacts.swap(contacts); m_Impl->stats = world.statistics(); m_Impl->current = &scene;
+  m_Impl->fields = scene.physics().fields; m_Impl->integration = scene.physics().integration;
+}
+void System::step(Scene& scene,float dt) {
+  if (!std::isfinite(dt) || dt <= 0) throw std::invalid_argument("Physics dt must be positive and finite.");
+  synchronize(scene); advance(scene,dt); publish(scene);
+}
+void System::applyImpulse(Scene& scene,Entity e,Vec3 impulse,Vec3 point) {
+  finite(impulse); finite(point);
+  if (!scene.owns(e) || !e.has<Transform>() || !e.has<RigidBody>() || !e.has<Collider>() || e.get<Collider>().empty()) throw std::invalid_argument("Impulse requires a live physical entity.");
+  synchronize(scene); const auto id = scene.physicsBody(e); scene.physicsWorld().applyImpulse(id,v(impulse),v(point));
+  const auto state = scene.physicsWorld().state(id); auto& rb = e.get<RigidBody>(); rb.velocity = state.velocity.vector(); rb.angularVelocity = state.angularVelocity.vector();
+  for (auto& binding : scene.m_Impl->physicsBindings) if (binding.entity == e) binding.authored = rb;
 }
 std::vector<Manifold> System::contactSnapshot(const Scene& scene) const {
-  const auto shapes = Detail::captureColliders(scene);
-  bool current = m_Impl->previousDt > 0 && shapes.size() == m_Impl->previous.size();
-  for (std::size_t i = 0; current && i < shapes.size(); ++i) {
-    const auto& pose = shapes[i].entity.get<Transform>(); const auto& old = m_Impl->previous[i];
-    current = pose.position == old.pose.position && pose.rotation == old.pose.rotation &&
-      pose.scale == old.pose.scale && same(body(scene, shapes[i]), old);
+  const auto shapes = Detail::captureColliders(scene); const auto& bindings = scene.m_Impl->physicsBindings;
+  bool current = m_Impl->current == &scene;
+  std::size_t live = 0;
+  for (const auto& b : bindings) if (scene.m_Impl->physicsWorld && scene.m_Impl->physicsWorld->contains(b.body) && scene.m_Impl->physicsWorld->state(b.body).enabled) ++live;
+  current &= live == shapes.size();
+  for (const auto& shape : shapes) {
+    const auto it = std::lower_bound(bindings.begin(),bindings.end(),shape.entity.id(),[](const auto& b,auto id) { return b.entity.id() < id; });
+    if (it == bindings.end() || it->entity != shape.entity || !samePose(it->published,shape.entity.get<Transform>()) || !sameWorldShape(it->shape,shape)) { current = false; break; }
   }
   if (!current) {
     std::vector<Manifold> result;
-    std::vector<Body> states; states.reserve(shapes.size());
-    for (const auto& shape : shapes) states.push_back(body(scene, shape));
-    for (const auto pair : Detail::broadPhase(shapes, m_Impl->config.contactDistance)) {
-      const auto& a = states[pair.a]; const auto& b = states[pair.b];
-      const double margin = a.inverseMass || b.inverseMass ? m_Impl->config.contactDistance : 0;
-      if (auto hit = Detail::collideManifold(a.shape, b.shape, margin)) {
-        hit->points = persistentPoints(a, b, *hit, {}, margin);
-        result.push_back(std::move(*hit));
-      }
+    for (const auto pair : Detail::broadPhase(shapes,m_Impl->config.contactDistance)) {
+      auto a = body(scene,shapes[pair.a]),b = body(scene,shapes[pair.b]); const auto margin = a.inverseMass || b.inverseMass ? m_Impl->config.contactDistance : 0;
+      if (auto hit = Detail::collideManifold(a.shape,b.shape,margin)) { hit->points = persistentPoints(a,b,*hit,{},margin); result.push_back(*hit); }
     }
     return result;
   }
   auto result = m_Impl->contacts;
-  // The solver skips static/static pairs; the debug view still shows them.
-  for (const auto pair : Detail::broadPhase(shapes, 0))
-    if (!m_Impl->previous[pair.a].inverseMass && !m_Impl->previous[pair.b].inverseMass)
-      if (auto hit = Detail::collideManifold(shapes[pair.a], shapes[pair.b], 0)) result.push_back(std::move(*hit));
+  for (const auto p : Detail::broadPhase(shapes,0)) {
+    const auto staticBody = [&](auto i) { return !shapes[i].entity.has<RigidBody>() || shapes[i].entity.get<RigidBody>().mass == 0; };
+    if (staticBody(p.a) && staticBody(p.b)) if (auto hit = Detail::collideManifold(shapes[p.a],shapes[p.b],0)) result.push_back(*hit);
+  }
   return result;
 }
-void System::reset() noexcept {
-  m_Impl->cache.clear(); m_Impl->contacts.clear(); m_Impl->previous.clear();
-  m_Impl->forces.clear(); m_Impl->fields.clear();
-  m_Impl->previousDt = 0; m_Impl->stats = {};
-}
-void System::applyImpulse(Scene& scene, Entity entity, Vec3 p, Vec3 worldPoint) {
-  finite(p); finite(worldPoint);
-  if (!scene.owns(entity) || !entity.has<RigidBody>() || !entity.has<Collider>() || !entity.has<Transform>())
-    throw std::invalid_argument("Impulse requires a live Transform/Collider/RigidBody entity.");
-  if (entity.get<Collider>().empty())
-    throw std::invalid_argument("Impulse requires a nonempty Collider.");
-  auto b = body(scene, Detail::resolveCollider(entity, scene.worldMatrix(entity)));
-  if (!b.inverseMass) return;
-  const auto nextVelocity = (b.velocity + v(p) * b.inverseMass).vector();
-  const auto nextAngular = (b.angular + b.inertia(collisionCross(v(worldPoint) - b.shape.center, v(p)))).vector();
-  auto& rb = entity.get<RigidBody>(); rb.velocity = nextVelocity; rb.angularVelocity = nextAngular;
-  for (auto& contact : m_Impl->cache) { contact.impulse = 0; contact.tangent = {}; }
-}
-void System::step(Scene& scene, float dt) {
-  if (!std::isfinite(dt) || dt <= 0) throw std::invalid_argument("Physics step must be positive and finite.");
-  const auto& config = m_Impl->config;
-  auto environment = scene.physics();
-  environment.validate(scene);
-  const bool environmentChanged = environment.fields != m_Impl->fields ||
-    environment.integration != m_Impl->integration;
-  for (const auto entity : scene.query<RigidBody>()) {
-    if (entity.has<Collider>() && entity.get<Collider>().empty()) continue;
-    const auto& rb = entity.get<RigidBody>();
-    validate(rb);
-    if (rb.mass > 0 && (!entity.has<Transform>() || !entity.has<Collider>() || entity.get<Collider>().empty()))
-      throw std::invalid_argument("Dynamic RigidBody requires Transform and Collider.");
-  }
-  auto proxies = Detail::captureColliders(scene);
-  std::vector<Body> bodies;
-  bodies.reserve(proxies.size());
-  Statistics stats; stats.steps = m_Impl->stats.steps + 1;
-  // Validate the complete input before integrating or mutating any component.
-  for (const auto& shape : proxies) {
-    auto b = body(scene, shape);
-    const auto old = std::lower_bound(m_Impl->previous.begin(), m_Impl->previous.end(), shape.entity.id(),
-      [](const Body& previous, auto id) { return previous.shape.entity.id() < id; });
-    const bool found = old != m_Impl->previous.end() && old->shape.entity == shape.entity;
-    b.edited = environmentChanged || !found || !same(b, *old);
-    b.geometryEdited = !found || !sameGeometry(b, *old);
-    if (b.inverseMass > 0) ++stats.dynamicBodies; else ++stats.staticBodies;
-    bodies.push_back(b);
-  }
-  auto* jobs = m_Impl->jobs;
-  auto fieldForces = sampleForces(environment, fieldBodies(bodies));
-  std::vector<V> velocityBeforeContacts;
-  std::vector<BodyForceSnapshot> forces;
-  std::vector<unsigned char> dynamic(bodies.size());
-  for (std::size_t i = 0; i < bodies.size(); ++i) dynamic[i] = bodies[i].inverseMass > 0;
-  std::vector<Detail::ColliderPair> pairs;
-  std::vector<std::vector<Constraint>> pairConstraints;
-  std::vector<Constraint> constraints;
-  std::vector<std::vector<std::size_t>> islands;
-  std::vector<Manifold> contacts;
-  std::vector<Cached> cache;
-  std::map<std::pair<std::uint64_t, std::uint64_t>, std::span<const Cached>> oldPairs;
-  for (std::size_t begin = 0; begin < m_Impl->cache.size();) {
-    auto end = begin + 1;
-    const auto& first = m_Impl->cache[begin];
-    while (end < m_Impl->cache.size() && m_Impl->cache[end].a == first.a && m_Impl->cache[end].b == first.b) ++end;
-    oldPairs.emplace(std::pair{first.a.id(), first.b.id()}, std::span<const Cached>{m_Impl->cache}.subspan(begin, end - begin));
-    begin = end;
-  }
-  const auto integrate = [&](std::size_t index) {
-    auto& b = bodies[index];
-    Internal::integrate(b, fieldForces[index], dt, environment.integration);
-  };
-  const auto finishIntegration = [&] {
-    if (environment.integration == Integration::VelocityVerlet) {
-      const auto next = sampleForces(environment, fieldBodies(bodies));
-      for (std::size_t i = 0; i < bodies.size(); ++i) if (bodies[i].inverseMass > 0) {
-        bodies[i].velocity = bodies[i].velocity + next[i] * (bodies[i].inverseMass * dt * 0.5);
-        fieldForces[i] = (fieldForces[i] + next[i]) * 0.5;
-      }
+std::vector<BodyForceSnapshot> System::forceSnapshot(const Scene& scene) const {
+  scene.physics().validate(scene); const auto shapes = Detail::captureColliders(scene);
+  std::vector<Body> bodies; bodies.reserve(shapes.size()); for (const auto& s : shapes) bodies.push_back(body(scene,s));
+  const auto samples = sampleForces(scene.physics(),fieldBodies(bodies));
+  std::vector<BodyForceSnapshot> result;
+  for (std::size_t i = 0; i < bodies.size(); ++i) if (bodies[i].inverseMass) {
+    const auto e = shapes[i].entity; BodyForceSnapshot f{e,shapes[i].center.vector(),samples[i].vector()};
+    const auto& bindings = scene.m_Impl->physicsBindings;
+    const auto it = std::lower_bound(bindings.begin(),bindings.end(),e.id(),[](const auto& b,auto id) { return b.entity.id() < id; });
+    if (m_Impl->current == &scene && m_Impl->fields == scene.physics().fields && m_Impl->integration == scene.physics().integration && it != bindings.end() && it->entity == e &&
+        samePose(it->published,e.get<Transform>()) && sameSettings(it->authored,e.get<RigidBody>()) && it->authored.velocity == e.get<RigidBody>().velocity && it->authored.angularVelocity == e.get<RigidBody>().angularVelocity &&
+        sameWorldShape(it->shape,shapes[i])) {
+      const auto force = scene.m_Impl->physicsWorld->forces(it->body);
+      f.fieldForce = force.fieldForce.vector(); f.contactForce = force.contactForce.vector(); f.totalForce = force.totalForce.vector(); f.solved = force.status != ForceStatus::Stale;
     }
-    velocityBeforeContacts.reserve(bodies.size());
-    for (const auto& b : bodies) velocityBeforeContacts.push_back(b.velocity);
-  };
-  const auto bounds = [&](std::size_t index) {
-    auto& b = bodies[index];
-    if (b.inverseMass > 0) Detail::updateBounds(b.shape);
-    proxies[index] = b.shape;
-  };
-  const auto broad = [&] {
-    pairs = Detail::broadPhase(proxies, config.contactDistance, jobs, dynamic);
-    stats.candidatePairs = pairs.size();
-    pairConstraints.resize(pairs.size());
-  };
-  const auto narrow = [&](std::size_t index) {
-    const auto i = pairs[index].a, j = pairs[index].b;
-    const auto& a = bodies[i]; const auto& b = bodies[j];
-    const auto found = oldPairs.find({a.shape.entity.id(), b.shape.entity.id()});
-    const auto previousContacts = found == oldPairs.end() ? std::span<const Cached>{} : found->second;
-    pairConstraints[index] = buildConstraints(a, b, i, j, previousContacts, config, dt, m_Impl->previousDt);
-  };
-  const auto prepare = [&] {
-    for (auto& list : pairConstraints) constraints.insert(constraints.end(), list.begin(), list.end());
-    islands = contactIslands(constraints, dynamic);
-    stats.islands = islands.size();
-  };
-  const auto solve = [&](std::size_t index) { Internal::solveIsland(bodies, constraints, islands[index], config); };
-  const auto finalize = [&] {
-    // Prepare every output and cache allocation before committing Scene changes.
-    cache.reserve(constraints.size());
-    forces.reserve(bodies.size());
-    for (std::size_t i = 0; i < bodies.size(); ++i) if (bodies[i].inverseMass > 0) {
-      const auto& b = bodies[i];
-      const auto contact = (b.velocity - velocityBeforeContacts[i]) * (static_cast<double>(b.properties.mass) / dt);
-      forces.push_back({b.shape.entity, b.shape.center.vector(), fieldForces[i].vector(),
-        contact.vector(), (fieldForces[i] + contact).vector(), true});
-    }
-    for (auto& b : bodies) if (b.inverseMass > 0) {
-      b.pose.position = b.shape.center.vector();
-      b.properties.velocity = b.velocity.vector(); b.properties.angularVelocity = b.angular.vector();
-      Detail::updateBounds(b.shape);
-    }
-    for (const auto& c : constraints) {
-      const auto& a = bodies[c.a]; const auto& b = bodies[c.b];
-      if (!validAnchor(a, b, c.localA, c.localB, c.normal, config.contactDistance)) continue;
-      const auto pa = a.shape.center + a.offset(c.localA), pb = b.shape.center + b.offset(c.localB);
-      const auto friction = c.tangent1 * c.tangentImpulse1 + c.tangent2 * c.tangentImpulse2;
-      ContactPoint p{pa.vector(), pb.vector(), V{collisionDot(pb - pa, c.normal), 0, 0}.vector().x,
-        V{c.normalImpulse, 0, 0}.vector().x, friction.vector()};
-      if (contacts.empty() || contacts.back().a != a.shape.entity || contacts.back().b != b.shape.entity)
-        contacts.push_back({a.shape.entity, b.shape.entity, c.normal.vector(), {}});
-      contacts.back().points.push_back(p);
-      cache.push_back({a.shape.entity, b.shape.entity, c.normal, c.localA, c.localB, friction, c.normalImpulse});
-      ++stats.contacts;
-      stats.maximumPenetration = std::max(stats.maximumPenetration, -p.separation);
-    }
-  };
-  if (jobs) {
-    TaskGraph graph;
-    const JobOptions physics{JobCategory::Physics};
-    const auto integration = graph.addParallelFor(bodies.size(), integrate, physics);
-    const auto fieldUpdate = graph.add(finishIntegration, physics);
-    const auto update = graph.addParallelFor(bodies.size(), bounds, physics);
-    const auto candidates = graph.add(broad, physics);
-    const auto collision = graph.addParallelFor([&] { return pairs.size(); }, narrow, physics);
-    const auto preparation = graph.add(prepare, physics);
-    const auto solving = graph.addParallelFor([&] { return islands.size(); }, solve, {JobCategory::Physics, {}, 1});
-    const auto output = graph.add(finalize, physics);
-    graph.depends(fieldUpdate, integration); graph.depends(update, fieldUpdate); graph.depends(candidates, update);
-    graph.depends(collision, candidates); graph.depends(preparation, collision);
-    graph.depends(solving, preparation); graph.depends(output, solving);
-    jobs->wait(jobs->submit(graph), WaitMode::Help);
-  } else {
-    for (std::size_t i = 0; i < bodies.size(); ++i) integrate(i);
-    finishIntegration();
-    for (std::size_t i = 0; i < bodies.size(); ++i) bounds(i);
-    broad();
-    for (std::size_t i = 0; i < pairs.size(); ++i) narrow(i);
-    prepare();
-    for (std::size_t i = 0; i < islands.size(); ++i) solve(i);
-    finalize();
+    result.push_back(f);
   }
-  for (const auto& b : bodies) if (b.inverseMass > 0) {
-    b.shape.entity.get<Transform>() = b.pose;
-    b.shape.entity.get<RigidBody>() = b.properties;
-  }
-  m_Impl->cache = std::move(cache); m_Impl->previous = std::move(bodies);
-  m_Impl->contacts = std::move(contacts); m_Impl->stats = stats; m_Impl->previousDt = dt;
-  m_Impl->forces = std::move(forces); m_Impl->fields = std::move(environment.fields);
-  m_Impl->integration = environment.integration;
+  return result;
 }
 } // namespace Jade::Physics

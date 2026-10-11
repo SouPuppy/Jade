@@ -31,12 +31,12 @@ bool validAnchor(const Body &a, const Body &b, V localA, V localB, V normal, dou
       margin + 8 * std::numeric_limits<float>::epsilon() * std::max(a.shape.size(), b.shape.size());
   return separation <= tolerance && collisionDot(tangent, tangent) <= tolerance * tolerance;
 }
-std::vector<ContactPoint> persistentPoints(const Body &a, const Body &b, const Manifold &hit,
+SmallList<ContactPoint,24> persistentPoints(const Body &a, const Body &b, const Manifold &hit,
                                            std::span<const Cached> cache, double margin) {
   if (a.shape.kind != Detail::CollisionKind::Box || b.shape.kind != Detail::CollisionKind::Box)
     return hit.points;
   const auto normal = v(hit.normal);
-  std::vector<ContactPoint> points;
+  SmallList<ContactPoint,24> points;
   for (const auto &old : cache) {
     if (a.geometryEdited || b.geometryEdited || old.a != hit.a || old.b != hit.b ||
         collisionDot(old.normal, normal) < 0.99 || !validAnchor(a, b, old.localA, old.localB, normal, margin))
@@ -131,7 +131,7 @@ std::vector<ContactPoint> persistentPoints(const Body &a, const Body &b, const M
             selected = {i, j, k, l};
           }
         }
-  std::vector<ContactPoint> reduced;
+  SmallList<ContactPoint,24> reduced;
   for (const auto i : selected)
     reduced.push_back(points[i]);
   return reduced;
@@ -153,6 +153,7 @@ void positionImpulse(Body &a, Body &b, V ra, V rb, V p) {
 }
 void solveIsland(std::span<Body> bodies, std::span<Constraint> constraints,
                  std::span<const std::size_t> island, const Config &config) {
+  for (const auto ci : island) prepareConstraint(bodies,constraints[ci]);
   for (const auto ci : island) {
     const auto &c = constraints[ci];
     auto &a = bodies[c.a];
@@ -202,10 +203,59 @@ void solveIsland(std::span<Body> bodies, std::span<Constraint> constraints,
     }
   }
 }
-std::vector<Constraint> buildConstraints(const Body &a, const Body &b, std::size_t i, std::size_t j,
+void prepareConstraint(std::span<Body> bodies, Constraint& c) {
+  const auto& a = bodies[c.a]; const auto& b = bodies[c.b];
+  c.ra = a.offset(c.localA); c.rb = b.offset(c.localB);
+  c.normalA = a.inertia(collisionCross(c.ra,c.normal)); c.normalB = b.inertia(collisionCross(c.rb,c.normal));
+  c.tangent1A = a.inertia(collisionCross(c.ra,c.tangent1)); c.tangent1B = b.inertia(collisionCross(c.rb,c.tangent1));
+  c.tangent2A = a.inertia(collisionCross(c.ra,c.tangent2)); c.tangent2B = b.inertia(collisionCross(c.rb,c.tangent2));
+  const double n = effective(a,b,c.ra,c.rb,c.normal);
+  c.normalMass = n > 0 ? 1/n : 0;
+  const double m1 = effective(a,b,c.ra,c.rb,c.tangent1), m2 = effective(a,b,c.ra,c.rb,c.tangent2);
+  const double cross = collisionDot(c.tangent1,
+    collisionCross(a.inertia(collisionCross(c.ra,c.tangent2)),c.ra)+
+    collisionCross(b.inertia(collisionCross(c.rb,c.tangent2)),c.rb));
+  const double determinant = m1*m2-cross*cross;
+  if (determinant > 0) {
+    c.tangentMass11 = m2/determinant; c.tangentMass12 = -cross/determinant; c.tangentMass22 = m1/determinant;
+  }
+}
+void warmConstraint(std::span<Body> bodies, Constraint& c) {
+  applyVelocityImpulse(bodies,c,c.normalImpulse,c.tangentImpulse1,c.tangentImpulse2);
+}
+void applyVelocityImpulse(std::span<Body> bodies,const Constraint& c,double normal,double t1,double t2) {
+  auto& a = bodies[c.a]; auto& b = bodies[c.b]; const auto p = c.normal*normal+c.tangent1*t1+c.tangent2*t2;
+  if (a.inverseMass > 0) { a.velocity = a.velocity-p*a.inverseMass; a.angular = a.angular-c.normalA*normal-c.tangent1A*t1-c.tangent2A*t2; }
+  if (b.inverseMass > 0) { b.velocity = b.velocity+p*b.inverseMass; b.angular = b.angular+c.normalB*normal+c.tangent1B*t1+c.tangent2B*t2; }
+}
+void solveVelocity(std::span<Body> bodies, Constraint& c) {
+  if (!(c.normalMass > 0)) return;
+  auto& a = bodies[c.a]; auto& b = bodies[c.b];
+  const double old = c.normalImpulse;
+  c.normalImpulse = std::max(0.0,old+(c.target-collisionDot(relative(a,b,c.ra,c.rb),c.normal))*c.normalMass);
+  applyVelocityImpulse(bodies,c,c.normalImpulse-old,0,0);
+  const auto rv = relative(a,b,c.ra,c.rb);
+  const double u = collisionDot(rv,c.tangent1), v = collisionDot(rv,c.tangent2);
+  double next1 = c.tangentImpulse1-c.tangentMass11*u-c.tangentMass12*v;
+  double next2 = c.tangentImpulse2-c.tangentMass12*u-c.tangentMass22*v;
+  const double limit = c.friction*c.normalImpulse, length = std::hypot(next1,next2);
+  if (length > limit && length > 0) { next1 *= limit/length; next2 *= limit/length; }
+  applyVelocityImpulse(bodies,c,0,next1-c.tangentImpulse1,next2-c.tangentImpulse2);
+  c.tangentImpulse1 = next1; c.tangentImpulse2 = next2;
+}
+void solvePosition(std::span<Body> bodies, const Constraint& c, const Config& config) {
+  auto& a = bodies[c.a]; auto& b = bodies[c.b];
+  const auto ra = a.offset(c.localA), rb = b.offset(c.localB);
+  const double separation = collisionDot((b.shape.center-a.shape.center)+rb-ra,c.normal);
+  const double error = std::min(0.0,separation+config.penetrationSlop);
+  if (error >= 0) return;
+  const double mass = effective(a,b,ra,rb,c.normal);
+  if (mass > 0) positionImpulse(a,b,ra,rb,c.normal*(-.4*error/mass));
+}
+SmallList<Constraint,4> buildConstraints(const Body &a, const Body &b, std::size_t i, std::size_t j,
                                          std::span<const Cached> previousContacts, const Config &config,
                                          float dt, double previousDt) {
-  std::vector<Constraint> result;
+  SmallList<Constraint,4> result;
   const auto hit = Detail::collideManifold(a.shape, b.shape, config.contactDistance);
   if (!hit)
     return result;
@@ -213,7 +263,7 @@ std::vector<Constraint> buildConstraints(const Body &a, const Body &b, std::size
   const auto seed = std::abs(normal.x) < 0.7 ? V{1, 0, 0} : V{0, 1, 0};
   const auto t1 = Detail::collisionUnit(collisionCross(normal, seed));
   const auto t2 = collisionCross(normal, t1);
-  std::vector<bool> used(previousContacts.size());
+  std::array<bool,4> used{};
   for (const auto &p : persistentPoints(a, b, *hit, previousContacts, config.contactDistance)) {
     Constraint c{i, j, normal, t1, t2, a.local(v(p.pointA)), b.local(v(p.pointB))};
     c.friction = std::sqrt(static_cast<double>(a.properties.friction) * b.properties.friction);

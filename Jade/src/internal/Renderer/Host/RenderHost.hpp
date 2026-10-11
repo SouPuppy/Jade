@@ -26,7 +26,8 @@ public:
   void draw(const Renderer::SceneSnapshot *, Renderer::ImageSize, Renderer::RenderMode mode, bool wireframe, bool axes,
             const CollisionDebugLines* colliders = nullptr, bool paused = true,
             std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max(),
-            const Renderer::CameraFrame* observer=nullptr, const std::vector<Renderer::PathSegment>* paths=nullptr);
+            const Renderer::CameraFrame* observer=nullptr, const std::vector<Renderer::PathSegment>* paths=nullptr,
+            bool normalDebug=false);
 
 private:
   Window &m_Window;
@@ -36,6 +37,7 @@ private:
   DebugDraw m_Debug;
   Renderer::DebugViewOptions m_DebugOptions;
   RealtimePipeline m_Raster{false}, m_Hybrid{true};
+  NormalDebugPipeline m_NormalDebug;
   Renderer::RayTracingSettings m_Settings;
   Renderer::RayTracing m_RayTracing;
   std::unique_ptr<Renderer::ComputeRayTracer> m_Compute;

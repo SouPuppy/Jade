@@ -117,9 +117,10 @@ void Application::Run(const RunOptions &options)
       break;
     // One processing pass retains the same scene through input, update and present.
     const auto active = m_Impl->runtime.scene();
+    if (active && active->m_Impl->cameraNavigation)
+      active->m_Impl->cameraNavigation->suspend(runtime().soulMode());
     // Also covers a module installed after this Scene became active.
-    if(!runtime().soulMode()) m_Impl->window.SetMouseCaptured(active && active->CapturesMouse());
-    else if(!m_Impl->window.Input().IsDown(MouseButton::Right)) m_Impl->window.SetMouseCaptured(false);
+    m_Impl->window.SetMouseCaptured(runtime().capturesMouse());
     const auto dispatch = [&](auto &&...arguments) {
       const auto flow = m_Impl->events.Dispatch(arguments...);
       if (flow == EventFlow::Stop || !active || m_Impl->stopRequested || m_Impl->window.ShouldClose())
@@ -164,12 +165,8 @@ void Application::Run(const RunOptions &options)
             runtime().setPhysicsDebug(!runtime().physicsDebugEnabled());
           } else if (key->event.key == Key::F5) {
             auto& renderer = runtime().renderer();
-            auto settings = renderer.rayTracingSettings();
-            settings.output = settings.output == Renderer::RayOutput::Color
-                                ? Renderer::RayOutput::Normal : Renderer::RayOutput::Color;
-            renderer.setRayTracingSettings(settings);
-            applicationLog << Log::info("Ray output: {}", settings.output == Renderer::RayOutput::Normal
-                                                          ? "Normal" : "Color");
+            renderer.setNormalDebug(!renderer.normalDebugEnabled());
+            applicationLog << Log::info("Normal debug: {}", renderer.normalDebugEnabled() ? "on" : "off");
           } else if (key->event.key == Key::O && active) {
             runtime().toggleProjection();
           }
@@ -177,7 +174,7 @@ void Application::Run(const RunOptions &options)
       } else if (const auto *mouse = std::get_if<Detail::MouseTransition>(&transition)) {
         if(!runtime().soulMouse(mouse->action,mouse->event)) dispatch(mouse->action, mouse->event);
       } else if (const auto *scroll = std::get_if<MouseScrolled>(&transition)) {
-        dispatch(*scroll);
+        if (!runtime().soulScrolled(*scroll)) dispatch(*scroll);
       } else {
         const auto& moved=std::get<MouseMoved>(transition);
         if(!runtime().soulMouseMoved(moved)) dispatch(moved);
@@ -210,6 +207,7 @@ void Application::Run(const RunOptions &options)
 
     const float dt = previousFrame ? std::chrono::duration<float>(now - *previousFrame).count() : 0.0f;
     previousFrame = now;
+    runtime().beginCameraFrame();
     const auto modifiers = m_Impl->window.Input().CurrentModifiers();
     for (std::size_t index = 1; index < Detail::InputState::keyCount; ++index) {
       const auto key = static_cast<Key>(index);
@@ -237,6 +235,7 @@ void Application::Run(const RunOptions &options)
     if (m_Impl->stopRequested || m_Impl->window.ShouldClose()) {
       break;
     }
+    runtime().updateObserver(dt);
     dispatch(FrameUpdate{dt, std::chrono::duration<double>(now - start).count(), frames + 1});
     if (m_Impl->stopRequested || m_Impl->window.ShouldClose()) {
       break;

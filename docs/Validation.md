@@ -1,5 +1,105 @@
 # Windows x64 validation
 
+## Scene 5 ten-wall stress test (2026-10-12)
+
+JadeDemo now accepts --scene 5 and key 5. Scene 5 lazily creates ten parallel
+100-column by 100-row walls: exactly 100,000 dynamic unit cubes sharing one mesh,
+plus a radius-three, mass-3500 glass sphere launched automatically at 60 units/second.
+Walls are spaced 12 units apart. K relaunches from the camera, P pauses/resumes,
+and R rebuilds this scene. The camera frames the walls with a 1000-unit far plane
+and faster navigation. Inactive scenes retain their state.
+
+Debug and Release JadeDemo build successfully. Both actual executables complete
+one-frame Scene 5 startup runs with empty stderr. Release also completes a two-frame
+run with real physics and wireframe rendering in 33.25 seconds, logging frame hitches
+and discarded substep debt as expected for this workload. Release --help includes scene 5;
+--scene 6 is rejected with exit code 1. A hidden harness includes the actual Demo
+source and injects its installed GLFW callbacks, verifying all 100,000 unique grid
+cells, shared geometry, initial projectile settings, 5/K/P/R/1/3 and retained state.
+Input checks use a long fixed step to isolate them from expensive simulation.
+
+The harness then advances the actual Scene 5 through 24 physics steps at 1/120
+second. All 100,001 dynamic bodies participate; the ball makes contact and 138
+cubes move more than 0.05 units off their wall plane. Positions, velocities and
+angular velocities remain finite. With three workers in Release, the measured
+average is 909.901 ms per step. This is a stress workload, not a realtime scene.
+These checks cover the first impact, not traversal of all ten walls.
+
+Artifacts: build/windows-release/validation/scene5-validation.cpp/.log/.err,
+scene5-startup.log/.err, scene5-runtime.log/.err and
+build/windows-debug/bin/scene5-startup.log/.err.
+
+## Untitled executable build recovery (2026-10-12)
+
+The unsupported string_view switch in Untitled's --pipeline parser is replaced by explicit string comparisons. The complete windows-debug default build and windows-release Untitled target now succeed; this resolves the executable build blocker recorded below. Debug Untitled completes two hidden CPU frames for each of raster, hybrid, tracing and none. An invalid pipeline retains the descriptive error and exit code 1. Startup logs are build/windows-debug/vscode-untitled-{raster,hybrid,tracing,none,invalid}.log.
+
+## Independent F5 normal debug (2026-10-11)
+
+F5 now toggles Renderer::Config::normalDebug through System::setNormalDebug; it does not change the selected I pipeline or RayTracingSettings::output. A dedicated geometry/composite pass draws normals with the main pipeline set to None, without wireframe, lights, shadow passes or transport. Switching I retains this debug view; disabling F5 resumes the selected pipeline. Geometry establishes its own OpenGL depth, texture and sampler state so it can draw without a preceding shadow pass. Debug title/progress reports Normals and hides transport sampling statistics while active.
+
+Release passes all 288 tests across 57 suites in 18.705 seconds. Debug passes all 8 focused application/pipeline/F5 tests across 3 suites in 1.402 seconds. New CPU/GPU readback coverage verifies the actual normal output texture with I set to None, then throughout the full pipeline cycle; input coverage verifies repeat/modifier/consumption rules, settings preservation and tracing resumption. Existing raster/hybrid tests cover depth, alpha, normals, visibility and moving shadows. Debug and Release JadeDemo rebuild successfully.
+
+Artifacts: build/windows-release/f5-normal-debug-full.log/.xml and build/windows-debug/f5-normal-debug.log/.xml. This section supersedes earlier descriptions of F5 as a ray tracing output switch.
+
+## Unified upright camera controls (2026-10-11)
+
+FPSCameraControl is now the only scene camera module; FreeCameraControl sources and public headers are removed. Optional CameraControl components own ViewMode, physical bindings and tuning. Editor defaults are right-drag look, middle-drag pan, wheel zoom, horizontal WASD/arrows, Space ascent, Shift descent and Ctrl slow movement. FirstPerson is a captured-mouse interaction mode of the same controller. Both constrain pitch to +/-89 degrees and remove roll. CameraMotion separates these upright operations from unrestricted Transform Motion; scene cameras and the F2 observer share CameraNavigation.
+
+Release passes all 287 tests across 57 suites in 49.110 seconds. Debug's broad event/input/camera regression run passes 59 tests in 66.520 seconds; the final camera/module/observer run passes 21 tests in 42.808 seconds. Coverage includes pitch limits, fixed up, full horizontal speed while pitched, normalized combined movement, alias deduplication, independent Shift descent, per-camera rebinding, focus/camera/scene/settings/projection resets, perspective/orthographic pan scale, reversible zoom, module transaction rollback, consumed-frame input clearing and observer isolation of game pose/lens. Five affected public headers compile independently under MSVC C++20 /W4 /WX /permissive- with only Jade/include exposed. git diff --check passes.
+
+Debug JadeDemo builds and completes a two-frame showroom run. Release JadeSmokeTests builds; Release JadeDemo cannot be overwritten while its existing process is running. Full Untitled executable compilation remains blocked by the concurrent string_view switch in Demo/Untitled/Source/main.cpp; that edit is preserved. UntitledGameplay and its test coverage build and pass.
+
+Artifacts: build/windows-release/all-tests.log/.xml, build/windows-debug/camera-tests.log/.xml, build/windows-debug/camera-final.log/.xml and build/windows-debug/showcase-camera-smoke.log. These checks establish automated input/math/lifecycle behavior and a startup smoke run; they do not measure manual interaction quality.
+
+## Render pipelines and Untitled (2026-10-11)
+
+This section supersedes the earlier two-switch I/F5 behavior documented below.
+Untitled starts in Raster; I cycles Raster/Hybrid/RayTracing/None. F5 preserves the
+pipeline, F1/F3/F4 remain overlays, and F2 uses an independent observer while the
+world keeps updating. Debug and Release each pass all 285 tests across 57 suites
+(114.981 s and 43.307 s). All 69 public headers compile independently with only
+Jade/include visible. An engine-only build with Demo and tests disabled succeeds.
+Both executables are rebuilt and git diff --check passes.
+
+New readback tests verify depth, alpha cutout, frame selection, normal output,
+GPU/CPU visibility, moving occluders and emissive light endpoints. Recorded transport
+matches Li without changing sampling; explicit directional lighting agrees between
+CPU and GPU tracing. Observer regressions cover consumed movement, continuing physics,
+original-camera preservation, projection, pipeline selection, pause preservation,
+Escape and scene-switch cleanup. Actual game readback verifies rendered hero colors
+against Film encoding and exports Raster/Hybrid/soul previews, visually inspected.
+Path visualization uses diagnostic CPU samples rather than replaying GPU film paths.
+
+Release moving/rotating benchmarks ran at 960 x 640 on NVIDIA GeForce RTX 5070 Ti.
+Each main mode ran 1441 frames; soul ran 241. Tracing used scale 0.5 (480 x 320),
+four bounces and at least one complete sample per frame. Normal tracing frames reserve
+6 ms for presentation/window scheduling; paused accumulation remains unlimited.
+
+| Mode | Frames | Elapsed seconds | Overall FPS | Mean frame work ms |
+| --- | ---: | ---: | ---: | ---: |
+| raster | 1441 | 60.13 | 23.95 | 4.26 |
+| hybrid | 1441 | 60.01 | 24 | 3.49 |
+| tracing | 1441 | 60.75 | 23.7 | 21.83 |
+| none | 1441 | 60.01 | 24 | 2.42 |
+| soul | 241 | 10.05 | 23.88 | 4.88 |
+
+These are measured results on this machine, not guarantees for other hardware.
+Raster/Hybrid meet the 24 FPS game target. Tracing averages about 23.7 FPS and retains
+occasional missed slots; the previous unreserved benchmark averaged 23.08 FPS. An
+additional 241-frame CPU Hybrid run at scale 0.25 completed in 10.06 s (23.86 FPS).
+Sparse diagnostics are bounded to 16 x 9 samples, four bounces and at most 6 Hz.
+Realtime lighting is direct-light approximation with up to eight sources: open emissive
+meshes use center area samples, closed emissive meshes use isotropic point approximations,
+and dielectric surfaces remain opaque tinted approximations. Hybrid does not implement
+traced reflections/indirect lighting. None retains a window and enabled diagnostics.
+
+Artifacts are under build/validation: pipeline-{debug,release}-full.log/.xml,
+pipeline-headers.log, pipeline-engine-only.log, pipeline-performance.json and
+untitled-*-benchmark.log. Preview PPM/PNG files are in build/windows-debug/validation
+and build/windows-release/validation. Assets include all thirteen RAR archives and
+104 source PNGs under Demo/Untitled/Assets; generated runtime metadata identifies
+nine Walk and fourteen Idle frames per direction at the 12 FPS timing fallback.
+
 ## Mesh wireframe on F1 (2026-10-11)
 
 The default Mesh wireframe switch moves from F to F1, independently of debug.shortcuts. Updated regressions cover image/wireframe combinations, exact modifiers, repeat suppression, application/scene consumption, callback ordering and the former F key being unbound. F3/F4/F5 behavior remains covered. Release passes all 14 targeted ApplicationDebug/RenderMode/F5 checks in 4.961 seconds; Debug passes the F1/image state regression in 0.323 seconds. Both Demo executables rebuild successfully; git diff --check passes. Artifacts: build/validation/f1-mesh-*.log/.xml.
