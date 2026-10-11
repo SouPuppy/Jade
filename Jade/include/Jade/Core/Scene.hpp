@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Jade/Core/Entity.hpp>
+#include <Jade/Core/Archetype.hpp>
 #include <Jade/Events/Event.hpp>
 #include <Jade/Events/FrameUpdate.hpp>
 #include <Jade/Events/Keyboard.hpp>
@@ -45,7 +46,11 @@ public:
       : m_Entities(entities), m_Index(index) { Skip(); }
     void Skip()
     {
-      while (m_Index < m_Entities->size() && !((*m_Entities)[m_Index].template has<T>() && ...)) ++m_Index;
+      while (m_Index < m_Entities->size()) {
+        const auto& entity = (*m_Entities)[m_Index];
+        if (entity.valid() && (entity.template has<T>() && ...)) break;
+        ++m_Index;
+      }
     }
     const std::vector<Entity>* m_Entities = nullptr;
     std::size_t m_Index = 0;
@@ -79,14 +84,27 @@ public:
   }
 
   Entity create();
+  template<class T> T create()
+  {
+    static_assert(std::is_base_of_v<Entity, T>, "Typed entities derive from Jade::Archetype.");
+    const auto entity = create();
+    try {
+      T result(entity);
+      Detail::CheckArchetype(entity, typename T::JadeArchetypeComponents{});
+      return result;
+    } catch (...) {
+      if (owns(entity)) destroy(entity);
+      throw;
+    }
+  }
   void destroy(Entity entity);
   bool owns(Entity entity) const noexcept;
   // Snapshot identities; skip removals and defer new matches until the next view.
   template<class... T>
-  SceneView<T...> view() const
+  auto query() const
   {
-    static_assert(sizeof...(T) > 0, "Scene::view requires at least one component type.");
-    return SceneView<T...>(Snapshot({typeid(T)...}));
+    static_assert(sizeof...(T) > 0, "Scene::query requires at least one component type.");
+    return QueryTypes(typename Detail::FlattenComponents<Detail::ComponentList<>, T...>::type{});
   }
 
   // Reparenting retains local TRS. Empty parent detaches; deletion destroys the subtree.
@@ -129,6 +147,10 @@ public:
 
 private:
   friend class Application;
+  friend class Runtime;
+  template<class... T> SceneView<T...> QueryTypes(Detail::ComponentList<T...>) const {
+    return SceneView<T...>(Snapshot({typeid(T)...}));
+  }
   bool CapturesMouse() const noexcept;
   void InstallModule(std::type_index type, std::function<void()> attach);
   void RequireOwned(Entity entity) const;

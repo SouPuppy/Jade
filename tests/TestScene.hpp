@@ -15,6 +15,6 @@ inline std::shared_ptr<Jade::Scene> MakeTestScene(Jade::Application& app)
   Jade::Motion::lookAt(pose, {});
   camera.add<Jade::Camera>();
   scene->setCamera(camera);
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   return scene;
 }

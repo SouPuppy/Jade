@@ -1,5 +1,24 @@
 # Windows x64 validation
 
+## Runtime, Archetype and rigid-body dynamics (2026-10-10)
+
+Debug and Release each passed 197/197 GoogleTest tests across 46 suites. Both isolated configurations rebuilt the engine, Demo and tests without compiler warnings. Nine affected public headers passed standalone MSVC C++20 /W4 /WX compilation. Runtime now owns Scene selection, Assets, Renderer::System and Physics::System; tests retain coverage of scene switching, callback/worker exceptions, recovery, input propagation and rendering.
+
+Archetype checks cover recursive flattening/deduplication, typed creation, manual component composition, empty-signature queries across destruction/recycling, incomplete/throwing constructor rollback and stable component references. A signature-query fixture includes 5,000 unrelated entities and verifies that only matching group rows are visited. Physics checks cover gravity, mass-dependent linear/off-center angular impulses, four-point Box face manifolds, Sphere contacts, restitution, friction, static bodies, invalid-input rollback and recycled identities. Runtime checks compare 30/60-FPS clocks, substep limits, dropped debt, pause/resume, scene changes and repeated Run boundaries.
+
+The 5/3/1 pyramid fixture advances nine boxes and a static floor for 2,400 steps at 1/120 second with gravity continuously enabled and no sleeping. The last 600 steps produce the same rounded measurements in Debug and Release:
+
+| Measurement over the final five seconds | Observed maximum | Acceptance limit |
+| --- | --- | --- |
+| Linear speed | 0.000001 m/s | < 0.02 m/s |
+| Angular speed | 0.000000 rad/s (rounded) | < 0.02 rad/s |
+| Penetration | 0.003336 m | <= 0.005 m |
+| Position drift | 0.000303 m | < 0.01 m |
+
+Actual OpenGL readback verifies cyan AABBs, yellow shapes, red contact markers and green normal arrows. Logging checks verify activation and summary throttling. Both actual Demo executables completed 240 frames with normal shutdown and empty stderr. The Debug launch exceeded its frame budget and exercised substep-debt dropping; these launches establish successful execution, not realtime performance. An ignored Release harness built from the actual Demo source with a hidden window invokes real GLFW callbacks and checks F4, P, K, 1/2/3, R and I: unified debug state, pause preservation, angular impulse, scene selection, reset and transitions between Wireframe/RayTracing all passed.
+
+Artifacts are ignored under .temp/runtime-debug-tests.xml/.log, .temp/runtime-release-tests.xml/.log, .temp/runtime-*-build.log, .temp/runtime-*-demo.log/.err and .temp/runtime-demo-input.log. Builds are build/collision-debug/ and build/collision-release/. Physics remains discrete and single-threaded, with all-pairs broad phase; these checks do not establish CCD, arbitrary hierarchy dynamics or large-world scalability. No commit was created.
+
 ## F4 Collider debug shortcut (2026-10-10)
 
 Debug and Release each passed all 14 ApplicationDebug, CollisionDebug and RenderMode tests. Existing keyboard callback checks now cover F4 opt-in, repeats, modifiers, event consumption and independent wireframe/axis/AABB state. OpenGL readback verifies yellow Collider shapes and cyan AABBs alongside actual gray-white mesh wireframe. Both isolated configurations rebuilt the engine, Demo and tests successfully. Demo cubes and spheres now carry matching Colliders. No commit was created.

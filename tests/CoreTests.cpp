@@ -131,7 +131,7 @@ TEST(Scene, QueriesSnapshotMatchesSkipRemovalsAndDeferNewMatches)
   missing.add<Counter>();
   Jade::Entity created;
   std::vector<Jade::Entity> visited;
-  for (const auto entity : scene.view<Counter, Label>()) {
+  for (const auto entity : scene.query<Counter, Label>()) {
     visited.push_back(entity);
     if (entity == first) {
       scene.destroy(erased);
@@ -144,7 +144,7 @@ TEST(Scene, QueriesSnapshotMatchesSkipRemovalsAndDeferNewMatches)
   }
   EXPECT_EQ(visited, (std::vector<Jade::Entity>{first}));
   visited.clear();
-  for (const auto entity : scene.view<Counter, Label>())
+  for (const auto entity : scene.query<Counter, Label>())
     visited.push_back(entity);
   ASSERT_EQ(visited.size(), 3u);
   EXPECT_NE(std::find(visited.begin(), visited.end(), created), visited.end());

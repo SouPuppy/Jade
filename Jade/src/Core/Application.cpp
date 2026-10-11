@@ -19,110 +19,24 @@ namespace Jade {
 namespace {
 
 const Log::Logger applicationLog{"Application"};
-const Log::Logger sceneLog{"Scene"};
 const Log::Logger frameLog{"Frame"};
 const Log::Logger performanceLog{"Performance"};
 const Log::Logger rayLog{"RayTracing"};
 
 } // namespace
 
-Application::Application(const ApplicationConfig &config)
+Application::Application(const EngineConfig &config)
 {
   if (config.frameLimits == 0) {
     throw std::invalid_argument("Frame limits must be positive.");
   }
   m_Impl = std::make_unique<Impl>(config);
   applicationLog << Log::info("Ready: window={}x{} target_fps={} vsync={}", config.window.width,
-                              config.window.height, config.frameLimits, config.vsync ? "on" : "off");
+                              config.window.height, config.frameLimits, config.renderer.vsync ? "on" : "off");
 }
 
-Application::~Application()
-{
-  m_Impl->rendering.stop();
-  // Destruction releases ownership without invoking throwing user callbacks.
-  if (m_Impl->scene)
-    m_Impl->scene->m_Impl->owner = nullptr;
-}
-
-Assets &Application::assets() noexcept { return m_Impl->assets; }
-std::shared_ptr<Scene> Application::scene() const noexcept { return m_Impl->scene; }
-
-Renderer::RayTracing &Application::rayTracing() noexcept { return m_Impl->rendering.rayTracing(); }
-Renderer::RenderProgress Application::renderProgress() const { return m_Impl->rendering.progress(); }
-
-void Application::setScene(std::shared_ptr<Scene> scene)
-{
-  if (scene && scene->m_Impl->owner && scene->m_Impl->owner != this) {
-    throw std::invalid_argument("Scene is already active in another Application.");
-  }
-  m_Impl->pendingScene = std::move(scene);
-  if (!m_Impl->running && !m_Impl->switching)
-    ApplyPendingScene();
-}
-
-bool Application::ApplyPendingScene()
-{
-  if (!m_Impl->pendingScene || m_Impl->switching)
-    return false;
-  auto next = std::move(*m_Impl->pendingScene);
-  m_Impl->pendingScene.reset();
-  const auto previous = m_Impl->scene;
-  if (previous == next)
-    return false;
-  if (next && next->m_Impl->owner && next->m_Impl->owner != this) {
-    throw std::invalid_argument("Scene is already active in another Application.");
-  }
-  if (next)
-    next->m_Impl->owner = this; // Reserve through reentrant lifecycle callbacks.
-  m_Impl->switching = true;
-  struct SwitchGuard {
-    bool &switching;
-    ~SwitchGuard() { switching = false; }
-  } guard{m_Impl->switching};
-  try {
-    if (previous) {
-      previous->m_Impl->events.DispatchLifecycle(false);
-    }
-    m_Impl->scene = next;
-    m_Impl->window.SetMouseCaptured(next && next->CapturesMouse());
-    m_Impl->window.Input().ResetCursor();
-    m_Impl->rendering.invalidate();
-    if (previous) {
-      previous->m_Impl->owner = nullptr;
-      sceneLog << Log::debug("Deactivated: scene={}", previous->m_Impl->id);
-    }
-    if (next) {
-      sceneLog << Log::debug("Activated: scene={}", next->m_Impl->id);
-      next->m_Impl->events.DispatchLifecycle(true);
-    }
-  } catch (...) {
-    if (next && m_Impl->scene != next)
-      next->m_Impl->owner = nullptr;
-    m_Impl->pendingScene.reset();
-    throw;
-  }
-  return true;
-}
-
-void Application::setWireframe(bool enabled) noexcept
-{
-  if (m_Impl->wireframe != enabled) {
-    m_Impl->wireframe = enabled;
-    m_Impl->rendering.invalidate();
-  }
-}
-
-bool Application::wireframeEnabled() const noexcept { return m_Impl->wireframe; }
-
-void Application::setAxisGizmo(bool enabled) noexcept { m_Impl->axisGizmo = enabled; }
-
-bool Application::axisGizmoEnabled() const noexcept { return m_Impl->axisGizmo; }
-
-void Application::setColliderGizmo(bool enabled) noexcept { m_Impl->colliderGizmo = enabled; }
-bool Application::colliderGizmoEnabled() const noexcept { return m_Impl->colliderGizmo; }
-void Application::setColliderAabbGizmo(bool enabled) noexcept { m_Impl->colliderAabbGizmo = enabled; }
-bool Application::colliderAabbGizmoEnabled() const noexcept { return m_Impl->colliderAabbGizmo; }
-
+Application::~Application() = default;
+Runtime& Application::runtime() noexcept { return m_Impl->runtime; }
 EventConnection Application::Connect(KeyAction action, KeyChord chord,
                                      std::function<EventFlow(const KeyEvent &)> callback)
 {
@@ -154,46 +68,49 @@ void Application::stop() noexcept { m_Impl->stopRequested = true; }
 
 void Application::Run(const RunOptions &options)
 {
-  if (m_Impl->running || m_Impl->switching) {
+  if (m_Impl->running) {
     throw std::logic_error("Application::Run cannot be called from an event callback.");
   }
-  m_Impl->rendering.start(m_Impl->wireframe);
+  m_Impl->runtime.begin();
+  const auto wireframe = [&] { return runtime().renderer().mode() == Renderer::Mode::Wireframe; };
+  const auto toggleWireframe = [&] { runtime().renderer().setMode(wireframe() ? Renderer::Mode::RayTracing : Renderer::Mode::Wireframe); };
   m_Impl->running = true;
   m_Impl->stopRequested = false;
   using Clock = Detail::FrameClock::Clock;
   const auto start = Clock::now();
   std::uint64_t frames = 0;
   struct RunGuard {
-    Detail::RenderHost &rendering;
+    Runtime &runtime;
     bool &running;
     const std::uint64_t &frames;
     Clock::time_point start;
-    std::optional<std::shared_ptr<Scene>> &pending;
+
     std::string_view reason = "window_closed";
     int exceptions = std::uncaught_exceptions();
     ~RunGuard()
     {
-      rendering.stop();
+      if (std::uncaught_exceptions() > exceptions) runtime.abort();
+      else runtime.end();
       running = false;
       const double elapsed = std::chrono::duration<double>(Clock::now() - start).count();
       if (std::uncaught_exceptions() > exceptions) {
-        pending.reset();
+
         applicationLog << Log::error("Run aborted by exception: frames={} elapsed={:.2f}s", frames, elapsed);
       } else {
         applicationLog << Log::info("Run stopped: frames={} elapsed={:.2f}s reason={}", frames, elapsed,
                                     reason);
       }
     }
-  } guard{m_Impl->rendering, m_Impl->running, frames, start, m_Impl->pendingScene};
+  } guard{m_Impl->runtime, m_Impl->running, frames, start};
 
   applicationLog << Log::info("Run started");
   Detail::FrameClock frameClock(m_Impl->frameLimits, start);
   Detail::FrameDiagnostics diagnostics(m_Impl->frameLimits);
   std::optional<Clock::time_point> previousFrame;
-  Renderer::ImageSize previousSize;
+
 
   while (!m_Impl->window.ShouldClose() && !m_Impl->stopRequested) {
-    if (ApplyPendingScene()) {
+    if (m_Impl->runtime.commitScene()) {
       previousFrame.reset();
       diagnostics.Resume();
       frameClock.Resume(Clock::now());
@@ -201,7 +118,7 @@ void Application::Run(const RunOptions &options)
     if (m_Impl->stopRequested)
       break;
     // One processing pass retains the same scene through input, update and present.
-    const auto active = m_Impl->scene;
+    const auto active = m_Impl->runtime.scene();
     // Also covers a module installed after this Scene became active.
     m_Impl->window.SetMouseCaptured(active && active->CapturesMouse());
     const auto dispatch = [&](auto &&...arguments) {
@@ -221,18 +138,17 @@ void Application::Run(const RunOptions &options)
         if (key->action == KeyAction::Pressed && key->event.key == Key::I &&
             key->event.modifiers == Modifiers::None && flow == EventFlow::Continue &&
             !m_Impl->stopRequested && !m_Impl->window.ShouldClose())
-          setWireframe(!wireframeEnabled());
+          toggleWireframe();
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
           if (key->event.key == Key::F) {
-            setWireframe(!wireframeEnabled());
-            applicationLog << Log::info("Wireframe: {}", wireframeEnabled() ? "on" : "off");
+            toggleWireframe();
+            applicationLog << Log::info("Wireframe: {}", wireframe() ? "on" : "off");
           } else if (key->event.key == Key::F3) {
-            setAxisGizmo(!axisGizmoEnabled());
-            applicationLog << Log::info("Axis Gizmo: {}", axisGizmoEnabled() ? "on" : "off");
+            runtime().setAxes(!runtime().axesEnabled());
+            applicationLog << Log::info("Axis Gizmo: {}", runtime().axesEnabled() ? "on" : "off");
           } else if (key->event.key == Key::F4) {
-            setColliderGizmo(!colliderGizmoEnabled());
-            applicationLog << Log::info("Collider Gizmo: {}", colliderGizmoEnabled() ? "on" : "off");
+            runtime().setPhysicsDebug(!runtime().physicsDebugEnabled());
           } else if (key->event.key == Key::O && active) {
             const auto camera = active->camera();
             if (camera.has<Transform>() && camera.has<Camera>()) {
@@ -262,7 +178,8 @@ void Application::Run(const RunOptions &options)
 
     const auto size = m_Impl->window.GetFramebufferSize();
     if (size.width <= 0 || size.height <= 0) {
-      m_Impl->rendering.invalidate();
+      m_Impl->runtime.suspend();
+      previousFrame.reset();
       m_Impl->window.WaitEvents(0.05);
       frameClock.Resume(Clock::now());
       previousFrame.reset();
@@ -309,23 +226,8 @@ void Application::Run(const RunOptions &options)
       break;
     }
 
-    const Renderer::ImageSize imageSize{size.width, size.height};
-    if (imageSize != previousSize) {
-      m_Impl->rendering.invalidate();
-      previousSize = imageSize;
-    }
-    m_Impl->rendering.rethrowError();
-    std::optional<Renderer::SceneSnapshot> snapshot;
-    if (active) {
-      const auto camera = active->camera();
-      if (camera.has<Transform>() && camera.has<Camera>())
-        snapshot = Renderer::SceneSnapshot::capture(*active, m_Impl->assets);
-    }
-    std::optional<Detail::CollisionDebugLines> collisionDebug;
-    if (active && snapshot && (m_Impl->colliderGizmo || m_Impl->colliderAabbGizmo))
-      collisionDebug = Detail::captureCollisionDebug(*active, m_Impl->colliderGizmo, m_Impl->colliderAabbGizmo);
-    m_Impl->rendering.draw(snapshot ? &*snapshot : nullptr, imageSize, m_Impl->wireframe, m_Impl->axisGizmo,
-                          collisionDebug ? &*collisionDebug : nullptr);
+    m_Impl->runtime.tick(dt);
+    m_Impl->runtime.render({size.width, size.height});
     const auto completed = Clock::now();
     const auto stats = frameClock.FinishFrame(completed);
     frames = stats.frame;
@@ -342,7 +244,7 @@ void Application::Run(const RunOptions &options)
         performanceLog << Log::debug(
             "fps={:.1f} interval_avg={:.2f}ms interval_max={:.2f}ms work_avg={:.2f}ms work_max={:.2f}ms",
             summary.fps, summary.intervalAvgMs, summary.intervalMaxMs, summary.workAvgMs, summary.workMaxMs);
-        const auto progress = renderProgress();
+        const auto progress = runtime().renderer().progress();
         if (progress.samplesPerPixel && *progress.samplesPerPixel != 0)
           rayLog << Log::debug("revision={} spp={} size={}x{} sample_ms={:.2f}", progress.revision,
                                *progress.samplesPerPixel, progress.size.width, progress.size.height,
@@ -354,8 +256,7 @@ void Application::Run(const RunOptions &options)
     }
   }
 
-  m_Impl->rendering.stop();
-  m_Impl->rendering.rethrowError();
+  m_Impl->runtime.finish();
 
   if (options.frameLimit != 0 && frames != options.frameLimit && !m_Impl->stopRequested) {
     throw std::runtime_error("Application closed before the frame limit.");

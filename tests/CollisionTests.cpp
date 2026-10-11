@@ -48,16 +48,16 @@ void symmetric(const Scene& scene, Entity a, Entity b)
   EXPECT_NEAR(dot(forward->normal, forward->normal), 1, 1e-5);
 }
 
-ApplicationConfig hidden()
+EngineConfig hidden()
 {
-  ApplicationConfig config;
+  EngineConfig config;
   config.window.visible = false;
   config.window.width = config.window.height = 64;
-  config.axisGizmo = false;
+  config.debug.axes = false;
   config.logPerformance = false;
   config.frameLimits = 240;
-  config.rayTracing.workerCount = 1;
-  config.rayTracing.maxSamples = 1;
+  config.renderer.rayTracing.workerCount = 1;
+  config.renderer.rayTracing.maxSamples = 1;
   return config;
 }
 
@@ -423,57 +423,106 @@ TEST(CollisionDebug, ShapeAndAabbOverlaysProduceIndependentColorsOverImageAndWir
 TEST(CollisionDebug, ApplicationControlsAreOptInAndValidateOnlyWhenDisplayed)
 {
   auto config = hidden();
-  EXPECT_FALSE(config.colliderGizmo);
-  EXPECT_FALSE(config.colliderAabbGizmo);
+  EXPECT_FALSE(config.debug.physics);
   Application app(config);
   const auto scene = std::make_shared<Scene>();
   camera(*scene);
   add(*scene, Sphere{0});
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   EXPECT_NO_THROW(app.Run({1}));
-  app.setColliderGizmo(true);
-  EXPECT_TRUE(app.colliderGizmoEnabled());
+  app.runtime().setPhysicsDebug(true);
+  EXPECT_TRUE(app.runtime().physicsDebugEnabled());
   EXPECT_THROW(app.Run({1}), std::invalid_argument);
-  app.setColliderGizmo(false);
-  app.setColliderAabbGizmo(true);
-  EXPECT_TRUE(app.colliderAabbGizmoEnabled());
-  EXPECT_THROW(app.Run({1}), std::invalid_argument);
-  app.setColliderAabbGizmo(false);
-  app.setWireframe(true);
+  app.runtime().setPhysicsDebug(false);
+  app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
   EXPECT_NO_THROW(app.Run({1}));
+}
+
+TEST(CollisionDebug, ContactPointsAndNormalsHaveDistinctRedAndGreenPixels)
+{
+  WindowConfig config; config.visible = false; config.width = config.height = 256;
+  Window window(config);
+  Detail::OpenGLDevice device(window, false);
+  Detail::OpenGLDisplay display(device);
+  Detail::DebugDraw draw(device);
+  Scene scene; camera(scene);
+  add(scene, Sphere{0.6f}, {-0.5f, 0, 0});
+  add(scene, Sphere{0.6f}, {0.5f, 0, 0});
+  auto debug = Detail::captureCollisionDebug(scene, true, true, true);
+  ASSERT_EQ(debug.contacts.size(), 1u);
+  EXPECT_FALSE(debug.points.empty()); EXPECT_FALSE(debug.normals.empty());
+  const auto snapshot = Renderer::SceneSnapshot::capture(scene, Assets{});
+  std::vector<unsigned char> pixels(256 * 256 * 4);
+  display.begin({256, 256});
+  draw.colliders(debug, *snapshot.camera, {256, 256});
+  glReadBuffer(GL_BACK); glReadPixels(0, 0, 256, 256, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+  int red = 0, green = 0, yellow = 0, cyan = 0;
+  for (std::size_t i = 0; i < pixels.size(); i += 4) {
+    if (pixels[i] > 240 && pixels[i+1] < 10 && pixels[i+2] < 10) ++red;
+    if (pixels[i] < 10 && pixels[i+1] > 240 && pixels[i+2] < 10) ++green;
+    if (pixels[i] > 240 && pixels[i+1] > 150 && pixels[i+2] < 10) ++yellow;
+    if (pixels[i] < 10 && pixels[i+1] > 240 && pixels[i+2] > 240) ++cyan;
+  }
+  EXPECT_GT(red, 0); EXPECT_GT(green, 3); EXPECT_GT(yellow, 50); EXPECT_GT(cyan, 50);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST(CollisionDebug, LogsSimulationAndBodyValuesWithoutPerFrameSummarySpam)
+{
+  struct Restore { ~Restore() { Log::Configure(); } } restore;
+  std::vector<Log::Record> records;
+  Log::Config logging; logging.console = false;
+  logging.sink = [&](const Log::Record& r) { records.push_back(r); };
+  Log::Configure(logging);
+  auto config = hidden(); config.debug.physics = true;
+  config.renderer.mode = Renderer::Mode::Wireframe;
+  Application app(config);
+  auto scene = std::make_shared<Scene>(); camera(*scene);
+  add(*scene, Sphere{1}).add<RigidBody>();
+  app.runtime().setScene(scene);
+  app.Run({4});
+  int summaries = 0, bodies = 0;
+  for (const auto& r : records) if (r.category == "Physics/Debug") {
+    if (r.message.find("fixed_step=") != std::string::npos) {
+      ++summaries;
+      EXPECT_NE(r.message.find("gravity="), std::string::npos);
+      EXPECT_NE(r.message.find("dynamic=1"), std::string::npos);
+      EXPECT_NE(r.message.find("contacts="), std::string::npos);
+    }
+    if (r.message.find("mass=") != std::string::npos) ++bodies;
+  }
+  EXPECT_EQ(summaries, 1); EXPECT_EQ(bodies, 1);
 }
 
 TEST(CollisionDebug, ColliderEditsAndOverlayTogglesDoNotRestartPathTracing)
 {
   auto config = hidden();
-  config.colliderGizmo = true;
+  config.debug.physics = true;
   Application app(config);
   const auto scene = std::make_shared<Scene>();
   camera(*scene);
   const auto object = add(*scene, Sphere{1});
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   std::uint64_t revision = 0;
   app.on<FrameUpdate>([&](const auto& frame) {
     if (frame.frame == 2) {
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (app.renderProgress().samplesPerPixel != 1 && std::chrono::steady_clock::now() < deadline)
+      while (app.runtime().renderer().progress().samplesPerPixel != 1 && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      ASSERT_EQ(app.renderProgress().samplesPerPixel, 1u);
-      revision = app.renderProgress().revision;
+      ASSERT_EQ(app.runtime().renderer().progress().samplesPerPixel, 1u);
+      revision = app.runtime().renderer().progress().revision;
       object.get<Collider>() = Collider{Box{{2, 1, 1}}};
       object.get<Transform>().position.x = 1;
-      app.setColliderGizmo(false);
-      app.setColliderAabbGizmo(true);
+      app.runtime().setPhysicsDebug(false);
     }
     if (frame.frame == 3) {
-      EXPECT_EQ(app.renderProgress().revision, revision);
-      EXPECT_EQ(app.renderProgress().samplesPerPixel, 1u);
-      app.setColliderGizmo(true);
-      app.setColliderAabbGizmo(false);
+      EXPECT_EQ(app.runtime().renderer().progress().revision, revision);
+      EXPECT_EQ(app.runtime().renderer().progress().samplesPerPixel, 1u);
+      app.runtime().setPhysicsDebug(true);
       object.remove<Collider>();
     }
     if (frame.frame == 4)
-      EXPECT_EQ(app.renderProgress().revision, revision);
+      EXPECT_EQ(app.runtime().renderer().progress().revision, revision);
   });
   app.Run({4});
   EXPECT_GT(revision, 0u);

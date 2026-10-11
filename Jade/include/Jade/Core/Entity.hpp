@@ -12,7 +12,7 @@ class Scene;
 
 // A copyable identity. Components belong to the Scene, not to this handle.
 // A const handle can access mutable components, like a const pointer value.
-class Entity final {
+class Entity {
 public:
   Entity() = default;
 

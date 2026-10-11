@@ -69,9 +69,9 @@ void CheckSummary(const Jade::Log::Record &record)
   EXPECT_GE(std::stod(values[5]), std::stod(values[4]));
 }
 
-Jade::ApplicationConfig HiddenApplication()
+Jade::EngineConfig HiddenApplication()
 {
-  Jade::ApplicationConfig config;
+  Jade::EngineConfig config;
   config.window.visible = false;
   config.window.width = 160;
   config.window.height = 120;

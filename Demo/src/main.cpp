@@ -32,6 +32,38 @@ Jade::Entity Instance(Jade::Scene &scene, Jade::MeshHandle mesh, Jade::Vec3 posi
   return entity;
 }
 
+using Object = Jade::Archetype<Jade::Geometry, Jade::Transform, Jade::Material>;
+using Physical = Jade::Archetype<Jade::Transform, Jade::Collider, Jade::RigidBody>;
+class StackBox : public Jade::Archetype<Object, Physical> {
+  using Base = Jade::Archetype<Object, Physical>;
+public:
+  explicit StackBox(Jade::Entity entity) : Base(entity) { add<Jade::Collider>(Jade::Box{}); }
+};
+std::shared_ptr<Jade::Scene> CreateStack(Jade::Runtime& runtime, Jade::MeshHandle mesh)
+{
+  auto scene = CreateScene({7, 5, 11});
+  Instance(*scene, mesh, {0, -0.5f, 0}, Jade::Materials::Diffuse({0.6f, 0.6f, 0.6f}), {12, 1, 12})
+    .add<Jade::Collider>(Jade::Box{});
+  Jade::Entity top;
+  for (int layer = 0; layer < 3; ++layer) {
+    const int width = 5 - 2 * layer;
+    for (int i = 0; i < width; ++i) {
+      auto box = scene->create<StackBox>();
+      box.get<Jade::Geometry>().mesh = mesh;
+      box.get<Jade::Material>() = Jade::Materials::Diffuse({0.75f, 0.35f + 0.15f * layer, 0.15f});
+      box.get<Jade::Transform>().position = {static_cast<float>(i - width / 2), 0.6f + 1.1f * layer, 0};
+      top = box;
+    }
+  }
+  // Retain a fixed emissive mesh so this scene can also be inspected in RayTracing.
+  Instance(*scene, mesh, {0, 6, 0}, Jade::Materials::Emissive({18, 18, 18}), {5, 0.1f, 5});
+  scene->on<Jade::KeyPressed<"K">>([&runtime, scenePtr = scene.get(), top] {
+    runtime.physics().applyImpulse(*scenePtr, top, {2.5f, 0, 0}, top.get<Jade::Transform>().position + Jade::Vec3{0, 0.5f, 0});
+  });
+  scene->on<Jade::KeyPressed<"P">>([&runtime] { runtime.setPaused(!runtime.paused()); });
+  return scene;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -46,21 +78,23 @@ int main(int argc, char **argv)
     } else if (argc != 1)
       throw std::invalid_argument("Usage: JadeDemo [--frames N]");
 
-    Jade::ApplicationConfig config;
+    Jade::EngineConfig config;
     config.frameLimits = 24;
-    config.debug = true;
-    config.axisGizmo = false;
-    config.rayTracing.resolutionScale = 0.5f;
-    config.rayTracing.maxSamples = 0;
-    config.rayTracing.maxBounces = 12;
-    config.rayTracing.rrStartBounce = 4;
-    config.rayTracing.workerCount = 0;
-    config.rayTracing.exposureEV = 0;
+    config.debug.shortcuts = true;
+    config.debug.axes = false;
+    config.renderer.mode = Jade::Renderer::Mode::Wireframe;
+    config.renderer.rayTracing.resolutionScale = 0.5f;
+    config.renderer.rayTracing.maxSamples = 0;
+    config.renderer.rayTracing.maxBounces = 12;
+    config.renderer.rayTracing.rrStartBounce = 4;
+    config.renderer.rayTracing.workerCount = 0;
+    config.renderer.rayTracing.exposureEV = 0;
     Jade::Application app(config);
 
-    const auto cubeMesh = app.assets().add(Jade::MeshData::cube(2));
-    const auto sphereMesh = app.assets().add(Jade::MeshData::sphere(1));
-    const auto bunnyMesh = app.assets().load<Jade::Mesh>("assets/bunny.obj");
+    const auto cubeMesh = app.runtime().assets().add(Jade::MeshData::cube(2));
+    const auto sphereMesh = app.runtime().assets().add(Jade::MeshData::sphere(1));
+    const auto stackMesh = app.runtime().assets().add(Jade::MeshData::cube(1));
+    const auto bunnyMesh = app.runtime().assets().load<Jade::Mesh>("assets/bunny.obj");
 
     const auto floor = Jade::Materials::Diffuse({0.65f, 0.65f, 0.65f});
     const auto diffuse = Jade::Materials::Diffuse({0.8f, 0.28f, 0.12f});
@@ -70,7 +104,7 @@ int main(int argc, char **argv)
 
     // Scene I: illumination comes exclusively from the ceiling mesh.
     auto showroom = CreateScene({4, 3.5f, 12});
-    const auto &bunnyVertices = app.assets().get(bunnyMesh).data().vertices;
+    const auto &bunnyVertices = app.runtime().assets().get(bunnyMesh).data().vertices;
     const float bunnyBottom =
         std::min_element(bunnyVertices.begin(), bunnyVertices.end(), [](const auto &a, const auto &b) {
           return a.position.y < b.position.y;
@@ -107,17 +141,33 @@ int main(int argc, char **argv)
       }
     });
     hierarchy->on<Jade::KeyPressed<"P">>([&] { animate = !animate; });
+    auto stack = CreateStack(app.runtime(), stackMesh);
 
     app.on<Jade::KeyPressed<"1">>([&] {
-      app.setScene(showroom);
+      app.runtime().setPaused(false);
+      app.runtime().setScene(showroom);
       return Jade::EventFlow::Stop;
     });
     app.on<Jade::KeyPressed<"2">>([&] {
-      app.setScene(hierarchy);
+      app.runtime().setPaused(false);
+      app.runtime().setScene(hierarchy);
       return Jade::EventFlow::Stop;
     });
 
-    app.setScene(showroom);
+    app.on<Jade::KeyPressed<"3">>([&] {
+      app.runtime().setPaused(false);
+      app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
+      app.runtime().setScene(stack);
+      return Jade::EventFlow::Stop;
+    });
+    app.on<Jade::KeyPressed<"R">>([&] {
+      stack = CreateStack(app.runtime(), stackMesh);
+      app.runtime().setPaused(false);
+      app.runtime().setScene(stack);
+      return Jade::EventFlow::Stop;
+    });
+
+    app.runtime().setScene(stack);
     app.Run(run);
     return 0;
   } catch (const std::exception &error) {

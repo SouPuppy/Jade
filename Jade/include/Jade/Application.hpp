@@ -11,6 +11,7 @@
 #include <Jade/Events/MouseScrolled.hpp>
 #include <Jade/WindowConfig.hpp>
 #include <Jade/Renderer/RayTracing/RayTracing.hpp>
+#include <Jade/Runtime.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -20,26 +21,6 @@
 
 namespace Jade {
 
-struct ApplicationConfig {
-  WindowConfig window;
-  Renderer::RayTracingConfig rayTracing;
-  bool vsync = false;
-  // Built-in F/F3/F4/O shortcuts, independent of logging and build type.
-  // Unmodified I toggles RayTracing/Wireframe even with debug disabled.
-  bool debug = false;
-  // Frames per second. RunOptions::frameLimit controls total frames per run.
-  std::uint32_t frameLimits = 24;
-  // Debug summaries once per second, rate-limited hitch warnings and optional
-  // per-frame Trace. Work time excludes the explicit frame-pacing wait.
-  bool logPerformance = true;
-  // Unit XYZ axes at the world origin, visible over objects. Debug enables F3.
-  bool axisGizmo = true;
-  // Collision shapes (yellow); debug enables F4. Independent of Wireframe.
-  bool colliderGizmo = false;
-  // World AABBs (cyan), over either render mode.
-  bool colliderAabbGizmo = false;
-};
-
 struct RunOptions {
   // Zero runs until the user closes the window.
   std::uint32_t frameLimit = 0;
@@ -47,21 +28,13 @@ struct RunOptions {
 
 class Application final {
 public:
-  explicit Application(const ApplicationConfig &config = {});
+  explicit Application(const EngineConfig &config = {});
   ~Application();
 
   Application(const Application &) = delete;
   Application &operator=(const Application &) = delete;
 
-  // Assets are shared across scenes. Selection is deferred while Run is active.
-  Assets &assets() noexcept;
-  // The owned path tracer is always available. Configure its integrator outside Run.
-  Renderer::RayTracing &rayTracing() noexcept;
-  Renderer::RenderProgress renderProgress() const;
-  // Returns the committed selection, including nullptr when no scene is active.
-  std::shared_ptr<Scene> scene() const noexcept;
-  // Last request wins. nullptr unloads; selecting the current scene emits no events.
-  void setScene(std::shared_ptr<Scene> scene);
+  Runtime &runtime() noexcept;
   // Callbacks run on the main thread in registration order. Ignoring the
   // returned handle keeps the callback; use disconnect() to cancel it.
   template <class Event, class Callback> EventConnection on(Callback &&callback)
@@ -88,15 +61,6 @@ public:
 
   // Ends the current Run(), allowing a later Run() to resume.
   void stop() noexcept;
-  // Wireframe suspends path tracing and draws diagnostic edges.
-  void setWireframe(bool enabled) noexcept;
-  bool wireframeEnabled() const noexcept;
-  void setAxisGizmo(bool enabled) noexcept;
-  bool axisGizmoEnabled() const noexcept;
-  void setColliderGizmo(bool enabled) noexcept;
-  bool colliderGizmoEnabled() const noexcept;
-  void setColliderAabbGizmo(bool enabled) noexcept;
-  bool colliderAabbGizmoEnabled() const noexcept;
   void Run(const RunOptions &options = {});
 
 private:
@@ -107,7 +71,6 @@ private:
   EventConnection Connect(std::function<EventFlow(const FrameUpdate &)> callback);
   EventConnection Connect(std::function<EventFlow(const MouseMoved &)> callback);
   EventConnection Connect(std::function<EventFlow(const MouseScrolled &)> callback);
-  bool ApplyPendingScene();
   struct Impl;
   std::unique_ptr<Impl> m_Impl;
 };

@@ -1,4 +1,15 @@
 add_library(Jade STATIC
+  include/Jade/Core/Archetype.hpp
+  include/Jade/EngineConfig.hpp
+  include/Jade/Runtime.hpp
+  include/Jade/Renderer/System.hpp
+  include/Jade/Physics/RigidBody.hpp
+  include/Jade/Physics/System.hpp
+  src/Core/Runtime.cpp
+  src/Renderer/System.cpp
+  src/Physics/System.cpp
+  src/internal/Physics/Manifold.hpp
+  src/internal/Physics/Manifold.cpp
   include/Jade/Physics/Collider.hpp
   include/Jade/Physics/Collision.hpp
   src/Physics/Collision.cpp

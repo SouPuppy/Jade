@@ -1,6 +1,6 @@
 # Jade
 
-Jade is a C++20 static engine library validated on Windows x64 / MSVC. Its rendering kernel provides CPU progressive path tracing and an unlit wireframe mode over immutable meshes, diffuse/metal/dielectric materials and emissive geometry. Ray tracing uses asset-owned SAH BLAS and a scene SAH TLAS. OpenGL 3.3 presents completed images and draws diagnostic lines. Scene owns entities, hierarchy, events and camera selection; Assets owns immutable resources. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
+Jade is a C++20 static engine library validated on Windows x64 / MSVC. Application owns the window/input loop; Runtime coordinates Scene, Assets, Renderer and Physics. Scene owns component data and signature-indexed entity groups. Physics supports Box/Sphere rigid bodies, gravity, angular motion and persistent multi-point contact solving without a window or GPU. Renderer provides CPU progressive path tracing and unlit wireframe; OpenGL 3.3 presents completed images and debug primitives. Include individual public headers or `<Jade/Jade.hpp>` and link `Jade::Jade`.
 
 ## Build
 
@@ -37,15 +37,15 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun and a fixed area emitter lighting the camera-facing planets; P pauses that animation. Demo starts in RayTracing with resolutionScale 0.5. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, I switches RayTracing/Wireframe, F also toggles wireframe when debug shortcuts are enabled, F3 toggles axes, F4 toggles yellow Collider shapes and Esc exits. Demo's cubes and spheres have matching Box/Sphere Colliders; the bunny has none.
+Demo starts in Wireframe with a 5/3/1 pyramid of nine dynamic cubes above a static floor. Press 3 to return to this scene, P to pause/resume physics, R to reset the pyramid and K to give its top cube an off-center impulse. F4 toggles cyan AABBs, yellow Collider outlines, red contact markers, green normal arrows and Physics/Debug logging. Press 1 for the bunny/metal/glass showroom or 2 for the animated sphere hierarchy; P pauses the hierarchy animation. I switches RayTracing/Wireframe; RayTracing uses resolutionScale 0.5. The input/presentation loop targets 24 FPS. Each scene retains its camera; WASD/arrows move, Space/Ctrl+Space fly, Shift+W is faster, Ctrl+W slower, left dragging turns, the wheel zooms and Q/E roll. O switches projection, F also toggles wireframe, F3 toggles axes and Esc exits.
 
 ```cpp
 #include <Jade/Jade.hpp>
 
 int main()
 {
-  Jade::ApplicationConfig config;
-  config.debug = true; // Enable Application F/F3/F4/O shortcuts.
+  Jade::EngineConfig config;
+  config.debug.shortcuts = true; // Enable Application F/F3/F4/O shortcuts.
   Jade::Application app(config);
   auto scene = std::make_shared<Jade::Scene>();
 
@@ -57,7 +57,7 @@ int main()
   scene->setCamera(camera);
   scene->use<Jade::Module::FreeCameraControl>();
 
-  const auto mesh = app.assets().add(Jade::MeshData::cube(2.0f));
+  const auto mesh = app.runtime().assets().add(Jade::MeshData::cube(2.0f));
   auto cube = scene->create();
   cube.add<Jade::Transform>();
   cube.add<Jade::Geometry>(mesh);
@@ -70,12 +70,12 @@ int main()
   lamp.add<Jade::Geometry>(mesh);
   lamp.add<Jade::Material>(Jade::Materials::Emissive({14, 12, 10}));
 
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   app.Run();
 }
 ```
 
-Application starts without a scene; a new Scene is empty, requires no window and creates no implicit camera. Assets remain shared at Application scope. `app.scene()` returns the active `shared_ptr<Scene>`; `app.setScene(nullptr)` unloads it and leaves the application clearing/presenting and dispatching global events.
+Runtime starts without a scene; a new Scene is empty, requires no window and creates no implicit camera. Assets remain shared at Runtime scope. `app.runtime().scene()` returns the active `shared_ptr<Scene>`; `app.runtime().setScene(nullptr)` unloads it and leaves the application clearing/presenting and dispatching global events.
 
 Components are ordinary C++ types; no inheritance is required:
 
@@ -85,7 +85,7 @@ struct Velocity { Jade::Vec3 value; };
 auto entity = scene->create();
 entity.add<Jade::Transform>();
 entity.add<Velocity>(Jade::Vec3{1, 0, 0});
-for (auto entity : scene->view<Jade::Transform, Velocity>()) {
+for (auto entity : scene->query<Jade::Transform, Velocity>()) {
   auto& pose = entity.get<Jade::Transform>();
   pose.position = pose.position + entity.get<Velocity>().value * 0.01f;
 }
@@ -93,7 +93,45 @@ for (auto entity : scene->view<Jade::Transform, Velocity>()) {
 
 `add<T>(args...)` constructs a component and returns its reference. `get<T>()`, `has<T>()` and `remove<T>()` access state; duplicate add throws `std::logic_error`, missing get throws `std::out_of_range`, and removing an absent component is a no-op. `scene->destroy(entity)` destroys the entity and its descendants. All subtree handles become invalid before component destructors run; components are released children before parents. Generation IDs prevent old handles from accessing reused slots. Handles and views do not extend Scene lifetime. Component references survive unrelated creation, but removal and owner destruction invalidate them. A const Entity handle still accesses mutable components.
 
-`scene->view<T...>()` snapshots matching identities. New entities or new matches wait until the next query; destroyed entities and removed matches are skipped when advancing the iterator. Keep a named view alive while using its iterators. Removing/replacing a component invalidates its references immediately. Scene mutation and rendering use the main thread.
+`scene->query<T...>()` snapshots matching identities. New entities or new matches wait until the next query; destroyed entities and removed matches are skipped when advancing the iterator. Keep a named view alive while using its iterators. Removing/replacing a component invalidates its references immediately. Scene mutation and rendering use the main thread.
+
+## Runtime, configuration and Archetype
+
+```cpp
+Jade::EngineConfig config;
+config.physics.gravity = {0, -9.81f, 0};
+config.physics.fixedStep = 1.0 / 120.0;
+config.renderer.mode = Jade::Renderer::Mode::Wireframe;
+config.debug.shortcuts = true;
+Jade::Application app(config);
+auto& runtime = app.runtime();
+// runtime.assets(), runtime.scene(), runtime.renderer(), runtime.physics()
+```
+
+Renderer mode is selected with `runtime.renderer().setMode(...)`; sampling configuration and progress are available through `runtime.renderer().rayTracing()` and `runtime.renderer().progress()`. Physics is independently usable as `Jade::Physics::System` with `step(scene, dt)`. Runtime accumulates frame time into fixed steps after FrameUpdate and before rendering. At most eight substeps run per frame; excess whole steps are discarded and logged. Scene selection, Run boundaries and `runtime.setPaused(...)` reset accumulated time and contact caches. Inactive scenes do not simulate.
+
+```cpp
+using Object = Jade::Archetype<Jade::Geometry, Jade::Transform, Jade::Material>;
+using Physical = Jade::Archetype<Jade::Transform, Jade::Collider, Jade::RigidBody>;
+class Ball : public Jade::Archetype<Object, Physical> {
+  using Base = Jade::Archetype<Object, Physical>;
+public:
+  explicit Ball(Jade::Entity entity) : Base(entity) {
+    add<Jade::Collider>(Jade::Sphere{0.5f});
+  }
+};
+auto ball = scene->create<Ball>();
+ball.get<Jade::Geometry>().mesh = sphereMesh;
+ball.get<Jade::RigidBody>().mass = 2;
+ball.get<Jade::RigidBody>().velocity = {1, 0, 0};
+for (auto entity : scene->query<Physical>()) { /* includes manually composed entities */ }
+```
+
+Archetype recursively flattens and deduplicates component types in first-appearance order. Composition groups are aliases; only the final handle constructor initializes custom values. Default-constructible components are added automatically; use get to edit them and add to initialize non-default-constructible components such as Collider. Missing declared components or a throwing constructor roll back the new entity. Ball is an identity handle, not the component owner. Queries cache matching component signatures and enumerate those groups instead of scanning all entity slots. Components remain in stable type pools; this version adds signature indexing, not packed movable component chunks.
+
+RigidBody uses world-space velocity and angularVelocity (radians/second), mass in kg, friction 0.6 and restitution 0 by default. A Collider without RigidBody, or with mass 0, is static. Positive-mass bodies require a root Transform and Collider; parented dynamic bodies are rejected. Inertia is derived from the scaled Box/Sphere. `runtime.physics().applyImpulse(scene, entity, impulse, worldPoint)` changes both linear and angular velocity for off-center impulses.
+
+The solver uses semi-implicit integration, up to four Box face contacts, speculative contact retention (5 mm), accumulated normal/tangent impulses, warm starting and Coulomb friction. Defaults are 20 velocity iterations, four separate position-correction iterations and 2 mm penetration slop. Restitution applies only above a 1 m/s closing speed. Static/static pairs remain available to geometric queries/debug drawing but do not enter the dynamics solver. No sleeping, CCD, joints, kinematic bodies or physics worker threads are introduced.
 
 ```cpp
 auto root = scene->create(); // An identity group needs no Transform.
@@ -104,7 +142,7 @@ auto matrix = scene->worldMatrix(child); // Jade::Matrix4, column-major.
 scene->setParent(child);                 // Detach, retaining local TRS.
 ```
 
-Hierarchy belongs to Scene; Transform contains local position, rotation and scale. `parent(entity)` returns an empty Entity for a root; `children(entity)` returns an attachment-order snapshot. Self-parenting, cycles and foreign/dead entities are rejected before changing links. Removing Transform preserves links and makes that entity an identity group. Reparenting retains local TRS, so world pose can change. Full parent Ãƒâ€” local matrices preserve shear from nonuniform scale and rotation.
+Hierarchy belongs to Scene; Transform contains local position, rotation and scale. `parent(entity)` returns an empty Entity for a root; `children(entity)` returns an attachment-order snapshot. Self-parenting, cycles and foreign/dead entities are rejected before changing links. Removing Transform preserves links and makes that entity an identity group. Reparenting retains local TRS, so world pose can change. Full parent times local matrices preserve shear from nonuniform scale and rotation.
 
 The World type/header, `Application::world()/camera()/setCamera()` and callback-based `each()` are removed. Use Scene directly; there are no compatibility aliases.
 
@@ -113,7 +151,7 @@ The World type/header, `Application::world()/camera()/setCamera()` and callback-
 Every physical object is an instance of an immutable compiled triangle Mesh. Geometry references an immutable mesh resource; Material describes scattering and emission independently:
 
 ```cpp
-const auto bunnyMesh = app.assets().load<Jade::Mesh>("assets/bunny.obj");
+const auto bunnyMesh = app.runtime().assets().load<Jade::Mesh>("assets/bunny.obj");
 auto bunny = scene->create();
 bunny.add<Jade::Transform>().scale = {16, 16, 16};
 bunny.add<Jade::Geometry>(bunnyMesh);
@@ -148,17 +186,17 @@ OBJ loading parses MeshData, validates it and builds the Mesh BLAS before publis
 
 ## Rendering configuration and extension
 
-Application owns one RayTracing instance automatically. Set sampling parameters in ApplicationConfig before construction; use app.rayTracing() to install a custom Integrator outside Run.
+Runtime's Renderer::System owns one RayTracing instance automatically. Set sampling parameters in EngineConfig before construction; use app.runtime().renderer().rayTracing() to install a custom Integrator outside Run.
 
 ```cpp
-Jade::ApplicationConfig config;
-config.rayTracing.resolutionScale = 1; // Actual framebuffer dimensions.
-config.rayTracing.maxSamples = 0;     // Unlimited; positive stops a static revision.
-config.rayTracing.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
-config.rayTracing.maxBounces = 12;
-config.rayTracing.rrStartBounce = 4;
-config.rayTracing.seed = 0;
-config.rayTracing.exposureEV = 0;
+Jade::EngineConfig config;
+config.renderer.rayTracing.resolutionScale = 1; // Actual framebuffer dimensions.
+config.renderer.rayTracing.maxSamples = 0;     // Unlimited; positive stops a static revision.
+config.renderer.rayTracing.workerCount = 0;    // Auto: logical processors minus one, clamped to 1..256.
+config.renderer.rayTracing.maxBounces = 12;
+config.renderer.rayTracing.rrStartBounce = 4;
+config.renderer.rayTracing.seed = 0;
+config.renderer.rayTracing.exposureEV = 0;
 Jade::Application app(config);
 ```
 
@@ -168,12 +206,12 @@ Resolution scale is within (0, 8], exposure within [-64, 64] EV, workerCount wit
 
 The window thread captures immutable scene/camera state. A coordinator consumes already compiled meshes, reuses/refits/rebuilds the instance TLAS and schedules 16x16 tiles on persistent CPU workers. Camera/material changes reuse the TLAS. Transform-only changes refit a detached copy; SAH cost exceeding 1.5 times the last complete build triggers a rebuild. Changes to instance layout or mesh references rebuild directly. A sample round is committed only when complete. Static scenes accumulate; direct component edits reset accumulation for the new revision. During motion, the current round finishes and only the latest pending snapshot is rendered next. The previous complete image may remain visible while the next is computed; samples from different revisions are never blended. Scene/camera invalidation, resize and mode changes reject stale display results.
 
-Wireframe draws unlit triangle edges and runs no ray integrator. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.renderProgress() reports RayTracing or Wireframe, the optional completed sample count, sample time and inFlight state. Wireframe reports no physical samples. These values are independent of presentation FPS.
+Wireframe draws unlit triangle edges and runs no ray integrator. F3 axes are composed after the image and do not affect Film or illumination. Projection O resets camera sampling. Minimized windows suspend work, and stopping Run joins active computation. app.runtime().renderer().progress() reports RayTracing or Wireframe, the optional completed sample count, sample time and inFlight state. Wireframe reports no physical samples. These values are independent of presentation FPS.
 
 Rendering can also run headlessly through public interfaces:
 
 ```cpp
-auto snapshot = Jade::Renderer::SceneSnapshot::capture(*scene, app.assets());
+auto snapshot = Jade::Renderer::SceneSnapshot::capture(*scene, app.runtime().assets());
 auto prepared = Jade::Renderer::RayScene::build(snapshot);
 Jade::Renderer::Film film({320, 200});
 Jade::Renderer::RayTracing renderer;
@@ -183,7 +221,7 @@ for (std::uint64_t sample = 0; sample < 64; ++sample) {
 auto image = film.resolve(); // Top-left origin, opaque sRGB RGBA8.
 ```
 
-ProgressiveBackend defines a headless sample-round contract over RayScene, RenderRequest and linear HDR Film. Application uses its owned RayTracing; algorithm extension is through Integrator. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with app.rayTracing().setIntegrator or on a headless RayTracing instance. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
+ProgressiveBackend defines a headless sample-round contract over RayScene, RenderRequest and linear HDR Film. Runtime's Renderer::System uses its owned RayTracing; algorithm extension is through Integrator. Custom Integrator implementations receive Ray, immutable RayScene and Sampler; install one with app.runtime().renderer().rayTracing().setIntegrator or on a headless RayTracing instance. Integrator calls run concurrently. Sampler streams are independent of worker scheduling, so identical seed/settings/sample counts produce identical images across thread counts. RayQuery exposes closest-hit and occlusion interfaces. Scene contains no BVH or intersection method.
 
 PathIntegrator samples both BSDFs and emissive triangles with MIS, traces secondary rays beyond camera clipping planes, and uses Russian roulette. Numerical ray offsets derive from hit-position error and floating-point rounding. `Film::resolve` applies exposure, Reinhard tone mapping and sRGB encoding once; OpenGL does not repeat color conversion. Textures, volumes, nested media, spectral transport, denoising and dedicated caustic techniques remain outside this version.
 
@@ -228,21 +266,19 @@ if (auto hit = Jade::Physics::contact(*scene, box, sphere)) {
 auto contacts = Jade::Physics::detect(*scene);
 ```
 
-Queries automatically derive world shapes and AABBs from current components. AABB overlap only selects candidates; precise detection uses Sphere–Sphere, Sphere–Box and rotated Box–Box. No Auto shape or AABB component is required. Box dimensions are half-extents: {1, 2, 1} describes a box of size {2, 4, 2}. Box supports nonuniform world scale, provided its world basis remains orthogonal. Sphere requires uniform world scale; nonuniform scale and hierarchy shear throw std::invalid_argument. Dimensions must be finite and positive. Scale/orthogonality checks allow a 1e-5 relative rounding tolerance. There is no gravity, collision response or continuous detection.
+Queries automatically derive world shapes and AABBs from current components. AABB overlap only selects candidates; precise detection uses Sphere–Sphere, Sphere–Box and rotated Box–Box. No Auto shape or AABB component is required. Box dimensions are half-extents: {1, 2, 1} describes a box of size {2, 4, 2}. Box supports nonuniform world scale, provided its world basis remains orthogonal. Sphere requires uniform world scale; nonuniform scale and hierarchy shear throw std::invalid_argument. Dimensions must be finite and positive. Scale/orthogonality checks allow a 1e-5 relative rounding tolerance. Geometric queries do not simulate; Physics::System separately provides gravity and collision response.
 
 These main-thread queries need no window, camera, mesh or material. detect returns one Contact per pair in ascending Entity-ID order and skips Colliders without Transform. contact returns no hit for missing Collider/Transform or self-pairs, and rejects foreign/dead entities. It preserves the supplied entity order; reversing the pair reverses its normal. The point is a midpoint of surface witnesses, including a representative of clipped face contacts. Normal remains a separation direction during containment, rather than necessarily pointing between centers. Touching and rounding-sized gaps count as zero-penetration contacts, using a distance tolerance of 1e-6 times max(1, the pair's largest world half-extent or radius).
 
 Collider stores a copy of the supplied shape. Shape data needs no separate allocation and its storage is private. Replace it with `entity.get<Jade::Collider>() = Jade::Collider{Jade::Sphere{2}}`; the next query observes the change. Calling detect is explicit; an application may call it in FrameUpdate after moving entities. Queries do not move entities or emit collision events.
 
 ```cpp
-config.colliderGizmo = true;      // Yellow actual shapes; defaults to false.
-config.colliderAabbGizmo = true;  // Cyan world AABBs; defaults to false.
+config.debug.physics = true; // AABBs, shapes, contact points/normals and logging.
 // Or change them while running:
-app.setColliderGizmo(true);
-app.setColliderAabbGizmo(true);
+app.runtime().setPhysicsDebug(true);
 ```
 
-With config.debug=true, bare F4 toggles the yellow Collider shapes once per press, independently of wireframe and AABB visibility. Ordinary mesh wireframe remains gray-white; world AABBs remain cyan. Both overlays work in RayTracing and Wireframe, including for entities with no Geometry. They use current collision transforms and remain separate from path tracing snapshots: changing only a Collider, a Collider-only Transform or these display flags does not restart sampling. Debug drawing validates the displayed shapes. Disable both flags to avoid consuming Collider data during rendering. Broad Phase currently checks all entity pairs; no spatial index or contact manifold persistence is introduced in this version.
+With config.debug.shortcuts=true, bare F4 toggles all physics debug drawing and logging independently of the render mode. Ordinary mesh wireframe is gray-white, AABBs cyan, shapes yellow, contact markers red and normal arrows green. These overlays work over RayTracing and Wireframe, including entities without Geometry, and are excluded from path tracing snapshots. Physics/Debug logs configuration, substeps, body/contact counts, maximum penetration and per-body mass/velocities on activation and at most once per second. Trace adds contact point/normal/impulse records. Dynamics maintains contact impulses between fixed steps; Broad Phase still uses all-pairs tests among Colliders.
 
 ## Scene modules and controls
 
@@ -280,7 +316,7 @@ struct Spin {
   static void attach(Jade::Scene& scene)
   {
     scene.on<Jade::FrameUpdate>([&scene](const auto& frame) {
-      for (auto entity : scene.view<Jade::Transform>()) {
+      for (auto entity : scene.query<Jade::Transform>()) {
         Jade::Motion::yaw(entity.get<Jade::Transform>(), 15 * frame.dt);
       }
     });
@@ -291,7 +327,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-`ApplicationConfig::debug` defaults to false in both Debug and Release builds. Setting it to true enables unmodified F (wireframe), F3 (axes), F4 (Collider shapes) and O (current scene camera projection), once per press. Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses the default. O skips an absent/incomplete camera and preserves pose, both zoom settings and clipping planes. Toggle diagnostics use the Application logger at Info. `config.axisGizmo` and `config.colliderGizmo` still control initial visibility independently. `app.setWireframe()` / `wireframeEnabled()`, `app.setAxisGizmo()` / `axisGizmoEnabled()` and `app.setColliderGizmo()` / `colliderGizmoEnabled()` work with either flag value. This flag does not change logging; terminal logging still defaults to Debug.
+`EngineConfig::debug.shortcuts` defaults to false in both builds. Enabling it permits bare F (renderer mode), F3 (axes), F4 (physics overlays/logs) and O (camera projection), once per press after global and scene callbacks. Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/config.debug.physics independently. Direct controls use runtime.renderer().setMode(), runtime.setAxes() and runtime.setPhysicsDebug(); this flag does not change the process-wide logger threshold.
 
 ## Events and controls
 
@@ -329,7 +365,7 @@ Events follows the global logging threshold independently of `logPerformance`.
 
 ```cpp
 app.on<Jade::KeyPressed<"2">>([&] {
-  app.setScene(otherScene);
+  app.runtime().setScene(otherScene);
   return Jade::EventFlow::Stop;
 });
 scene->on<Jade::SceneDeactivated>([&] { dragging = false; });
@@ -362,7 +398,7 @@ There are no folder aggregation headers. Source `.cpp` files include their match
 
 ## Frame scheduling and logs
 
-`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. VSync defaults to false and may further constrain the achieved rate. `app.setWireframe(bool)` selects the unlit debug mode and bypasses ray computation; unit world axes draw over the presented image without changing physical samples. Demo starts with axes disabled.
+`config.frameLimits` defaults to 24 frames per second and must be positive. The loop uses monotonic absolute deadlines and waits for events between frames; slow frames skip missed slots. config.renderer.vsync defaults to false. `runtime.renderer().setMode(Jade::Renderer::Mode::Wireframe)` bypasses ray computation; debug drawing overlays the presented image without changing path tracing samples. Demo starts in Wireframe with axes disabled.
 
 ```text
 15:27:07.591522  INFO [Application] - Ready: window=960x640 target_fps=24 vsync=off
@@ -378,7 +414,7 @@ and Demo wireframe changes are event logs. Each Run resets timing and retains th
 Assets and subscriptions. `RunOptions::frameLimit` limits total submitted frames
 independently of FPS. Completed sample progress is available through `renderProgress()` and periodic Debug logs in the RayTracing category.
 
-`ApplicationConfig::logPerformance` defaults to true. A completed one-second
+`EngineConfig::logPerformance` defaults to true. A completed one-second
 measurement window emits one Debug summary with FPS, average/maximum frame interval
 and average/maximum work time. Interval includes frame pacing; work measures wall
 time from held/update callbacks through presentation, excluding the explicit

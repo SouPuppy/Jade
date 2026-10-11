@@ -3,6 +3,7 @@
 #include <Jade/Math/Vector.hpp>
 
 #include <vector>
+#include <Jade/Physics/System.hpp>
 
 namespace Jade { class Scene; }
 
@@ -10,9 +11,10 @@ namespace Jade::Detail {
 
 // Presentation-only data, kept out of path tracing snapshots and revisions.
 struct CollisionDebugLines {
-  std::vector<Vec3> shapes, aabbs;
+  std::vector<Vec3> shapes, aabbs, points, normals;
+  std::vector<Physics::Manifold> contacts;
 };
 
-CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs);
+CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts = false);
 
 } // namespace Jade::Detail

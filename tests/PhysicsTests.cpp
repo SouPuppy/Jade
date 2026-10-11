@@ -1,0 +1,216 @@
+#include <Jade/Jade.hpp>
+#include <gtest/gtest.h>
+#include <array>
+#include <cmath>
+#include <limits>
+
+namespace {
+using namespace Jade;
+using Physical = Archetype<Transform, Collider, RigidBody>;
+class Block : public Physical {
+public:
+  explicit Block(Entity e) : Physical(e) { add<Collider>(Box{}); }
+};
+Entity floor(Scene& scene) {
+  const auto e = scene.create();
+  e.add<Transform>().position = {0, -0.5f, 0};
+  e.add<Collider>(Box{{6, 0.5f, 6}});
+  return e;
+}
+double length(Vec3 v) { return std::hypot(v.x, v.y, v.z); }
+EngineConfig hidden() {
+  EngineConfig c; c.window.visible = false; c.window.width = c.window.height = 64;
+  c.renderer.mode = Renderer::Mode::Wireframe; c.logPerformance = false;
+  return c;
+}
+}
+TEST(Physics, GravityAndMassDependentLinearAndAngularImpulses) {
+  Scene scene;
+  const auto a = scene.create<Block>(), b = scene.create<Block>();
+  b.get<Transform>().position = {10, 0, 0};
+  b.get<RigidBody>().mass = 2;
+  Physics::System system;
+  system.step(scene, 1.0f / 120);
+  EXPECT_NEAR(a.get<RigidBody>().velocity.y, -9.81 / 120, 1e-6);
+  EXPECT_FLOAT_EQ(a.get<RigidBody>().velocity.y, b.get<RigidBody>().velocity.y);
+  EXPECT_NEAR(a.get<Transform>().position.y, -9.81 / (120 * 120), 1e-7);
+  system.applyImpulse(scene, a, {1, 0, 0}, a.get<Transform>().position);
+  system.applyImpulse(scene, b, {1, 0, 0}, b.get<Transform>().position);
+  EXPECT_FLOAT_EQ(a.get<RigidBody>().velocity.x, 1);
+  EXPECT_FLOAT_EQ(b.get<RigidBody>().velocity.x, 0.5f);
+  system.applyImpulse(scene, a, {1, 0, 0}, a.get<Transform>().position + Vec3{0, 0.5f, 0});
+  EXPECT_NEAR(a.get<RigidBody>().angularVelocity.z, -3, 1e-5);
+  system.step(scene, 1.0f / 120);
+  EXPECT_LT(a.get<Transform>().rotation.z, 0);
+}
+TEST(Physics, BoxFaceManifoldHasFourContactsAndSpherePairsHaveOne) {
+  Scene scene;
+  const auto a = scene.create<Block>(), b = scene.create<Block>();
+  b.get<Transform>().position.y = 0.9f;
+  auto contacts = Physics::manifolds(scene);
+  ASSERT_EQ(contacts.size(), 1u);
+  EXPECT_EQ(contacts[0].points.size(), 4u);
+  for (const auto& p : contacts[0].points) EXPECT_NEAR(p.separation, -0.1, 1e-6);
+  a.get<Collider>() = Collider{Sphere{0.5f}};
+  EXPECT_EQ(Physics::manifolds(scene)[0].points.size(), 1u);
+  b.get<Collider>() = Collider{Sphere{0.5f}};
+  EXPECT_EQ(Physics::manifolds(scene)[0].points.size(), 1u);
+  b.get<Transform>().position.y = 1.003f;
+  EXPECT_TRUE(Physics::manifolds(scene).empty());
+  EXPECT_EQ(Physics::manifolds(scene, 0.005f).size(), 1u);
+}
+TEST(Physics, PyramidRestsForTwentySecondsWithGravityStillEnabled) {
+  Scene scene;
+  const auto ground = floor(scene);
+  std::vector<Entity> boxes;
+  for (int layer = 0; layer < 3; ++layer) {
+    const int width = 5 - 2 * layer;
+    for (int i = 0; i < width; ++i) {
+      const auto e = scene.create<Block>();
+      e.get<Transform>().position = {static_cast<float>(i - width / 2), 0.6f + 1.1f * layer, 0};
+      boxes.push_back(e);
+    }
+  }
+  Physics::System system;
+  std::array<Vec3, 9> settled;
+  double maxVelocity = 0, maxAngular = 0, maxDrift = 0;
+  float maxPenetration = 0;
+  for (int step = 0; step < 2400; ++step) {
+    system.step(scene, 1.0f / 120);
+    if (step == 1799) for (std::size_t i = 0; i < boxes.size(); ++i) settled[i] = boxes[i].get<Transform>().position;
+    if (step >= 1800) {
+      maxPenetration = std::max(maxPenetration, system.statistics().maximumPenetration);
+      for (std::size_t i = 0; i < boxes.size(); ++i) {
+        const auto& b = boxes[i].get<RigidBody>(); const auto& p = boxes[i].get<Transform>();
+        maxVelocity = std::max(maxVelocity, length(b.velocity));
+        maxAngular = std::max(maxAngular, length(b.angularVelocity));
+        maxDrift = std::max(maxDrift, length(p.position - settled[i]));
+      }
+    }
+  }
+  EXPECT_LT(maxVelocity, 0.02);
+  EXPECT_LT(maxAngular, 0.02);
+  EXPECT_LE(maxPenetration, 0.005f);
+  EXPECT_LT(maxDrift, 0.01);
+  for (std::size_t i = 0; i < boxes.size(); ++i) {
+    const auto& p = boxes[i].get<Transform>();
+    const float expected = i < 5 ? 0.5f : i < 8 ? 1.5f : 2.5f;
+    EXPECT_NEAR(p.position.y, expected, 0.02);
+    EXPECT_NEAR(p.position.z, 0, 0.05);
+    EXPECT_TRUE(std::isfinite(p.position.x));
+    const auto q = p.rotation;
+    EXPECT_NEAR(q.w*q.w + q.x*q.x + q.y*q.y + q.z*q.z, 1, 1e-4);
+  }
+  EXPECT_FLOAT_EQ(ground.get<Transform>().position.y, -0.5f);
+  EXPECT_EQ(system.statistics().dynamicBodies, 9u);
+  RecordProperty("maximum_linear_speed", std::to_string(maxVelocity));
+  RecordProperty("maximum_angular_speed", std::to_string(maxAngular));
+  RecordProperty("maximum_penetration", std::to_string(maxPenetration));
+  RecordProperty("maximum_drift", std::to_string(maxDrift));
+}
+TEST(Physics, SphereSettlesAndZeroMassRemainsStatic) {
+  Scene scene;
+  floor(scene);
+  const auto ball = scene.create<Block>();
+  ball.get<Collider>() = Collider{Sphere{0.5f}};
+  ball.get<Transform>().position.y = 2;
+  const auto fixed = scene.create<Block>();
+  fixed.get<Transform>().position = {3, 2, 0}; fixed.get<RigidBody>().mass = 0;
+  Physics::System system;
+  for (int i = 0; i < 600; ++i) system.step(scene, 1.0f / 120);
+  EXPECT_NEAR(ball.get<Transform>().position.y, 0.5, 0.005);
+  EXPECT_LT(length(ball.get<RigidBody>().velocity), 0.02);
+  EXPECT_FLOAT_EQ(fixed.get<Transform>().position.y, 2);
+}
+TEST(Physics, ValidationIsTransactionalAndCacheDoesNotSurviveRecycling) {
+  Scene scene;
+  floor(scene);
+  const auto a = scene.create<Block>(), b = scene.create<Block>();
+  a.get<Transform>().position = {0, 3, 0}; b.get<Transform>().position = {3, 3, 0};
+  Physics::System system;
+  b.get<RigidBody>().mass = -1;
+  EXPECT_THROW(system.step(scene, 0.01f), std::invalid_argument);
+  EXPECT_FLOAT_EQ(a.get<Transform>().position.y, 3);
+  EXPECT_FLOAT_EQ(a.get<RigidBody>().velocity.y, 0);
+  b.get<RigidBody>().mass = 1;
+  scene.setParent(b, a);
+  EXPECT_THROW(system.step(scene, 0.01f), std::invalid_argument);
+  scene.setParent(b);
+  a.get<RigidBody>().velocity.x = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_THROW(system.step(scene, 0.01f), std::invalid_argument);
+  a.get<RigidBody>().velocity = {};
+  system.step(scene, 0.01f);
+  scene.destroy(a); scene.destroy(b);
+  const auto fresh = scene.create<Block>(); fresh.get<Transform>().position.y = 5;
+  system.step(scene, 0.01f);
+  EXPECT_NEAR(fresh.get<RigidBody>().velocity.y, -0.0981f, 1e-6);
+  fresh.remove<Collider>();
+  EXPECT_THROW(system.step(scene, 0.01f), std::invalid_argument);
+}
+
+TEST(Physics, RestitutionAndFrictionChangeContactResponse) {
+  Scene scene; floor(scene);
+  const auto ball = scene.create<Block>();
+  ball.get<Collider>() = Collider{Sphere{0.5f}};
+  ball.get<Transform>().position.y = 1;
+  ball.get<RigidBody>().velocity.y = -2;
+  ball.get<RigidBody>().restitution = 0.8f;
+  Physics::System system;
+  float upward = 0;
+  for (int i = 0; i < 120; ++i) {
+    system.step(scene, 1.0f/120);
+    upward = std::max(upward, ball.get<RigidBody>().velocity.y);
+  }
+  EXPECT_GT(upward, 1);
+  const auto slide = [](float friction) {
+    Scene s; floor(s); const auto box = s.create<Block>();
+    box.get<Transform>().position.y = 0.5f;
+    box.get<RigidBody>().velocity.x = 2;
+    box.get<RigidBody>().friction = friction;
+    Physics::System physics;
+    for (int i = 0; i < 120; ++i) physics.step(s, 1.0f/120);
+    return box.get<RigidBody>().velocity.x;
+  };
+  EXPECT_NEAR(slide(0), 2, 0.01);
+  EXPECT_LT(std::abs(slide(0.6f)), 0.1);
+}
+TEST(Runtime, FixedClockIsFrameRateIndependentAndDropsExcessDebt) {
+  const auto simulate = [](float dt, int frames) {
+    Application app(hidden());
+    const auto scene = std::make_shared<Scene>();
+    const auto e = scene->create<Block>();
+    e.get<Transform>().position.y = 10;
+    app.runtime().setScene(scene);
+    for (int i = 0; i < frames; ++i) app.runtime().tick(dt);
+    EXPECT_EQ(app.runtime().physics().statistics().steps, 120u);
+    EXPECT_EQ(app.runtime().droppedTime(), 0);
+    return e.get<Transform>().position;
+  };
+  const auto a = simulate(1.0f/30, 30), b = simulate(1.0f/60, 60);
+  EXPECT_EQ(a, b);
+  Application app(hidden());
+  auto scene = std::make_shared<Scene>(); scene->create<Block>(); app.runtime().setScene(scene);
+  app.runtime().tick(1);
+  EXPECT_EQ(app.runtime().substeps(), 8u);
+  EXPECT_GT(app.runtime().droppedTime(), 0.9);
+  app.runtime().setScene(std::make_shared<Scene>());
+  app.runtime().tick(0);
+  EXPECT_EQ(app.runtime().physics().statistics().steps, 0u);
+}
+
+TEST(Runtime, PauseAndRunBoundariesDoNotAccumulateOldTime) {
+  Application app(hidden());
+  auto scene = std::make_shared<Scene>(); const auto e = scene->create<Block>();
+  e.get<Transform>().position.y = 10; app.runtime().setScene(scene);
+  app.runtime().tick(1.0f/120);
+  const auto position = e.get<Transform>().position;
+  app.runtime().setPaused(true); app.runtime().tick(10);
+  EXPECT_EQ(e.get<Transform>().position, position);
+  EXPECT_EQ(app.runtime().substeps(), 0u);
+  app.runtime().setPaused(false); app.runtime().tick(0);
+  EXPECT_EQ(e.get<Transform>().position, position);
+  app.Run({1}); app.Run({1});
+  EXPECT_EQ(e.get<Transform>().position, position);
+  app.runtime().tick(1.0f/120);
+  EXPECT_LT(e.get<Transform>().position.y, position.y);
+}

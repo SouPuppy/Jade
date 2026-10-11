@@ -13,7 +13,7 @@ struct Scene::Impl {
   };
   std::uint64_t id;
   Entity camera;
-  const Application* owner = nullptr;
+  const Runtime* owner = nullptr;
   std::vector<ModuleEntry> modules;
   Detail::EventDispatcher events;
   Impl();

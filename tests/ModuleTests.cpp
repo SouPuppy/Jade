@@ -15,16 +15,16 @@
 
 namespace {
 
-Jade::ApplicationConfig Hidden(bool debug = false)
+Jade::EngineConfig Hidden(bool debug = false)
 {
-  Jade::ApplicationConfig config;
+  Jade::EngineConfig config;
   config.window.visible = false;
   config.window.width = 160;
   config.window.height = 120;
   config.frameLimits = 120;
   config.logPerformance = false;
-  config.axisGizmo = false;
-  config.debug = debug;
+  config.debug.axes = false;
+  config.debug.shortcuts = debug;
   return config;
 }
 
@@ -74,7 +74,7 @@ std::shared_ptr<Jade::Scene> SelectScene(Jade::Application &app)
 {
   auto scene = std::make_shared<Jade::Scene>();
   scene->setCamera(AddCamera(*scene));
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   return scene;
 }
 
@@ -139,11 +139,11 @@ TEST(SceneModules, InstallsOncePerSceneAndKeepsSubscriptionsAcrossActivation)
   a->use<CounterModule>();
   b->use<CounterModule>();
   EXPECT_EQ(CounterModule::installs, 2);
-  app.setScene(a);
+  app.runtime().setScene(a);
   app.Run({1});
-  app.setScene(b);
+  app.runtime().setScene(b);
   app.Run({1});
-  app.setScene(a);
+  app.runtime().setScene(a);
   a->use<CounterModule>();
   app.Run({1});
   EXPECT_EQ(CounterModule::installs, 2);
@@ -162,7 +162,7 @@ TEST(SceneModules, FailureCancelsNestedInstallationsAndPreservesExistingSubscrib
   EXPECT_FALSE(CounterModule::connection.connected());
   EXPECT_FALSE(OuterModule::connection.connected());
   EXPECT_TRUE(existing.connected());
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   app.Run({1});
   EXPECT_EQ(existingUpdates, 1);
   EXPECT_EQ(CounterModule::updates, 0);
@@ -174,7 +174,7 @@ TEST(SceneModules, FailureCancelsNestedInstallationsAndPreservesExistingSubscrib
   EXPECT_EQ(CounterModule::updates, 1);
   EXPECT_TRUE(OuterModule::connection.connected());
   const auto expired = CounterModule::connection;
-  app.setScene(nullptr);
+  app.runtime().setScene(nullptr);
   scene.reset();
   EXPECT_FALSE(expired.connected());
 }
@@ -192,7 +192,7 @@ TEST(SceneModules, FailureRetainsPreviouslyInstalledDependency)
   EXPECT_FALSE(OuterModule::connection.connected());
   OuterModule::fail = false;
   scene->use<OuterModule>();
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   app.Run({1});
   EXPECT_EQ(CounterModule::installs, 1);
   EXPECT_EQ(CounterModule::updates, 1);
@@ -211,7 +211,7 @@ TEST(SceneModules, RejectsRecursiveInstallationAndAllowsRetry)
 
 TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
 {
-  EXPECT_FALSE(Jade::ApplicationConfig{}.debug);
+  EXPECT_FALSE(Jade::EngineConfig{}.debug.shortcuts);
   for (const bool debug : {false, true}) {
     Jade::Application app(Hidden(debug));
     const auto scene = SelectScene(app);
@@ -224,10 +224,9 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
     input.Tap(GLFW_KEY_F4);
     input.Tap(GLFW_KEY_O);
     app.Run({1});
-    EXPECT_EQ(app.wireframeEnabled(), debug);
-    EXPECT_EQ(app.axisGizmoEnabled(), debug);
-    EXPECT_EQ(app.colliderGizmoEnabled(), debug);
-    EXPECT_FALSE(app.colliderAabbGizmoEnabled());
+    EXPECT_EQ((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe), debug);
+    EXPECT_EQ(app.runtime().axesEnabled(), debug);
+    EXPECT_EQ(app.runtime().physicsDebugEnabled(), debug);
     EXPECT_EQ(lens.projection, debug ? Jade::Projection::Orthographic : Jade::Projection::Perspective);
     EXPECT_FLOAT_EQ(lens.fovDegrees, 47);
     EXPECT_FLOAT_EQ(lens.viewHeight, 9);
@@ -236,23 +235,21 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
     input.Tap(GLFW_KEY_F4);
     input.Tap(GLFW_KEY_O);
     app.Run({1});
-    EXPECT_FALSE(app.wireframeEnabled());
-    EXPECT_FALSE(app.axisGizmoEnabled());
-    EXPECT_FALSE(app.colliderGizmoEnabled());
+    EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    EXPECT_FALSE(app.runtime().axesEnabled());
+    EXPECT_FALSE(app.runtime().physicsDebugEnabled());
     EXPECT_EQ(lens.projection, Jade::Projection::Perspective);
-    app.setWireframe(true);
-    EXPECT_TRUE(app.wireframeEnabled());
-    app.setColliderAabbGizmo(true);
+    app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
+    EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
     input.Tap(GLFW_KEY_F4);
     app.Run({1});
-    EXPECT_EQ(app.colliderGizmoEnabled(), debug);
-    EXPECT_TRUE(app.wireframeEnabled());
-    EXPECT_TRUE(app.colliderAabbGizmoEnabled());
-    EXPECT_FALSE(app.axisGizmoEnabled());
+    EXPECT_EQ(app.runtime().physicsDebugEnabled(), debug);
+    EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+    EXPECT_FALSE(app.runtime().axesEnabled());
     if (debug) {
       input.Tap(GLFW_KEY_F);
       app.Run({1});
-      EXPECT_FALSE(app.wireframeEnabled());
+      EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
     }
   }
 }
@@ -269,9 +266,9 @@ TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
     input.Tap(GLFW_KEY_O, modifier);
   }
   app.Run({1});
-  EXPECT_FALSE(app.wireframeEnabled());
-  EXPECT_FALSE(app.axisGizmoEnabled());
-  EXPECT_FALSE(app.colliderGizmoEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_FALSE(app.runtime().axesEnabled());
+  EXPECT_FALSE(app.runtime().physicsDebugEnabled());
   EXPECT_EQ(scene->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
   int sceneF = 0;
   app.on<Jade::KeyPressed<"f">>([] { return Jade::EventFlow::Stop; });
@@ -285,9 +282,9 @@ TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
   input.Tap(GLFW_KEY_O);
   app.Run({1});
   EXPECT_EQ(sceneF, 0);
-  EXPECT_FALSE(app.wireframeEnabled());
-  EXPECT_FALSE(app.axisGizmoEnabled());
-  EXPECT_FALSE(app.colliderGizmoEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_FALSE(app.runtime().axesEnabled());
+  EXPECT_FALSE(app.runtime().physicsDebugEnabled());
   EXPECT_EQ(scene->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
 }
 
@@ -297,22 +294,22 @@ TEST(ApplicationDebug, CallbacksRunBeforeDefaultsAndStopCanPreventThem)
   const auto scene = SelectScene(app);
   std::vector<int> order;
   app.on<Jade::KeyPressed<"f">>([&] {
-    EXPECT_FALSE(app.wireframeEnabled());
+    EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
     order.push_back(1);
   });
   scene->on<Jade::KeyPressed<"f">>([&] {
-    EXPECT_FALSE(app.wireframeEnabled());
+    EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
     order.push_back(2);
   });
   Input input;
   input.Tap(GLFW_KEY_F);
   app.Run({1});
   EXPECT_EQ(order, (std::vector<int>{1, 2}));
-  EXPECT_TRUE(app.wireframeEnabled());
+  EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   app.on<Jade::KeyPressed<"F3">>([&] { app.stop(); });
   input.Tap(GLFW_KEY_F3);
   app.Run({1});
-  EXPECT_FALSE(app.axisGizmoEnabled());
+  EXPECT_FALSE(app.runtime().axesEnabled());
 }
 
 TEST(ApplicationDebug, ProjectionUsesRetainedSceneDuringDeferredSwitch)
@@ -320,12 +317,12 @@ TEST(ApplicationDebug, ProjectionUsesRetainedSceneDuringDeferredSwitch)
   Jade::Application app(Hidden(true));
   auto a = SelectScene(app), b = std::make_shared<Jade::Scene>();
   b->setCamera(AddCamera(*b));
-  app.on<Jade::KeyPressed<"2">>([&] { app.setScene(b); });
+  app.on<Jade::KeyPressed<"2">>([&] { app.runtime().setScene(b); });
   Input input;
   input.Tap(GLFW_KEY_2);
   input.Tap(GLFW_KEY_O);
   app.Run({2});
-  EXPECT_EQ(app.scene(), b);
+  EXPECT_EQ(app.runtime().scene(), b);
   EXPECT_EQ(a->camera().get<Jade::Camera>().projection, Jade::Projection::Orthographic);
   EXPECT_EQ(b->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
   input.Tap(GLFW_KEY_O);
@@ -340,7 +337,7 @@ TEST(ApplicationDebug, MissingCameraAndComponentsAreIgnored)
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
   auto scene = std::make_shared<Jade::Scene>();
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
   const auto camera = AddCamera(*scene);
@@ -487,17 +484,17 @@ TEST(FreeCameraControl, SceneReactivationResetsDragAndDoesNotRetainOwner)
   input.Move(0, 0);
   input.Button(GLFW_PRESS);
   app.Run({1});
-  app.setScene(b);
+  app.runtime().setScene(b);
   input.Move(20, 0);
   app.Run({1});
   ExpectNear(Jade::Motion::getFront(b->camera().get<Jade::Transform>()), {0, 0, -1});
-  app.setScene(a);
+  app.runtime().setScene(a);
   input.Move(40, 0);
   app.Run({1});
   ExpectNear(Jade::Motion::getFront(a->camera().get<Jade::Transform>()), {0, 0, -1});
   const auto connection = a->on<Jade::FrameUpdate>([] {});
   std::weak_ptr<Jade::Scene> weak = a;
-  app.setScene(nullptr);
+  app.runtime().setScene(nullptr);
   a.reset();
   EXPECT_TRUE(weak.expired());
   EXPECT_FALSE(connection.connected());
@@ -508,7 +505,7 @@ TEST(FreeCameraControl, InstallationNeedsNoCameraAndMissingComponentsAreSafe)
   Jade::Application app(Hidden());
   auto scene = std::make_shared<Jade::Scene>();
   scene->use<Jade::Module::FreeCameraControl>();
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   Input input;
   input.Key(GLFW_KEY_W, GLFW_PRESS);
   input.Move(0, 0);
@@ -538,7 +535,7 @@ TEST(FreeCameraControl, ScrollOutAndBackPastZoomLimitsRestoresProjectionAndPose)
   const auto camera = AddCamera(*scene);
   scene->setCamera(camera);
   scene->use<Jade::Module::FreeCameraControl>();
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   Input input;
   const auto pose = camera.get<Jade::Transform>();
   for (auto projection : {Jade::Projection::Perspective, Jade::Projection::Orthographic}) {
@@ -726,7 +723,7 @@ TEST(FPSCameraControl, CaptureAndMouseBaselineFollowSceneAndFocusLifecycle)
   auto fps = std::make_shared<Jade::Scene>(), free = std::make_shared<Jade::Scene>();
   fps->use<Jade::Module::FPSCameraControl>();
   free->use<Jade::Module::FreeCameraControl>();
-  app.setScene(fps);
+  app.runtime().setScene(fps);
   Input input;
   EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
   input.Key(GLFW_KEY_W, GLFW_PRESS);
@@ -746,16 +743,16 @@ TEST(FPSCameraControl, CaptureAndMouseBaselineFollowSceneAndFocusLifecycle)
   Jade::Transform expected;
   Jade::Motion::yaw(expected, 2);
   ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()), Jade::Motion::getFront(expected));
-  app.setScene(free);
+  app.runtime().setScene(free);
   EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
-  app.setScene(fps);
+  app.runtime().setScene(fps);
   EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_DISABLED);
   input.Move(5000, 5000);
   app.Run({1});
   ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()), Jade::Motion::getFront(expected));
   std::weak_ptr<Jade::Scene> weak = fps;
   const auto connection = fps->on<Jade::FrameUpdate>([] {});
-  app.setScene(nullptr);
+  app.runtime().setScene(nullptr);
   EXPECT_EQ(glfwGetInputMode(input.window, GLFW_CURSOR), GLFW_CURSOR_NORMAL);
   fps.reset();
   EXPECT_TRUE(weak.expired());

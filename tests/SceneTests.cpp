@@ -25,9 +25,9 @@ struct OnDestroy {
   ~OnDestroy() { callback(); }
 };
 
-Jade::ApplicationConfig Hidden()
+Jade::EngineConfig Hidden()
 {
-  Jade::ApplicationConfig config;
+  Jade::EngineConfig config;
   config.window.visible = false;
   config.window.width = 160;
   config.window.height = 120;
@@ -65,12 +65,12 @@ TEST(Scene, StartsEmptyAndViewsDoNotKeepTheOwnerAlive)
   {
     Jade::Scene scene;
     EXPECT_FALSE(scene.camera());
-    const auto empty = scene.view<Value>();
+    const auto empty = scene.query<Value>();
     EXPECT_EQ(empty.begin(), empty.end());
     entity = scene.create();
     EXPECT_FALSE(entity.has<Jade::Transform>());
     entity.add<Value>(7);
-    snapshot.emplace(scene.view<Value>());
+    snapshot.emplace(scene.query<Value>());
     ASSERT_NE(snapshot->begin(), snapshot->end());
     EXPECT_EQ((*snapshot->begin()).get<Value>().value, 7);
   }
@@ -226,7 +226,7 @@ TEST(Hierarchy, DeepTreesResolveAndDeleteWithoutRecursion)
   EXPECT_FLOAT_EQ(scene.worldMatrix(tail).at(0, 3), 4096);
   scene.destroy(root);
   EXPECT_FALSE(tail);
-  const auto view = scene.view<Jade::Transform>();
+  const auto view = scene.query<Jade::Transform>();
   EXPECT_EQ(view.begin(), view.end());
 }
 
@@ -262,15 +262,15 @@ TEST(Hierarchy, CameraUsesInheritedPositionAndRotationWhileIgnoringItsScale)
 TEST(SceneSwitching, EmptyApplicationAndExplicitSelectionWorkWithoutACamera)
 {
   Jade::Application app(Hidden());
-  EXPECT_FALSE(app.scene());
+  EXPECT_FALSE(app.runtime().scene());
   EXPECT_NO_THROW(app.Run({1}));
   auto scene = std::make_shared<Jade::Scene>();
-  app.setScene(scene);
-  EXPECT_EQ(app.scene(), scene);
+  app.runtime().setScene(scene);
+  EXPECT_EQ(app.runtime().scene(), scene);
   EXPECT_FALSE(scene->camera());
   EXPECT_NO_THROW(app.Run({1}));
-  app.setScene(nullptr);
-  EXPECT_FALSE(app.scene());
+  app.runtime().setScene(nullptr);
+  EXPECT_FALSE(app.runtime().scene());
   EXPECT_NO_THROW(app.Run({1}));
 }
 
@@ -290,8 +290,8 @@ TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
     order.push_back("a-update");
     if (switchOnce) {
       switchOnce = false;
-      app.setScene(b);
-      EXPECT_EQ(app.scene(), a);
+      app.runtime().setScene(b);
+      EXPECT_EQ(app.runtime().scene(), a);
     }
   });
   a->on<Jade::FrameUpdate>([&] { order.push_back("a-late"); });
@@ -299,7 +299,7 @@ TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
     order.push_back("b-update");
     updates.push_back(update);
   });
-  app.setScene(a);
+  app.runtime().setScene(a);
   app.Run({3});
   EXPECT_EQ(order, (std::vector<std::string>{"a-enter", "a-update", "a-late", "a-exit", "b-enter", "b-update",
                                              "b-update"}));
@@ -312,7 +312,7 @@ TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
   EXPECT_TRUE(connection.connected());
   EXPECT_EQ(entity.get<Value>().value, 7);
   order.clear();
-  app.setScene(a);
+  app.runtime().setScene(a);
   app.Run({1});
   EXPECT_EQ(order, (std::vector<std::string>{"a-enter", "a-update", "a-late"}));
 }
@@ -328,20 +328,20 @@ TEST(SceneSwitching, LastRequestWinsAndSelectingTheSameSceneDoesNotNotify)
   c->on<Jade::SceneActivated>([&] { ++cEnters; });
   app.on<Jade::FrameUpdate>([&](const auto &event) {
     if (event.frame == 1) {
-      app.setScene(b);
-      app.setScene(c);
+      app.runtime().setScene(b);
+      app.runtime().setScene(c);
     }
   });
-  app.setScene(a);
+  app.runtime().setScene(a);
   app.Run({2});
-  EXPECT_EQ(app.scene(), c);
+  EXPECT_EQ(app.runtime().scene(), c);
   EXPECT_EQ(exits, 1);
   EXPECT_EQ(bEnters, 0);
   EXPECT_EQ(cEnters, 1);
-  app.setScene(c);
+  app.runtime().setScene(c);
   EXPECT_EQ(cEnters, 1);
-  app.setScene(nullptr);
-  EXPECT_FALSE(app.scene());
+  app.runtime().setScene(nullptr);
+  EXPECT_FALSE(app.runtime().scene());
 }
 
 TEST(SceneSwitching, LifecycleReentryIsDeferredAndConsumptionDoesNotCancelSwitching)
@@ -351,18 +351,18 @@ TEST(SceneSwitching, LifecycleReentryIsDeferredAndConsumptionDoesNotCancelSwitch
   int enterA = 0, enterB = 0, skipped = 0;
   a->on<Jade::SceneActivated>([&] {
     ++enterA;
-    app.setScene(b);
+    app.runtime().setScene(b);
     return Jade::EventFlow::Stop;
   });
   a->on<Jade::SceneActivated>([&] { ++skipped; });
   a->on<Jade::SceneDeactivated>([] { return Jade::EventFlow::Stop; });
   a->on<Jade::SceneDeactivated>([&] { ++skipped; });
   b->on<Jade::SceneActivated>([&] { ++enterB; });
-  app.setScene(a);
-  EXPECT_EQ(app.scene(), a);
+  app.runtime().setScene(a);
+  EXPECT_EQ(app.runtime().scene(), a);
   EXPECT_EQ(enterA, 1);
   app.Run({1});
-  EXPECT_EQ(app.scene(), b);
+  EXPECT_EQ(app.runtime().scene(), b);
   EXPECT_EQ(enterB, 1);
   EXPECT_EQ(skipped, 0);
 }
@@ -380,16 +380,16 @@ TEST(SceneSwitching, LifecycleExceptionsLeaveSelectionAtTheCompletedPhase)
     if (failEnter)
       throw std::runtime_error("enter failed");
   });
-  app.setScene(a);
-  EXPECT_THROW(app.setScene(b), std::runtime_error);
-  EXPECT_EQ(app.scene(), a);
+  app.runtime().setScene(a);
+  EXPECT_THROW(app.runtime().setScene(b), std::runtime_error);
+  EXPECT_EQ(app.runtime().scene(), a);
   failExit = false;
-  EXPECT_THROW(app.setScene(b), std::runtime_error);
-  EXPECT_EQ(app.scene(), b);
+  EXPECT_THROW(app.runtime().setScene(b), std::runtime_error);
+  EXPECT_EQ(app.runtime().scene(), b);
   EXPECT_NO_THROW(app.Run({1}));
   failEnter = false;
-  app.setScene(nullptr);
-  EXPECT_NO_THROW(app.setScene(b));
+  app.runtime().setScene(nullptr);
+  EXPECT_NO_THROW(app.runtime().setScene(b));
 }
 
 TEST(SceneSwitching, CallbackFailureDiscardsQueuedSwitchAndRunCanRecover)
@@ -399,16 +399,16 @@ TEST(SceneSwitching, CallbackFailureDiscardsQueuedSwitchAndRunCanRecover)
   bool fail = true;
   a->on<Jade::FrameUpdate>([&] {
     if (fail) {
-      app.setScene(b);
+      app.runtime().setScene(b);
       throw std::runtime_error("update failed");
     }
   });
-  app.setScene(a);
+  app.runtime().setScene(a);
   EXPECT_THROW(app.Run({1}), std::runtime_error);
-  EXPECT_EQ(app.scene(), a);
+  EXPECT_EQ(app.runtime().scene(), a);
   fail = false;
   EXPECT_NO_THROW(app.Run({1}));
-  EXPECT_EQ(app.scene(), a);
+  EXPECT_EQ(app.runtime().scene(), a);
 }
 
 TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwnerDestruction)
@@ -419,19 +419,19 @@ TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwner
   const auto connection = scene->on<Jade::FrameUpdate>([] {});
   {
     Jade::Application first(Hidden()), second(Hidden());
-    first.setScene(scene);
-    EXPECT_THROW(second.setScene(scene), std::invalid_argument);
-    EXPECT_FALSE(second.scene());
-    EXPECT_EQ(first.scene(), scene);
-    first.setScene(nullptr);
-    second.setScene(scene);
+    first.runtime().setScene(scene);
+    EXPECT_THROW(second.runtime().setScene(scene), std::invalid_argument);
+    EXPECT_FALSE(second.runtime().scene());
+    EXPECT_EQ(first.runtime().scene(), scene);
+    first.runtime().setScene(nullptr);
+    second.runtime().setScene(scene);
   }
   EXPECT_TRUE(entity);
   EXPECT_TRUE(connection.connected());
   // Application destruction released the activation reservation.
   {
     Jade::Application app(Hidden());
-    EXPECT_NO_THROW(app.setScene(scene));
+    EXPECT_NO_THROW(app.runtime().setScene(scene));
   }
   scene.reset();
   EXPECT_FALSE(entity);
@@ -448,17 +448,17 @@ TEST(SceneSwitching, LifecycleReservesTargetAndFailedActivationDiscardsReentrant
   bool failActivation = true;
   int cActivated = 0;
   a->on<Jade::SceneDeactivated>([&] {
-    EXPECT_EQ(app.scene(), a);
-    EXPECT_THROW(other.setScene(a), std::invalid_argument);
-    EXPECT_THROW(other.setScene(b), std::invalid_argument);
+    EXPECT_EQ(app.runtime().scene(), a);
+    EXPECT_THROW(other.runtime().setScene(a), std::invalid_argument);
+    EXPECT_THROW(other.runtime().setScene(b), std::invalid_argument);
   });
   b->on<Jade::SceneActivated>([&] {
-    EXPECT_EQ(app.scene(), b);
+    EXPECT_EQ(app.runtime().scene(), b);
     // The old owner is released only after committing the new selection.
-    EXPECT_NO_THROW(other.setScene(a));
+    EXPECT_NO_THROW(other.runtime().setScene(a));
     EXPECT_THROW(app.Run({1}), std::logic_error);
     if (failActivation) {
-      app.setScene(c);
+      app.runtime().setScene(c);
       throw std::runtime_error("activation failed");
     }
   });
@@ -466,16 +466,16 @@ TEST(SceneSwitching, LifecycleReservesTargetAndFailedActivationDiscardsReentrant
   app.on<Jade::FrameUpdate>([&] {
     if (!requested) {
       requested = true;
-      app.setScene(b);
+      app.runtime().setScene(b);
     }
   });
-  app.setScene(a);
+  app.runtime().setScene(a);
   EXPECT_THROW(app.Run({2}), std::runtime_error);
-  EXPECT_EQ(app.scene(), b);
-  EXPECT_EQ(other.scene(), a);
+  EXPECT_EQ(app.runtime().scene(), b);
+  EXPECT_EQ(other.runtime().scene(), a);
   failActivation = false;
   EXPECT_NO_THROW(app.Run({1}));
-  EXPECT_EQ(app.scene(), b);
+  EXPECT_EQ(app.runtime().scene(), b);
   EXPECT_EQ(cActivated, 0);
 }
 
@@ -497,11 +497,11 @@ TEST(SceneSwitching, GlobalAndSceneEventsPreservePropagationAndPhysicalHeldState
     EXPECT_FLOAT_EQ(event.dt, 0);
   });
   app.on<Jade::KeyPressed<"1">>([&] {
-    app.setScene(b);
+    app.runtime().setScene(b);
     return Jade::EventFlow::Stop;
   });
   a->on<Jade::KeyPressed<"1">>([&] { ++swallowed; });
-  app.setScene(a);
+  app.runtime().setScene(a);
   SendKey(GLFW_KEY_W, GLFW_PRESS);
   SendKey(GLFW_KEY_1, GLFW_PRESS);
   app.Run({2});
@@ -511,7 +511,7 @@ TEST(SceneSwitching, GlobalAndSceneEventsPreservePropagationAndPhysicalHeldState
   EXPECT_EQ(pressedB, 0);
   EXPECT_EQ(heldB, 1);
   EXPECT_EQ(swallowed, 0);
-  EXPECT_EQ(app.scene(), b);
+  EXPECT_EQ(app.runtime().scene(), b);
 }
 
 TEST(SceneSwitching, SceneConsumptionPreventsDefaultEscapeAndGlobalUpdateStillRuns)
@@ -526,7 +526,7 @@ TEST(SceneSwitching, SceneConsumptionPreventsDefaultEscapeAndGlobalUpdateStillRu
   });
   scene->on<Jade::FrameUpdate>([&] { ++laterUpdates; });
   scene->on<Jade::KeyPressed<"Escape">>([] { return Jade::EventFlow::Stop; });
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   SendKey(GLFW_KEY_ESCAPE, GLFW_PRESS);
   EXPECT_NO_THROW(app.Run({2}));
   EXPECT_EQ(globalUpdates, 2);

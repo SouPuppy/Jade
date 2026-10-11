@@ -10,18 +10,18 @@
 namespace {
 using namespace Jade;
 using namespace Jade::Renderer;
-ApplicationConfig hidden(bool debug = false)
+EngineConfig hidden(bool debug = false)
 {
-  ApplicationConfig config;
+  EngineConfig config;
   config.window.visible = false;
   config.window.width = config.window.height = 64;
-  config.debug = debug;
-  config.axisGizmo = false;
+  config.debug.shortcuts = debug;
+  config.debug.axes = false;
   config.logPerformance = false;
   config.frameLimits = 240;
-  config.rayTracing.resolutionScale = .5f;
-  config.rayTracing.workerCount = 2;
-  config.rayTracing.maxSamples = 1;
+  config.renderer.rayTracing.resolutionScale = .5f;
+  config.renderer.rayTracing.workerCount = 2;
+  config.renderer.rayTracing.maxSamples = 1;
   return config;
 }
 void key(int code, int action, int modifiers = 0)
@@ -62,26 +62,26 @@ TEST(RenderMode, ITogglesWithDebugDisabledAndHonorsModifiersRepeatsAndEventConsu
 {
   Application app(hidden());
   MakeTestScene(app);
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   tap(GLFW_KEY_I, GLFW_MOD_CONTROL);
   key(GLFW_KEY_I, GLFW_REPEAT);
   app.Run({1});
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   auto consumed = app.on<KeyPressed<"I">>([] { return EventFlow::Stop; });
   tap(GLFW_KEY_I);
   app.Run({1});
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   consumed.disconnect();
   tap(GLFW_KEY_I);
   app.Run({2});
-  EXPECT_TRUE(app.wireframeEnabled());
-  EXPECT_EQ(app.renderProgress().rendererName, "Wireframe");
-  EXPECT_FALSE(app.renderProgress().samplesPerPixel);
+  EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_EQ(app.runtime().renderer().progress().rendererName, "Wireframe");
+  EXPECT_FALSE(app.runtime().renderer().progress().samplesPerPixel);
   EXPECT_EQ(std::string_view(glfwGetWindowTitle(glfwGetCurrentContext())), "Jade | Wireframe");
   tap(GLFW_KEY_I);
   app.Run({2});
-  EXPECT_FALSE(app.wireframeEnabled());
-  EXPECT_EQ(app.renderProgress().rendererName, "RayTracing");
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+  EXPECT_EQ(app.runtime().renderer().progress().rendererName, "RayTracing");
 }
 
 TEST(RenderMode, FRetainsTheDebugWireframeShortcut)
@@ -90,41 +90,41 @@ TEST(RenderMode, FRetainsTheDebugWireframeShortcut)
   MakeTestScene(app);
   tap(GLFW_KEY_F);
   app.Run({1});
-  EXPECT_TRUE(app.wireframeEnabled());
+  EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   tap(GLFW_KEY_I);
   app.Run({1});
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   tap(GLFW_KEY_F, GLFW_MOD_SHIFT);
   app.Run({1});
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
 }
 
 TEST(RenderMode, StartingInWireframeRunsNoIntegratorAndResumingStartsFreshSamples)
 {
   Application app(hidden());
   std::atomic<int> calls = 0;
-  app.rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(calls));
+  app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(calls));
   auto scene = MakeTestScene(app);
   auto object = scene->create();
   object.add<Transform>();
-  object.add<Geometry>(app.assets().add(MeshData::cube()));
+  object.add<Geometry>(app.runtime().assets().add(MeshData::cube()));
   object.add<Material>();
-  app.setWireframe(true);
+  app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
   app.Run({8});
   EXPECT_EQ(calls, 0);
   tap(GLFW_KEY_I);
   app.Run({8});
   EXPECT_GT(calls, 0);
-  EXPECT_EQ(app.renderProgress().samplesPerPixel, 1u);
+  EXPECT_EQ(app.runtime().renderer().progress().samplesPerPixel, 1u);
   const auto pausedCalls = calls.load();
-  app.setWireframe(true);
+  app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
   object.get<Transform>().position.x = 1;
   app.Run({8});
   EXPECT_EQ(calls, pausedCalls);
   tap(GLFW_KEY_I);
   app.Run({8});
   EXPECT_GT(calls, pausedCalls);
-  EXPECT_EQ(app.renderProgress().samplesPerPixel, 1u);
+  EXPECT_EQ(app.runtime().renderer().progress().samplesPerPixel, 1u);
 }
 
 TEST(RenderMode, WorkerFailureReleasesIntegratorLockAndAllowsRecovery)
@@ -141,15 +141,15 @@ TEST(RenderMode, WorkerFailureReleasesIntegratorLockAndAllowsRecovery)
   };
   Application app(hidden());
   std::atomic<bool> called = false;
-  app.rayTracing().setIntegrator(std::make_unique<Broken>(called));
+  app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<Broken>(called));
   MakeTestScene(app);
   auto synchronization = app.on<FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 2)
-      EXPECT_TRUE(waitUntil([&] { return called && !app.renderProgress().inFlight; }));
+      EXPECT_TRUE(waitUntil([&] { return called && !app.runtime().renderer().progress().inFlight; }));
   });
   EXPECT_THROW(app.Run({8}), std::runtime_error);
   synchronization.disconnect();
-  EXPECT_NO_THROW(app.rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
+  EXPECT_NO_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
   EXPECT_NO_THROW(app.Run({8}));
 }
 
@@ -159,31 +159,31 @@ TEST(RenderMode, RealPathTracingAndWheelInputSurviveRepeatedModeChanges)
   auto scene = MakeTestScene(app);
   scene->use<Module::FreeCameraControl>();
   auto object = scene->create();
-  object.add<Geometry>(app.assets().add(MeshData::cube()));
+  object.add<Geometry>(app.runtime().assets().add(MeshData::cube()));
   object.add<Material>(Materials::Gold());
   auto lamp = scene->create();
   lamp.add<Transform>().position = {0, 3, 0};
-  lamp.add<Geometry>(app.assets().add(MeshData::cube()));
+  lamp.add<Geometry>(app.runtime().assets().add(MeshData::cube()));
   lamp.add<Material>(Materials::Emissive({4, 3, 2}));
   const auto original = scene->camera().get<Camera>();
   bool traced = false, restored = false;
   std::uint64_t firstRevision = 0;
   app.on<FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 8) {
-      traced = waitUntil([&] { return app.renderProgress().samplesPerPixel == 1; });
-      firstRevision = app.renderProgress().revision;
+      traced = waitUntil([&] { return app.runtime().renderer().progress().samplesPerPixel == 1; });
+      firstRevision = app.runtime().renderer().progress().revision;
       tap(GLFW_KEY_I);
     }
     if (frame.frame == 12) {
-      EXPECT_TRUE(app.wireframeEnabled());
-      EXPECT_FALSE(app.renderProgress().inFlight);
-      EXPECT_EQ(app.renderProgress().rendererName, "Wireframe");
+      EXPECT_TRUE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+      EXPECT_FALSE(app.runtime().renderer().progress().inFlight);
+      EXPECT_EQ(app.runtime().renderer().progress().rendererName, "Wireframe");
       tap(GLFW_KEY_I);
     }
     if (frame.frame == 20) {
-      EXPECT_FALSE(app.wireframeEnabled());
-      EXPECT_TRUE(waitUntil([&] { return app.renderProgress().samplesPerPixel == 1; }));
-      EXPECT_GT(app.renderProgress().revision, firstRevision);
+      EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
+      EXPECT_TRUE(waitUntil([&] { return app.runtime().renderer().progress().samplesPerPixel == 1; }));
+      EXPECT_GT(app.runtime().renderer().progress().revision, firstRevision);
       auto window = glfwGetCurrentContext();
       auto scroll = glfwSetScrollCallback(window, nullptr);
       glfwSetScrollCallback(window, scroll);

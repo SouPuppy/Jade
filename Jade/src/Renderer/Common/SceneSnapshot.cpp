@@ -20,7 +20,7 @@ SceneSnapshot SceneSnapshot::capture(const Scene &scene, const Assets &assets)
     frame.forward = Math::unit(Math::vector(inverse, {0, 0, -1}));
     result.camera = frame;
   }
-  for (const auto entity : scene.view<Geometry>()) {
+  for (const auto entity : scene.query<Geometry>()) {
     const auto handle = entity.get<Geometry>().mesh;
     if (handle.empty())
       continue;

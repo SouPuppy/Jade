@@ -549,15 +549,15 @@ TEST(OpenGLDisplay, PresentsSrgbPixelsWithCorrectImageOrientation)
 
 TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
 {
-  ApplicationConfig config;
+  EngineConfig config;
   config.window.visible = false;
   config.window.width = 64;
   config.window.height = 64;
-  config.axisGizmo = false;
+  config.debug.axes = false;
   config.logPerformance = false;
-  config.debug = true;
-  config.rayTracing.workerCount = 1;
-  config.rayTracing.maxSamples = 1;
+  config.debug.shortcuts = true;
+  config.renderer.rayTracing.workerCount = 1;
+  config.renderer.rayTracing.maxSamples = 1;
   Application app(config);
   auto control = std::make_shared<Control>();
   class CountingIntegrator final : public Integrator {
@@ -570,7 +570,7 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
     }
     std::shared_ptr<Control> control;
   };
-  app.rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(control));
+  app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(control));
   auto scene = std::make_shared<Scene>();
   auto camera = scene->create();
   camera.add<Transform>().position = {0, 0, 5};
@@ -578,15 +578,15 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
   scene->setCamera(camera);
   auto object = scene->create();
   object.add<Transform>();
-  object.add<Geometry>(app.assets().add(MeshData::cube(2)));
+  object.add<Geometry>(app.runtime().assets().add(MeshData::cube(2)));
   object.add<Material>();
-  app.setScene(scene);
+  app.runtime().setScene(scene);
   int pausedCalls = 0;
   bool resumed = false;
   app.on<FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 3) {
       ASSERT_TRUE(waitUntil([&] { return control->calls.load() > 0; }));
-      app.setWireframe(true);
+      app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
     }
     if (frame.frame == 4)
       pausedCalls = control->calls;
@@ -595,33 +595,33 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
       object.get<Transform>().position = {1, 0, 0};
     }
     if (frame.frame == 7)
-      app.setWireframe(false);
+      app.runtime().renderer().setMode(Jade::Renderer::Mode::RayTracing);
     if (frame.frame == 10)
       resumed = waitUntil([&] { return control->calls.load() > pausedCalls; });
   });
   app.Run({10});
   EXPECT_GT(pausedCalls, 0);
   EXPECT_TRUE(resumed);
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
 }
 
 TEST(ApplicationRendering, OwnsDefaultRayTracingAndLocksIntegratorDuringRun)
 {
-  ApplicationConfig config;
+  EngineConfig config;
   config.window.visible = false;
   config.window.width = 64;
   config.window.height = 64;
-  config.rayTracing.workerCount = 1;
+  config.renderer.rayTracing.workerCount = 1;
   Application app(config);
-  EXPECT_EQ(app.rayTracing().name(), "RayTracing");
-  EXPECT_FALSE(app.wireframeEnabled());
+  EXPECT_EQ(app.runtime().renderer().rayTracing().name(), "RayTracing");
+  EXPECT_FALSE((app.runtime().renderer().mode() == Jade::Renderer::Mode::Wireframe));
   app.on<FrameUpdate>([&] {
-    EXPECT_THROW(app.rayTracing().setIntegrator(std::make_unique<PathIntegrator>()), std::logic_error);
+    EXPECT_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()), std::logic_error);
   });
   EXPECT_NO_THROW(app.Run({1}));
-  app.setWireframe(true);
+  app.runtime().renderer().setMode(Jade::Renderer::Mode::Wireframe);
   EXPECT_NO_THROW(app.Run({1}));
-  EXPECT_NO_THROW(app.rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
+  EXPECT_NO_THROW(app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<PathIntegrator>()));
 }
 
 TEST(PathTracing, DiffuseWallReturnsIndirectColoredLight)
@@ -751,12 +751,12 @@ TEST(RayTracing, CustomIntegratorWorksHeadlesslyAndLocksDuringApplicationRun)
   Film film({4, 4});
   renderer.render(RayScene{}, {{}, film.size(), 0, 0, {}}, film);
   EXPECT_EQ(film.pixels()[0], (LinearRGB{.25f, .5f, .75f}));
-  ApplicationConfig config;
+  EngineConfig config;
   config.window.visible = false;
   config.window.width = 64;
   config.window.height = 64;
   Application app(config);
-  auto &registered = app.rayTracing();
+  auto &registered = app.runtime().renderer().rayTracing();
   app.on<FrameUpdate>(
       [&] { EXPECT_THROW(registered.setIntegrator(std::make_unique<Constant>()), std::logic_error); });
   app.Run({1});

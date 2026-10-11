@@ -20,9 +20,9 @@
 
 namespace {
 
-Jade::ApplicationConfig HiddenInputApplication()
+Jade::EngineConfig HiddenInputApplication()
 {
-  Jade::ApplicationConfig config;
+  Jade::EngineConfig config;
   config.window.visible = false;
   config.window.width = 160;
   config.window.height = 120;
@@ -203,16 +203,16 @@ TEST(Application, KeyboardAdapterDispatchesChordsAndFrameBasedMovement)
   Jade::Application app(HiddenInputApplication());
   MakeTestScene(app);
   KeyboardAdapter input;
-  auto &camera = app.scene()->camera().get<Jade::Transform>();
+  auto &camera = app.runtime().scene()->camera().get<Jade::Transform>();
   camera.position = {0, 0, 5};
   Jade::Motion::lookAt(camera, {0, 0, 0});
   int pressed = 0, released = 0, held = 0, both = 0, bare = 0;
   double moved = 0;
-  app.scene()->on<Jade::KeyPressed<"C-w">>([&] { ++pressed; });
-  app.scene()->on<Jade::KeyReleased<"C-w">>([&] { ++released; });
-  app.scene()->on<Jade::KeyHeld<"w">>([&] { ++bare; });
-  app.scene()->on<Jade::KeyHeld<"C-S-w">>([&] { ++both; });
-  app.scene()->on<Jade::KeyHeld<"C-w">>([&](const auto &event) {
+  app.runtime().scene()->on<Jade::KeyPressed<"C-w">>([&] { ++pressed; });
+  app.runtime().scene()->on<Jade::KeyReleased<"C-w">>([&] { ++released; });
+  app.runtime().scene()->on<Jade::KeyHeld<"w">>([&] { ++bare; });
+  app.runtime().scene()->on<Jade::KeyHeld<"C-S-w">>([&] { ++both; });
+  app.runtime().scene()->on<Jade::KeyHeld<"C-w">>([&](const auto &event) {
     ++held;
     EXPECT_TRUE(std::isfinite(event.dt));
     EXPECT_GE(event.dt, 0);
@@ -220,7 +220,7 @@ TEST(Application, KeyboardAdapterDispatchesChordsAndFrameBasedMovement)
     camera.position = camera.position + Jade::Motion::getFront(camera) * distance;
     moved += distance;
   });
-  app.scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
+  app.runtime().scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 1) {
       EXPECT_FLOAT_EQ(frame.dt, 0);
       input.Send(GLFW_KEY_W, GLFW_REPEAT, GLFW_MOD_CONTROL);
@@ -252,15 +252,15 @@ TEST(Application, QuickTapsAndConsumedEscapeDispatchBeforeDrawing)
   MakeTestScene(app);
   KeyboardAdapter input;
   std::vector<int> order;
-  app.scene()->on<Jade::KeyPressed<"w">>([&] { order.push_back(1); });
-  app.scene()->on<Jade::KeyReleased<"w">>([&] { order.push_back(2); });
-  app.scene()->on<Jade::KeyHeld<"w">>([&] { order.push_back(99); });
-  app.scene()->on<Jade::KeyPressed<"Escape">>([&] {
+  app.runtime().scene()->on<Jade::KeyPressed<"w">>([&] { order.push_back(1); });
+  app.runtime().scene()->on<Jade::KeyReleased<"w">>([&] { order.push_back(2); });
+  app.runtime().scene()->on<Jade::KeyHeld<"w">>([&] { order.push_back(99); });
+  app.runtime().scene()->on<Jade::KeyPressed<"Escape">>([&] {
     order.push_back(3);
     return Jade::EventFlow::Stop;
   });
-  app.scene()->on<Jade::KeyPressed<"Escape">>([&] { order.push_back(99); });
-  app.scene()->on<Jade::FrameUpdate>([&] { order.push_back(4); });
+  app.runtime().scene()->on<Jade::KeyPressed<"Escape">>([&] { order.push_back(99); });
+  app.runtime().scene()->on<Jade::FrameUpdate>([&] { order.push_back(4); });
   input.Send(GLFW_KEY_W, GLFW_PRESS);
   input.Send(GLFW_KEY_W, GLFW_RELEASE);
   input.Send(GLFW_KEY_ESCAPE, GLFW_PRESS);
@@ -275,9 +275,9 @@ TEST(Application, FocusLossStopsHeldCallbacksAndReleasesOnce)
   MakeTestScene(app);
   KeyboardAdapter input;
   int held = 0, released = 0;
-  app.scene()->on<Jade::KeyHeld<"Space">>([&] { ++held; });
-  app.scene()->on<Jade::KeyReleased<"Space">>([&] { ++released; });
-  const auto loseFocus = app.scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
+  app.runtime().scene()->on<Jade::KeyHeld<"Space">>([&] { ++held; });
+  app.runtime().scene()->on<Jade::KeyReleased<"Space">>([&] { ++released; });
+  const auto loseFocus = app.runtime().scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 1) {
       input.Focus(false);
       input.Send(GLFW_KEY_SPACE, GLFW_RELEASE);
@@ -302,8 +302,8 @@ TEST(Application, StopAndDisconnectionPermitLaterRunsAndHandlesExpire)
     MakeTestScene(app);
     KeyboardAdapter input;
     int frames = 0;
-    expired = app.scene()->on<Jade::FrameUpdate>([&] { ++frames; });
-    const auto stopping = app.scene()->on<Jade::KeyPressed<"Escape">>([&] { app.stop(); });
+    expired = app.runtime().scene()->on<Jade::FrameUpdate>([&] { ++frames; });
+    const auto stopping = app.runtime().scene()->on<Jade::KeyPressed<"Escape">>([&] { app.stop(); });
     input.Send(GLFW_KEY_ESCAPE, GLFW_PRESS);
     EXPECT_NO_THROW(app.Run({5}));
     EXPECT_EQ(frames, 0);
@@ -323,7 +323,7 @@ TEST(Application, CallbackExceptionsAndNestedRunsLeaveTheLoopRecoverable)
   Jade::Application app(HiddenInputApplication());
   MakeTestScene(app);
   bool fail = true;
-  const auto throwing = app.scene()->on<Jade::FrameUpdate>([&] {
+  const auto throwing = app.runtime().scene()->on<Jade::FrameUpdate>([&] {
     if (fail) {
       fail = false;
       throw std::runtime_error("callback failure");
@@ -333,7 +333,7 @@ TEST(Application, CallbackExceptionsAndNestedRunsLeaveTheLoopRecoverable)
   EXPECT_NO_THROW(app.Run({1}));
   throwing.disconnect();
   int count = 0;
-  app.scene()->on<Jade::FrameUpdate>([&, counter = std::make_unique<int>(0)]() mutable {
+  app.runtime().scene()->on<Jade::FrameUpdate>([&, counter = std::make_unique<int>(0)]() mutable {
     EXPECT_THROW(app.Run({1}), std::logic_error);
     count = ++*counter;
   });
@@ -393,19 +393,19 @@ TEST(Application, MouseAdapterDispatchesInOrderAndMotionTurnsTheCamera)
   Jade::Application app(HiddenInputApplication());
   MakeTestScene(app);
   KeyboardAdapter input;
-  auto &camera = app.scene()->camera().get<Jade::Transform>();
+  auto &camera = app.runtime().scene()->camera().get<Jade::Transform>();
   camera.position = {0, 0, 5};
   Jade::Motion::lookAt(camera, {0, 0, 0});
   std::vector<int> order;
-  app.scene()->on<Jade::KeyPressed<"w">>([&] { order.push_back(1); });
-  const auto mouse = app.scene()->on<Jade::MouseMoved>([&](const auto &event) {
+  app.runtime().scene()->on<Jade::KeyPressed<"w">>([&] { order.push_back(1); });
+  const auto mouse = app.runtime().scene()->on<Jade::MouseMoved>([&](const auto &event) {
     order.push_back(2);
     Jade::Motion::yaw(camera, event.dx);
     Jade::Motion::pitch(camera, -event.dy);
     return Jade::EventFlow::Stop;
   });
-  app.scene()->on<Jade::MouseMoved>([&] { order.push_back(99); });
-  app.scene()->on<Jade::KeyReleased<"w">>([&] { order.push_back(3); });
+  app.runtime().scene()->on<Jade::MouseMoved>([&] { order.push_back(99); });
+  app.runtime().scene()->on<Jade::KeyReleased<"w">>([&] { order.push_back(3); });
   input.Cursor(100, 200);
   input.Send(GLFW_KEY_W, GLFW_PRESS);
   input.Cursor(190, 200);
@@ -583,39 +583,39 @@ TEST(Application, LeftDragAndScrollKeepArrivalOrderEvenForATapBetweenFrames)
   Jade::Application app(HiddenInputApplication());
   MakeTestScene(app);
   KeyboardAdapter input;
-  auto &lens = app.scene()->camera().get<Jade::Camera>();
-  auto &camera = app.scene()->camera().get<Jade::Transform>();
+  auto &lens = app.runtime().scene()->camera().get<Jade::Camera>();
+  auto &camera = app.runtime().scene()->camera().get<Jade::Transform>();
   camera.position = {0, 0, 5};
   Jade::Motion::lookAt(camera, {0, 0, 0});
   bool dragging = false;
   int held = 0;
   std::vector<char> order;
-  app.scene()->on<Jade::MousePressed<"Left">>([&] {
+  app.runtime().scene()->on<Jade::MousePressed<"Left">>([&] {
     order.push_back('p');
     dragging = true;
     return Jade::EventFlow::Stop;
   });
-  app.scene()->on<Jade::MousePressed<"Left">>([&] { order.push_back('!'); });
-  app.scene()->on<Jade::MousePressed<"Right">>([&] { order.push_back('!'); });
-  app.scene()->on<Jade::MouseReleased<"Left">>([&](const auto &event) {
+  app.runtime().scene()->on<Jade::MousePressed<"Left">>([&] { order.push_back('!'); });
+  app.runtime().scene()->on<Jade::MousePressed<"Right">>([&] { order.push_back('!'); });
+  app.runtime().scene()->on<Jade::MouseReleased<"Left">>([&](const auto &event) {
     EXPECT_FLOAT_EQ(event.dt, 0);
     order.push_back('r');
     dragging = false;
   });
-  app.scene()->on<Jade::MouseHeld<"Left">>([&] { ++held; });
-  app.scene()->on<Jade::MouseMoved>([&](const auto &mouse) {
+  app.runtime().scene()->on<Jade::MouseHeld<"Left">>([&] { ++held; });
+  app.runtime().scene()->on<Jade::MouseMoved>([&](const auto &mouse) {
     order.push_back('m');
     if (dragging) {
       Jade::Motion::yaw(camera, mouse.dx);
       Jade::Motion::pitch(camera, -mouse.dy);
     }
   });
-  const auto scrolling = app.scene()->on<Jade::MouseScrolled>([&](const auto &mouse) {
+  const auto scrolling = app.runtime().scene()->on<Jade::MouseScrolled>([&](const auto &mouse) {
     order.push_back('s');
     Jade::Motion::zoom(lens, mouse.dy);
     return Jade::EventFlow::Stop;
   });
-  app.scene()->on<Jade::MouseScrolled>([&] { order.push_back('!'); });
+  app.runtime().scene()->on<Jade::MouseScrolled>([&] { order.push_back('!'); });
   input.Cursor(100, 100);
   input.Cursor(120, 100);
   input.Button(GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, GLFW_MOD_CONTROL);
@@ -648,16 +648,16 @@ TEST(Application, MouseHeldSharesFrameDtAndStopsAfterRelease)
   std::vector<float> mouseDt;
   std::vector<float> frameDt;
   int pressed = 0, released = 0, wrongButton = 0;
-  app.scene()->on<Jade::MousePressed<"Right">>([&] { ++pressed; });
-  app.scene()->on<Jade::MouseReleased<"Right">>([&] { ++released; });
-  app.scene()->on<Jade::MouseHeld<"Left">>([&] { ++wrongButton; });
-  app.scene()->on<Jade::MouseHeld<"Right">>([&](const auto &event) {
+  app.runtime().scene()->on<Jade::MousePressed<"Right">>([&] { ++pressed; });
+  app.runtime().scene()->on<Jade::MouseReleased<"Right">>([&] { ++released; });
+  app.runtime().scene()->on<Jade::MouseHeld<"Left">>([&] { ++wrongButton; });
+  app.runtime().scene()->on<Jade::MouseHeld<"Right">>([&](const auto &event) {
     EXPECT_EQ(event.button, Jade::MouseButton::Right);
     EXPECT_TRUE(std::isfinite(event.dt));
     EXPECT_GE(event.dt, 0);
     mouseDt.push_back(event.dt);
   });
-  app.scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
+  app.runtime().scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
     frameDt.push_back(frame.dt);
     if (frame.frame == 2) {
       input.Button(GLFW_MOUSE_BUTTON_RIGHT, GLFW_RELEASE);
@@ -684,19 +684,19 @@ TEST(Application, FocusLossReleasesButtonsAndEndsDragBeforeLaterMotion)
   KeyboardAdapter input;
   bool dragging = false;
   int held = 0, released = 0, dragged = 0, scrolled = 0;
-  app.scene()->on<Jade::MousePressed<"Left">>([&] { dragging = true; });
-  app.scene()->on<Jade::MouseReleased<"Left">>([&] {
+  app.runtime().scene()->on<Jade::MousePressed<"Left">>([&] { dragging = true; });
+  app.runtime().scene()->on<Jade::MouseReleased<"Left">>([&] {
     dragging = false;
     ++released;
   });
-  app.scene()->on<Jade::MouseHeld<"Left">>([&] { ++held; });
-  app.scene()->on<Jade::MouseMoved>([&] {
+  app.runtime().scene()->on<Jade::MouseHeld<"Left">>([&] { ++held; });
+  app.runtime().scene()->on<Jade::MouseMoved>([&] {
     if (dragging) {
       ++dragged;
     }
   });
-  app.scene()->on<Jade::MouseScrolled>([&] { ++scrolled; });
-  app.scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
+  app.runtime().scene()->on<Jade::MouseScrolled>([&] { ++scrolled; });
+  app.runtime().scene()->on<Jade::FrameUpdate>([&](const auto &frame) {
     if (frame.frame == 1) {
       input.Focus(false);
       input.Button(GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE);
@@ -782,8 +782,8 @@ TEST(Application, OPressSwitchesProjectionOnceAndScrollUsesTheActiveMode)
   Jade::Application app(HiddenInputApplication());
   MakeTestScene(app);
   KeyboardAdapter input;
-  auto &lens = app.scene()->camera().get<Jade::Camera>();
-  auto &camera = app.scene()->camera().get<Jade::Transform>();
+  auto &lens = app.runtime().scene()->camera().get<Jade::Camera>();
+  auto &camera = app.runtime().scene()->camera().get<Jade::Transform>();
   lens.projection = Jade::Projection::Orthographic;
   lens.viewHeight = 8;
   lens.nearPlane = 0.25f;
@@ -795,12 +795,12 @@ TEST(Application, OPressSwitchesProjectionOnceAndScrollUsesTheActiveMode)
   const auto position = camera.position;
   const auto front = Jade::Motion::getFront(camera);
   int switches = 0;
-  app.scene()->on<Jade::KeyPressed<"o">>([&] {
+  app.runtime().scene()->on<Jade::KeyPressed<"o">>([&] {
     lens.projection = lens.projection == Jade::Projection::Perspective ? Jade::Projection::Orthographic
                                                                        : Jade::Projection::Perspective;
     ++switches;
   });
-  app.scene()->on<Jade::MouseScrolled>([&](const auto &mouse) { Jade::Motion::zoom(lens, mouse.dy); });
+  app.runtime().scene()->on<Jade::MouseScrolled>([&](const auto &mouse) { Jade::Motion::zoom(lens, mouse.dy); });
   input.Scroll(0, 1);
   input.Send(GLFW_KEY_O, GLFW_PRESS);
   input.Send(GLFW_KEY_O, GLFW_REPEAT);
@@ -829,37 +829,37 @@ TEST(Application, OPressSwitchesProjectionOnceAndScrollUsesTheActiveMode)
   EXPECT_EQ(lens.projection, Jade::Projection::Perspective);
 }
 
-TEST(Application, AxisGizmoDefaultsOnAndF3TogglesOncePerUnconsumedPress)
+TEST(Application, AxisGizmoDefaultsOffAndF3TogglesOncePerUnconsumedPress)
 {
-  EXPECT_TRUE(Jade::ApplicationConfig{}.axisGizmo);
+  EXPECT_FALSE(Jade::EngineConfig{}.debug.axes);
   for (const bool enabled : {true, false}) {
     auto config = HiddenInputApplication();
-    config.debug = true;
-    config.axisGizmo = enabled;
+    config.debug.shortcuts = true;
+    config.debug.axes = enabled;
     Jade::Application app(config);
     MakeTestScene(app);
     KeyboardAdapter input;
-    EXPECT_EQ(app.axisGizmoEnabled(), enabled);
+    EXPECT_EQ(app.runtime().axesEnabled(), enabled);
     input.Send(GLFW_KEY_F3, GLFW_PRESS);
     input.Send(GLFW_KEY_F3, GLFW_REPEAT);
     app.Run({2});
-    EXPECT_EQ(app.axisGizmoEnabled(), !enabled);
+    EXPECT_EQ(app.runtime().axesEnabled(), !enabled);
     input.Send(GLFW_KEY_F3, GLFW_RELEASE);
     input.Send(GLFW_KEY_F3, GLFW_PRESS);
     app.Run({1});
-    EXPECT_EQ(app.axisGizmoEnabled(), enabled);
-    const auto consumed = app.scene()->on<Jade::KeyPressed<"F3">>([] { return Jade::EventFlow::Stop; });
+    EXPECT_EQ(app.runtime().axesEnabled(), enabled);
+    const auto consumed = app.runtime().scene()->on<Jade::KeyPressed<"F3">>([] { return Jade::EventFlow::Stop; });
     input.Send(GLFW_KEY_F3, GLFW_RELEASE);
     input.Send(GLFW_KEY_F3, GLFW_PRESS);
     app.Run({1});
-    EXPECT_EQ(app.axisGizmoEnabled(), enabled);
+    EXPECT_EQ(app.runtime().axesEnabled(), enabled);
     consumed.disconnect();
     input.Send(GLFW_KEY_F3, GLFW_RELEASE);
     input.Send(GLFW_KEY_F3, GLFW_PRESS, GLFW_MOD_SHIFT);
     app.Run({1});
-    EXPECT_EQ(app.axisGizmoEnabled(), enabled);
-    app.setAxisGizmo(false);
+    EXPECT_EQ(app.runtime().axesEnabled(), enabled);
+    app.runtime().setAxes(false);
     app.Run({1});
-    EXPECT_FALSE(app.axisGizmoEnabled());
+    EXPECT_FALSE(app.runtime().axesEnabled());
   }
 }

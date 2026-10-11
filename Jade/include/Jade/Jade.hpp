@@ -1,6 +1,12 @@
 #pragma once
 
 #include <Jade/Application.hpp>
+#include <Jade/EngineConfig.hpp>
+#include <Jade/Runtime.hpp>
+#include <Jade/Core/Archetype.hpp>
+#include <Jade/Physics/RigidBody.hpp>
+#include <Jade/Physics/System.hpp>
+#include <Jade/Renderer/System.hpp>
 #include <Jade/Assets/AssetHandle.hpp>
 #include <Jade/Assets/Assets.hpp>
 #include <Jade/Color.hpp>

@@ -5,8 +5,8 @@ Application owns a global main-thread dispatcher; each Scene owns a dispatcher f
 ## Engine controls
 
 ```cpp
-Jade::ApplicationConfig config;
-config.debug = true; // F: wireframe, F3: axes, F4: Collider shapes, O: projection.
+Jade::EngineConfig config;
+config.debug.shortcuts = true; // F: wireframe, F3: axes, F4: physics debug/logs, O: projection.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
 scene->use<Jade::Module::FreeCameraControl>();
@@ -25,7 +25,7 @@ The Application debug flag defaults to false in both builds and is independent o
 These examples show custom bindings; avoid installing equivalent callbacks alongside FreeCameraControl unless both actions are intended.
 
 ```cpp
-auto scene = app.scene(); // Select a scene and explicit camera first.
+auto scene = app.runtime().scene(); // Select a scene and explicit camera first.
 auto camera = scene->camera();
 auto& pose = camera.get<Jade::Transform>();
 auto& lens = camera.get<Jade::Camera>();
@@ -75,7 +75,7 @@ Use `scene->on` for scene controls and updates, and `app.on` for application-wid
 
 ```cpp
 app.on<Jade::KeyPressed<"2">>([&] {
-  app.setScene(secondScene);
+  app.runtime().setScene(secondScene);
   return Jade::EventFlow::Stop;
 });
 scene->on<Jade::SceneDeactivated>([&] { dragging = false; });
@@ -152,7 +152,7 @@ Angles are increments in degrees about the current local axes. Positive yaw turn
 
 Zoom scales the active projection parameter by exp(-scroll * 0.1), bounding each scroll increment to [-100, 100]. Perspective FOV stays in [1, 179] degrees; orthographic visible height stays in [0.01, 10000] world units. The camera pose, projection mode and near/far planes stay intact. A zero increment leaves the camera unchanged, and nonfinite increments are rejected before mutation.
 
-With config.debug enabled, Application handles unconsumed KeyPressed<"o"> to toggle the projection once per press. Assigning Camera::projection preserves perspective FOV and orthographic height independently, along with pose/clip planes. Invalid component data is rejected when consumed for zoom or rendering.
+With config.debug.shortcuts enabled, Application handles unconsumed KeyPressed<"o"> to toggle the projection once per press. Assigning Camera::projection preserves perspective FOV and orthographic height independently, along with pose/clip planes. Invalid component data is rejected when consumed for zoom or rendering.
 
 ## Propagation and stopping
 
@@ -167,7 +167,7 @@ scene->on<Jade::KeyPressed<"Escape">>([] {
 scene->on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 ```
 
-With config.debug=true, unconsumed bare F, F3, F4 and O toggle wireframe, unit axes, yellow Collider shapes and the retained scene camera projection once per press, logging actual changes at Info under Application. F4 leaves wireframe and AABB visibility unchanged. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger these defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents the action. O ignores absent or incomplete cameras and preserves both lens zoom values, pose and clip planes. Without debug these keys have no default action. Initial axes and Collider shapes follow config.axisGizmo/config.colliderGizmo independently, and direct set/get APIs for wireframe, axes and Collider visibility remain available.
+With config.debug.shortcuts=true, unconsumed bare F, F3, F4 and O toggle renderer mode, axes, the complete physics debug overlay/logging and camera projection once per press. F4 leaves renderer mode unchanged; it toggles cyan AABBs, yellow Collider outlines, red contact points and green normals together. Physics/Debug logs state changes and rate-limited configuration/body/contact information. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. O preserves both lens zoom values, pose and clip planes. Initial debug visibility follows config.debug.axes/config.debug.physics independently. Direct controls live on runtime.renderer(), runtime.setAxes() and runtime.setPhysicsDebug().
 
 Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
@@ -203,7 +203,7 @@ with zero handlers. Application default Escape and enabled F/F3/F4/O actions run
 KeyHeld, MouseHeld, MouseMoved, MouseScrolled and FrameUpdate use Trace, including
 their relevant dt, position/deltas or frame index. Enable them explicitly with
 `Jade::Log::SetLevel(Jade::Log::Level::Trace)`; set Info to hide routine Events
-diagnostics. `ApplicationConfig::logPerformance` controls performance measurements,
+diagnostics. `EngineConfig::logPerformance` controls performance measurements,
 independently of Events logging.
 
 Callback failures emit Error with event, subscription ID, binding and exception

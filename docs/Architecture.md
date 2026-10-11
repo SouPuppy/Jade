@@ -4,6 +4,10 @@
 
 Entity identifies an existence in Scene. Components describe its state, systems interpret that state, and Assets owns shareable resources. Rendering uses Transform, Geometry, Material and an explicitly selected Camera. The CPU path tracer is independent of the window and OpenGL display.
 
+Application owns Window, ordered input events and frame pacing. Runtime owns Assets, active/pending Scene selection, Renderer::System and Physics::System. EngineConfig supplies separate Window/Renderer/Physics/Debug settings. No Application-level subsystem forwarding API remains. Renderer::System owns the existing RenderHost and progressive session; Physics::System is independently constructible without GPU/window dependencies. Destruction releases Runtime and its render workers before Window.
+
+FrameUpdate executes before Runtime's fixed-step clock. Tick accumulates dt, executes up to eight 1/120-second substeps and preserves the fractional remainder; excess whole-step debt is discarded and logged. Scene switches, pause changes, minimized windows and Run boundaries clear accumulated time and warm-start caches. Callback failures discard pending scene changes. Renderer captures only the resulting state. Physics and gameplay are main-thread work; existing ray workers retain immutable render snapshots.
+
 ```mermaid
 flowchart LR
   Scene --> Snapshot[Common SceneSnapshot]
@@ -24,12 +28,16 @@ flowchart LR
 | Public path | Contract |
 | --- | --- |
 | Core/Entity.hpp, Core/Scene.hpp | Identity, component ownership, hierarchy and queries |
+| Core/Archetype.hpp | Recursive, deduplicated component composition and typed creation |
+| Runtime.hpp, EngineConfig.hpp | Scene/subsystem ownership, fixed clock and typed settings |
 | Core/Transform.hpp | Local position, quaternion rotation and scale |
 | Assets/Assets.hpp, Assets/AssetHandle.hpp | Typed immutable resources and retained snapshots |
 | Math/ | Vectors, quaternions and column-major matrices |
 | Graphics/Mesh.hpp, Graphics/MeshData.hpp | Immutable compiled Mesh and editable authoring geometry |
 | Graphics/Geometry.hpp | MeshHandle component |
 | Physics/Collider.hpp, Physics/Collision.hpp | Local Box/Sphere components and window-independent Contact queries |
+| Physics/RigidBody.hpp, Physics/System.hpp | Linear/angular dynamics, manifolds, impulses and contact solving |
+| Renderer/System.hpp | RayTracing/Wireframe mode, integrator access and progress |
 | Materials/Material.hpp, Materials/Presets.hpp | Material values, validation and diffuse/metal/glass/emissive presets |
 | Graphics/Camera.hpp, Graphics/Motion.hpp | Projection settings and scene motion |
 | Renderer/RayTracing/Ray.hpp, Renderer/RayTracing/RayScene.hpp | Ray queries, surface hits, immutable scene compilation |
@@ -38,11 +46,11 @@ flowchart LR
 | Renderer/Common/RenderSettings.hpp, Renderer/Common/RenderProgress.hpp | Sampling resolution/exposure and physical sample progress |
 | Renderer/RayTracing/RayTracing.hpp | Multithreaded CPU path tracer |
 | Renderer/RayTracing/ProgressiveBackend.hpp | Headless complete-sample contract |
-| Application.hpp | Window loop, active Scene, events and RayTracing/Wireframe toggle |
+| Application.hpp | Window/input loop, global events and Runtime access |
 | Module/FreeCameraControl.hpp, Module/FPSCameraControl.hpp, Input/, Events/ | Scene-local controls and typed events |
 | Jade.hpp | Optional includes-only entry point |
 
-Headers work independently. GLFW, GLAD, Window, GPU programs and render-session storage remain private. Each maintained implementation includes its corresponding private header first and CMake lists sources explicitly. Core does not depend on rendering or platform headers. No compatibility adapters for the old MeshRenderer or lit OpenGL pipeline remain.
+Headers work independently. GLFW, GLAD, Window, GPU programs and render-session storage remain private. Implementations include their corresponding public or private header first and CMake lists sources explicitly. Entity, Scene and component storage do not depend on rendering or platform headers. Runtime connects these boundaries. No compatibility adapters for the old MeshRenderer or lit OpenGL pipeline remain.
 
 ## Logging
 
@@ -75,7 +83,7 @@ are emitted after the next prune removes inactive slots; handles stay immediate
 and noexcept. Logging never holds a live container iterator across a sink call.
 Events diagnostics obey the global threshold independently of logPerformance.
 
-ApplicationConfig.logPerformance replaces logFrames, defaults to true and controls
+EngineConfig.logPerformance replaces logFrames, defaults to true and controls
 performance diagnostics. The allocation-free internal FrameDiagnostics aggregates
 one-second windows and reports Debug summaries under Performance. It keeps frame
 intervals (including pacing) separate from work wall time (held/update callbacks
@@ -124,11 +132,11 @@ Scene owns one private Registry, a scene dispatcher and a selected camera Entity
 
 Component allocations survive unrelated creation and pool growth. Removal/destruction invalidates their references. Components are extracted before user destructors run so destructors can mutate the Scene. Constructors that destroy/reuse their identity cannot publish into the new generation.
 
-`Scene::view<T...>()` is an iterable snapshot of weak identities. Advancing rechecks liveness and required components, skipping destruction, slot reuse and removed matches. New entities/matches wait for the next view. Views own their snapshots but do not keep Scene alive; iterators require their view to remain alive. Nested views are independent. Removing/replacing a component invalidates its references immediately.
+`Scene::query<T...>()` is an iterable snapshot of weak identities. Advancing rechecks liveness and required components, skipping destruction, slot reuse and removed matches. New entities/matches wait for the next view. Views own their snapshots but do not keep Scene alive; iterators require their view to remain alive. Nested views are independent. Removing/replacing a component invalidates its references immediately.
 
 Registry owns parent links and attachment-order children, exposed through Scene::setParent/parent/children. Parent changes validate liveness, ownership and cycles before mutation and retain local TRS. No Transform is required for an identity group; removing Transform preserves relationships. Destruction collects a complete subtree iteratively, invalidates every identity before any destructor, extracts all components, then releases them children before parents. Destructors can create/reuse slots safely without joining the already selected destruction set.
 
-Scene::worldMatrix resolves full ancestor Ã— local matrices. Rendering creates a fresh ancestor cache per pass, so direct component writes need no dirty flags. Full matrices preserve shear under nonuniform scale and rotation. Matrix4 is a public column-major value; construction/validation helpers remain private.
+Scene::worldMatrix resolves full ancestor times local matrices. Rendering creates a fresh ancestor cache per pass, so direct component writes need no dirty flags. Full matrices preserve shear under nonuniform scale and rotation. Matrix4 is a public column-major value; construction/validation helpers remain private.
 
 ## Scene selection and events
 
@@ -152,7 +160,7 @@ MeshData owns editable vertices (position/normal) and uint32 triangle indices. M
 
 Scene::setCamera requires a live own-Scene identity with Transform and Camera. Creating Camera components never selects them implicitly. A removed/destroyed active camera causes clear/present only, retaining input and callbacks. Selecting a valid camera resumes geometry and axes.
 
-Application owns one RayTracing instance configured by ApplicationConfig::rayTracing. rayTracing() exposes it for Integrator configuration outside Run. Unmodified I toggles the retained wireframe state independently of ApplicationConfig.debug and respects event consumption, modifiers and repeats. The window title identifies RayTracing or Wireframe.
+Runtime's Renderer::System owns one RayTracing instance configured by EngineConfig.renderer.rayTracing. runtime.renderer().rayTracing() exposes Integrator configuration outside Run. Unmodified I toggles Renderer::Mode independently of EngineConfig.debug.shortcuts and respects event consumption, modifiers and repeats. The window title identifies RayTracing or Wireframe.
 
 ProgressiveBackend defines sampling settings, naming and algorithm locks. It receives immutable RayScene plus RenderRequest and commits exactly one Film sample, or cancels without commitment. RayTracing is the application implementation; custom Integrators change transport behavior without changing the application modes. The application seals its RayTracing algorithms throughout Run, including wireframe frames.
 
@@ -192,9 +200,13 @@ Collider contains a private shape tag and inline union, constructed from local B
 
 Each query creates a fresh SceneTransforms cache and world proxies; no dirty notifications are needed for direct edits. Positive finite dimensions and transforms are validated at consumption. Boxes derive an orthonormal world basis and scaled half-extents from the full ancestor matrix; rounding-sized basis errors are conservatively enclosed. Spheres require uniform world basis lengths. Sheared world bases and nonuniform spheres are rejected with relative tolerance 1e-5. Missing Transform is skipped, while foreign/dead pair queries throw. AABB min/max comes automatically from each proxy. All-pairs Broad Phase uses inclusive AABB overlap, with the same scale-relative tolerance as Narrow Phase.
 
-Private dispatch handles Sphere–Sphere center distances, Sphere–Box closest points (with a nearest-exit branch for contained centers) and Box–Box SAT over six face axes and nine edge axes. Double intermediates, normalized nondegenerate axes and a scale-relative 1e-6 distance tolerance keep contacts consistent with coarse rejection. Face clipping or closest supporting edges generates Box contact witnesses; the public result collapses these to one representative point. No rigid bodies, impulses, friction, gravity, collision events or continuous detection are included.
+Discrete pair queries handle Sphere–Sphere center distances, Sphere–Box closest points and Box–Box SAT over six face/nine edge axes. Their Contact result remains a representative point. Physics::manifolds separately exposes paired surface witnesses and signed separation: spheres produce one point, clipped Box faces up to four, edge contacts one. The dynamics solver uses a 5-mm retention margin and excludes static/static response.
 
-CollisionDebug creates separate line data on the owning thread when colliderGizmo/colliderAabbGizmo is enabled. DebugDraw overlays yellow shape edges/circles and cyan AABBs over either render mode, distinct from gray-white mesh wireframe. Debug F4 toggles only colliderGizmo. Collider-only entities are included. This data never enters SceneSnapshot equality or RayScene compilation, so shape and display edits do not invalidate path tracing. Detection and debug capture share world-shape validation and bounds derivation.
+RigidBody has world-space linear/angular velocities, mass, friction and restitution. Zero mass or absence of RigidBody is static. Dynamic bodies require root Transform and Collider; Box/Sphere inertia uses world scaled dimensions. Physics validates inputs, integrates into private body states, solves accumulated normal and two tangent impulses with warm starting, then applies independent positional corrections and commits components. Defaults are 20 velocity/four position iterations, 2-mm slop, friction 0.6 and restitution 0; low-speed contacts do not bounce. Contact caches match local anchors and discard destroyed/recycled entities, teleports and shape/property edits. No sleeping, kinematic bodies, CCD, joints or physics worker threads are included.
+
+Archetype aliases flatten component lists and deduplicate by first appearance. The final typed handle constructor binds a single Entity identity, defaults constructible components and supplies non-default components; failed construction rolls back the entity. Signature-indexed Registry groups and cached query matches avoid full slot scans. Stable per-type component pools preserve object references across unrelated creation and signature transitions; this is not a packed relocating chunk implementation.
+
+CollisionDebug creates independent primitive data and contact witnesses on the owning thread. F4/runtime.setPhysicsDebug toggles cyan AABBs, yellow shapes, red contact marker spheres and green normal arrows in either render mode. Collider-only entities and static/static geometric contacts are included. This data never enters SceneSnapshot equality or RayScene compilation. Physics/Debug logs summaries/body values on activation and once per second; Trace adds contact witnesses, normals and solved impulses. No screen text or font subsystem is added.
 
 ## Scene modules
 
@@ -204,7 +216,7 @@ Module::FreeCameraControl lives in the engine and registers scene-local motion, 
 
 Module::FPSCameraControl registers horizontal motion and continuous mouse look, clamps pitch to +/-89 degrees and removes roll. Yaw and movement use parent Y (world Y for root cameras); vertical motion, jumping, gravity and collision are left to a future character controller. It resolves Transform on every callback and derives heading from the current pose, so camera replacements and external edits remain safe. Scene's installation ledger rejects mixed Free/FPS controls and rolls back either module on installation failure. Application selects the active Scene's cursor capture mode; the window adapter uses GLFW disabled-cursor mode for FPS and resets cursor deltas on mode and scene changes. InputState already resets the baseline on focus changes.
 
-ApplicationConfig.debug defaults to false independently of build type and logging. Unconsumed unmodified Pressed I always toggles RayTracing/Wireframe. When debug is enabled, F/F3/F4/O toggle wireframe, axes, Collider shapes and the retained scene camera's projection after both dispatcher layers. O checks Transform and Camera and retains pose/zoom/clips. stop or a closed window prevents these actions. Application owns wireframe state, exposed by wireframeEnabled(). Initial axes and Collider shapes still follow config.axisGizmo/config.colliderGizmo independently of debug.
+EngineConfig.debug.shortcuts defaults to false independently of build type and logging. Unconsumed unmodified Pressed I always toggles RayTracing/Wireframe. When enabled, F/F3/F4/O toggle renderer mode, axes, the complete physics debug overlay/logging and camera projection after both dispatcher layers. O retains pose/zoom/clips; stop or a closed window prevents defaults. Initial debug visibility follows config.debug.axes/config.debug.physics independently; Renderer::System owns render mode and Runtime owns debug state.
 
 ## Loop, events and build
 
