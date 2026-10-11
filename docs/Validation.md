@@ -1,5 +1,17 @@
 # Windows x64 validation
 
+## Archetype descriptors and empty resources (2026-10-11)
+
+Debug and Release each passed 235/235 GoogleTest tests across 49 suites. The final Debug run took 263.577 seconds and Release took 26.499 seconds. The engine and tests built in both configurations without compiler warnings. Release Demo built normally. The running Debug JadeDemo.exe prevented replacing its executable, so the compiled Demo object was linked separately as build/windows-debug/bin/JadeArchetypeDemo.exe.
+
+Archetype coverage verifies alias and named Components descriptors, recursive composition and first-appearance deduplication, a deleted descriptor constructor that is never instantiated, Entity return types, explicit Transform presence, component defaults, component-constructor rollback, and rollback when a constructor removes an earlier declared component. Existing signature indexing, snapshot queries, entity generations and stable component references remain covered. Renderer-mode checks await completed sampling while Run retains the coordinator instead of assuming a fixed frame count guarantees worker completion.
+
+Empty-resource regressions verify Geometry mesh binding/clearing and rejection of nonempty expired handles. Collider checks cover the constexpr empty state, copying and shape replacement, omission from contact/detect/manifold/debug queries before unused transform validation, and exclusion from physics logs. Serial, one-worker and three-worker simulations verify inactive bodies retain pose/velocities, empty-body graphs succeed, applyImpulse rejects empty shapes without mutation, binding activates simulation, and clearing removes current contacts and subsequent solver state. Invalid participating body/shape data retains existing transactional validation.
+
+Eight affected public headers passed standalone MSVC C++20 /W4 /WX /permissive- compilation. Four compile-rejection checks verify non-default-constructible components, raw component types passed to create<T>(), malformed Components declarations, and the removed constructor-argument creation API. An external CMake consumer with Demo/tests disabled linked only Jade::Jade and ran headlessly, checking both descriptor forms, post-creation resources, physics activation/suspension, dynamic components, and empty-signature queries. Debug and Release Demo each completed two-frame launches for scenes 1 through 4 with exit code zero and empty stderr. Git diff --check passed.
+
+Artifacts are ignored under build/validation/archetype-debug-final.xml/.log, archetype-release-final.xml/.log, archetype-public/, archetype-consumer-source/, archetype-consumer-build/, and archetype-windows-debug-scene1 through scene4 / archetype-windows-release-scene1 through scene4 logs. The public-header, compile-rejection and Demo launch helpers are build/validation/archetype-public.ps1 and archetype-demo-smoke.ps1.
+
 ## Scene force fields, three-body orbit and force overlays (2026-10-11)
 
 Debug and Release each passed 235/235 GoogleTest tests across 49 suites. Engine, Demo and tests built successfully without compiler warnings in isolated build/fields-debug and build/fields-release configurations. Eight public headers (ForceField, GravityField, Environment, System, Scene, EngineConfig, Runtime and Jade.hpp) passed standalone MSVC C++20 /W4 /WX compilation. The initial primary Debug build encountered an occupied renderer object; the isolated Debug build uses /Z7 embedded compiler debug information after an MSVC shared-PDB write failure. Repository presets are unchanged.
