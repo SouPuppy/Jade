@@ -24,6 +24,8 @@ public:
   bool paused() const noexcept;
   void setAxes(bool enabled) noexcept;
   bool axesEnabled() const noexcept;
+  void setAabbs(bool enabled) noexcept;
+  bool aabbsEnabled() const noexcept;
   void setPhysicsDebug(bool enabled) noexcept;
   bool physicsDebugEnabled() const noexcept;
 private:

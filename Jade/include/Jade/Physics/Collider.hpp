@@ -19,19 +19,23 @@ struct Sphere {
 namespace Detail { struct ColliderAccess; }
 
 // Scene-owned component. Shape data has value semantics and no separate allocation.
-// Replace a shape by assigning Collider{Box{...}} or Collider{Sphere{...}}.
+// Empty colliders do not participate in physics. Assign Collider{} to clear a shape,
+// or Collider{Box{...}} / Collider{Sphere{...}} to bind one.
 class Collider final {
 public:
-  Collider() = delete;
+  constexpr Collider() noexcept : m_Kind(Kind::None), m_Shape() {}
   explicit constexpr Collider(Box box) noexcept : m_Kind(Kind::Box), m_Shape(box) {}
   explicit constexpr Collider(Sphere sphere) noexcept : m_Kind(Kind::Sphere), m_Shape(sphere) {}
+  constexpr bool empty() const noexcept { return m_Kind == Kind::None; }
 
 private:
   friend struct Detail::ColliderAccess;
-  enum class Kind : std::uint8_t { Box, Sphere };
+  enum class Kind : std::uint8_t { None, Box, Sphere };
   union Shape {
+    std::uint8_t none;
     Box box;
     Sphere sphere;
+    constexpr Shape() noexcept : none(0) {}
     constexpr Shape(Box value) noexcept : box(value) {}
     constexpr Shape(Sphere value) noexcept : sphere(value) {}
   };

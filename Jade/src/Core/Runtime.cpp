@@ -22,12 +22,12 @@ struct Runtime::Impl {
   std::optional<std::shared_ptr<Scene>> pending;
   Renderer::System renderer;
   Physics::System physics;
-  bool running = false, switching = false, paused = false, axes, physicsDebug, logNow = false;
+  bool running = false, switching = false, paused = false, axes, aabbs, physicsDebug, logNow = false;
   double accumulator = 0, dropped = 0, logElapsed = 0;
   unsigned substeps = 0;
   Impl(Window& w, const EngineConfig& c)
     : window(w), jobs(c.jobs), renderer(w, jobs, c.renderer, c.window.title), physics(jobs, c.physics), axes(c.debug.axes),
-      physicsDebug(c.debug.physics), logNow(c.debug.physics) {}
+      aabbs(c.debug.aabbs), physicsDebug(c.debug.physics), logNow(c.debug.physics) {}
 };
 Runtime::Runtime(Window& window, const EngineConfig& config) : m_Impl(std::make_unique<Impl>(window, config)) {}
 Runtime::~Runtime() {
@@ -114,6 +114,8 @@ void Runtime::setPaused(bool paused) noexcept {
 bool Runtime::paused() const noexcept { return m_Impl->paused; }
 void Runtime::setAxes(bool enabled) noexcept { m_Impl->axes = enabled; }
 bool Runtime::axesEnabled() const noexcept { return m_Impl->axes; }
+void Runtime::setAabbs(bool enabled) noexcept { m_Impl->aabbs = enabled; }
+bool Runtime::aabbsEnabled() const noexcept { return m_Impl->aabbs; }
 void Runtime::setPhysicsDebug(bool enabled) noexcept {
   if (enabled != m_Impl->physicsDebug) {
     m_Impl->physicsDebug = enabled; m_Impl->logNow = enabled; m_Impl->logElapsed = 0;
@@ -128,28 +130,39 @@ void Runtime::render(Renderer::ImageSize size) {
   if (m_Impl->scene) {
     const auto camera = m_Impl->scene->camera();
     const bool geometry = m_Impl->renderer.renderEnabled() || m_Impl->renderer.wireframeEnabled();
-    if ((geometry || m_Impl->axes || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
+    if ((geometry || m_Impl->axes || m_Impl->aabbs || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
       snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry);
+    if (m_Impl->physicsDebug || m_Impl->aabbs)
+      debug = Detail::captureCollisionDebug(*m_Impl->scene, m_Impl->physicsDebug, m_Impl->aabbs,
+        m_Impl->physicsDebug, &m_Impl->physics, m_Impl->physicsDebug);
     if (m_Impl->physicsDebug) {
-      debug = Detail::captureCollisionDebug(*m_Impl->scene, true, true, true, &m_Impl->physics);
       if (m_Impl->logNow || m_Impl->logElapsed >= 1) {
         m_Impl->logNow = false; m_Impl->logElapsed = std::fmod(m_Impl->logElapsed, 1.0);
         const auto& c = m_Impl->physics.config();
         std::size_t dynamic = 0, statics = 0, count = 0; float penetration = 0;
         for (const auto entity : m_Impl->scene->query<Transform, Collider>()) {
+          if (entity.get<Collider>().empty()) continue;
           if (entity.has<RigidBody>() && entity.get<RigidBody>().mass > 0) ++dynamic; else ++statics;
         }
         for (const auto& manifold : debug->contacts) {
           count += manifold.points.size();
           for (const auto& p : manifold.points) penetration = std::max(penetration, -p.separation);
         }
-        debugLog << Log::debug("gravity=({:.2f},{:.2f},{:.2f}) fixed_step={:.6f}s substeps={} paused={} dynamic={} static={} contacts={} max_penetration={:.6f}m dropped={:.6f}s",
-          c.gravity.x, c.gravity.y, c.gravity.z, c.fixedStep, m_Impl->substeps, m_Impl->paused, dynamic, statics, count, penetration, m_Impl->dropped);
+        debugLog << Log::debug("fields={} integration={} fixed_step={:.6f}s substeps={} paused={} dynamic={} static={} contacts={} max_penetration={:.6f}m dropped={:.6f}s",
+          m_Impl->scene->physics().fields.size(),
+          m_Impl->scene->physics().integration == Physics::Integration::VelocityVerlet ? "VelocityVerlet" : "SemiImplicitEuler",
+          c.fixedStep, m_Impl->substeps, m_Impl->paused, dynamic, statics, count, penetration, m_Impl->dropped);
         for (const auto entity : m_Impl->scene->query<Transform, Collider, RigidBody>()) {
+          if (entity.get<Collider>().empty()) continue;
           const auto& b = entity.get<RigidBody>();
           debugLog << Log::debug("entity={} mass={} velocity=({:.4f},{:.4f},{:.4f}) angular_velocity=({:.4f},{:.4f},{:.4f})",
             entity.id(), b.mass, b.velocity.x, b.velocity.y, b.velocity.z, b.angularVelocity.x, b.angularVelocity.y, b.angularVelocity.z);
         }
+        for (const auto& f : m_Impl->physics.forceSnapshot(*m_Impl->scene))
+          debugLog << Log::debug("entity={} field_force=({:.4f},{:.4f},{:.4f}) contact_force=({:.4f},{:.4f},{:.4f}) total_force=({:.4f},{:.4f},{:.4f}) solved={}",
+            f.entity.id(), f.fieldForce.x, f.fieldForce.y, f.fieldForce.z,
+            f.contactForce.x, f.contactForce.y, f.contactForce.z,
+            f.totalForce.x, f.totalForce.y, f.totalForce.z, f.solved);
       }
       if (Log::Enabled(Log::Level::Trace)) for (const auto& m : debug->contacts) for (const auto& p : m.points)
         debugLog << Log::trace("contact a={} b={} point=({:.4f},{:.4f},{:.4f}) normal=({:.3f},{:.3f},{:.3f}) penetration={:.6f} impulse={:.6f}",

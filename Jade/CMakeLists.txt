@@ -1,4 +1,13 @@
 add_library(Jade STATIC
+  include/Jade/Physics/Field/ForceField.hpp
+  include/Jade/Physics/Field/GravityField.hpp
+  include/Jade/Physics/Environment.hpp
+  src/Physics/Field/GravityField.cpp
+  src/internal/Physics/Math.hpp
+  src/internal/Physics/Dynamics/Body.hpp
+  src/internal/Physics/Dynamics/Body.cpp
+  src/internal/Physics/Solver/ContactSolver.hpp
+  src/internal/Physics/Solver/ContactSolver.cpp
   include/Jade/Core/JobSystem.hpp
   include/Jade/Core/TaskGraph.hpp
   src/Core/JobSystem.cpp

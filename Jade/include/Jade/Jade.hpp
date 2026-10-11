@@ -8,6 +8,7 @@
 #include <Jade/Core/TaskGraph.hpp>
 #include <Jade/Physics/RigidBody.hpp>
 #include <Jade/Physics/System.hpp>
+#include <Jade/Physics/Environment.hpp>
 #include <Jade/Renderer/System.hpp>
 #include <Jade/Assets/AssetHandle.hpp>
 #include <Jade/Assets/Assets.hpp>

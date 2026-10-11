@@ -256,6 +256,7 @@ std::optional<Contact> contact(const Scene& scene, Entity a, Entity b)
     throw std::invalid_argument("Collision queries require live entities in the supplied Scene.");
   if (a == b || !a.has<Collider>() || !b.has<Collider>() || !a.has<Transform>() || !b.has<Transform>())
     return std::nullopt;
+  if (a.get<Collider>().empty() || b.get<Collider>().empty()) return std::nullopt;
   const bool reversed = a.id() > b.id();
   if (reversed)
     std::swap(a, b);

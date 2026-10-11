@@ -247,6 +247,29 @@ TEST(RayGeometry, DegenerateTrianglesAndInvalidBindings)
   EXPECT_TRUE(f.snapshot().instances.empty());
 }
 
+TEST(RayGeometry, DescriptorGeometryCanBindClearAndRejectExpiredMeshes)
+{
+  Fixture f;
+  const auto object = f.scene.create<Archetype<Transform, Geometry, Material>>();
+  object.get<Transform>().scale = {};
+  object.get<Material>().roughness = -1;
+  EXPECT_TRUE(f.snapshot().instances.empty());
+  object.get<Geometry>().mesh = f.assets.add(MeshData::cube());
+  EXPECT_THROW(f.snapshot(), std::invalid_argument);
+  object.get<Transform>().scale = {1, 1, 1};
+  object.get<Material>() = {};
+  EXPECT_EQ(f.snapshot().instances.size(), 1u);
+  object.get<Geometry>().mesh = {};
+  EXPECT_TRUE(f.snapshot().instances.empty());
+  {
+    Assets temporary;
+    object.get<Geometry>().mesh = temporary.add(MeshData::cube());
+  }
+  EXPECT_FALSE(object.get<Geometry>().mesh.empty());
+  EXPECT_FALSE(object.get<Geometry>().mesh.valid());
+  EXPECT_THROW(f.snapshot(), std::invalid_argument);
+}
+
 TEST(RayCamera, RaysFollowProjectionAspectAndPrimaryClipPlanes)
 {
   CameraFrame camera;

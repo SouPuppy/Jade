@@ -9,6 +9,7 @@ namespace Jade {
 struct DebugConfig {
   bool shortcuts = false;
   bool axes = false;
+  bool aabbs = false;
   bool physics = false;
 };
 struct EngineConfig {

@@ -164,6 +164,12 @@ TEST(RenderMode, DisabledRenderingStartsNoIntegratorAndResumingStartsFreshSample
   auto scene = MakeTestScene(app);
   auto object = scene->create<Archetype<Transform, Geometry, Material>>();
   object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+  // Await sampling while Run owns the coordinator; eight frames alone do not
+  // guarantee worker completion on a busy machine.
+  app.on<FrameUpdate>([&](const auto& frame) {
+    if (frame.frame == 3 && renderer.renderEnabled())
+      ASSERT_TRUE(waitUntil([&] { return renderer.progress().samplesPerPixel == 1; }));
+  });
   app.Run({8});
   EXPECT_EQ(calls, 0);
   tap(GLFW_KEY_I);

@@ -75,7 +75,7 @@ Entity camera(Scene& scene)
 TEST(Collider, ShapeValuesCopyAndAssignWithoutChangingEntityAPI)
 {
   static_assert(std::is_trivially_copyable_v<Collider>);
-  static_assert(!std::is_default_constructible_v<Collider>);
+  static_assert(std::is_nothrow_default_constructible_v<Collider>);
   Scene scene;
   const auto a = add(scene, Box{{1, 2, 1}}), b = add(scene, Sphere{1}, {1.5f, 0, 0});
   ASSERT_TRUE(Physics::contact(scene, a, b));
@@ -84,6 +84,39 @@ TEST(Collider, ShapeValuesCopyAndAssignWithoutChangingEntityAPI)
   EXPECT_FALSE(Physics::contact(scene, a, b));
   a.get<Collider>() = copy;
   EXPECT_TRUE(Physics::contact(scene, a, b));
+}
+
+TEST(Collider, EmptyShapesSkipQueriesAndDebugBeforeTransformValidation)
+{
+  constexpr Collider empty;
+  static_assert(empty.empty());
+  Scene scene;
+  const auto a = scene.create<Archetype<Transform, Collider>>();
+  const auto b = scene.create<Archetype<Transform, Collider>>();
+  a.get<Transform>().scale = {};
+  b.get<Transform>().rotation = {0, 0, 0, 0};
+  EXPECT_FALSE(Physics::contact(scene, a, b));
+  EXPECT_TRUE(Physics::detect(scene).empty());
+  EXPECT_TRUE(Physics::manifolds(scene).empty());
+  auto debug = Detail::captureCollisionDebug(scene, true, true, true);
+  EXPECT_TRUE(debug.shapes.empty());
+  EXPECT_TRUE(debug.aabbs.empty());
+  EXPECT_TRUE(debug.contacts.empty());
+  a.get<Transform>() = {}; b.get<Transform>() = {};
+  a.get<Collider>() = Collider{Box{}};
+  b.get<Collider>() = Collider{Sphere{0.5f}};
+  EXPECT_TRUE(Physics::contact(scene, a, b));
+  EXPECT_EQ(Physics::detect(scene).size(), 1u);
+  const auto shape = a.get<Collider>();
+  a.get<Collider>() = {};
+  const auto emptyCopy = a.get<Collider>();
+  EXPECT_TRUE(emptyCopy.empty());
+  EXPECT_FALSE(shape.empty());
+  EXPECT_TRUE(Physics::detect(scene).empty());
+  a.get<Collider>() = shape;
+  EXPECT_TRUE(Physics::contact(scene, a, b));
+  b.get<Collider>() = emptyCopy;
+  EXPECT_FALSE(Physics::contact(scene, a, b));
 }
 
 TEST(Collision, SpheresSeparateTouchOverlapContainAndShareCenters)
@@ -404,7 +437,7 @@ TEST(CollisionDebug, ShapeAndAabbOverlaysProduceIndependentColorsOverImageAndWir
       int colored = 0, meshEdges = 0;
       for (std::size_t i = 0; i < pixels.size(); i += 4) {
         if (aabb ? (pixels[i] < 10 && pixels[i + 1] > 240 && pixels[i + 2] > 240)
-                 : (pixels[i] > 240 && pixels[i + 1] > 150 && pixels[i + 2] < 10))
+                 : (pixels[i] > 240 && pixels[i + 1] > 110 && pixels[i + 1] < 145 && pixels[i + 2] < 10))
           ++colored;
         if (pixels[i] > 195 && pixels[i] < 215 && pixels[i + 1] > 205 && pixels[i + 1] < 230 &&
             pixels[i + 2] > 220 && pixels[i + 2] < 240)
@@ -443,7 +476,7 @@ TEST(CollisionDebug, NearlyParallelBoxesDrawPersistentSolverAnchorsAndImpulses)
   Scene scene;
   const auto a = add(scene, Box{}, {-1, 0, 0}), b = add(scene, Box{});
   a.add<RigidBody>(); b.add<RigidBody>();
-  Physics::Config config; config.gravity = {};
+  Physics::Config config; scene.physics().fields.clear();
   Physics::System simulation(config);
   simulation.step(scene, 1.0f / 120);
   b.get<RigidBody>().angularVelocity = {0.0004f, 0.0006f, 0.0002f};
@@ -508,7 +541,7 @@ TEST(CollisionDebug, RecordedMidEdgeArtifactDoesNotReturnAfterResetOrMicronEdits
   a.get<Transform>().rotation = {1, -0.00000617850765f, -0.00000348690537f, -0.000050568f};
   b.get<Transform>().rotation = {1, -0.000175368259f, -0.000144732257f, 0.0000656225675f};
   a.add<RigidBody>(); b.add<RigidBody>();
-  Physics::Config config; config.gravity = {};
+  Physics::Config config; scene.physics().fields.clear();
   Physics::System simulation(config);
   for (int variant = 0; variant < 5; ++variant) {
     simulation.reset();
@@ -552,11 +585,36 @@ TEST(CollisionDebug, ContactPointsAndNormalsHaveDistinctRedAndGreenPixels)
   for (std::size_t i = 0; i < pixels.size(); i += 4) {
     if (pixels[i] > 240 && pixels[i+1] < 10 && pixels[i+2] < 10) ++red;
     if (pixels[i] < 10 && pixels[i+1] > 240 && pixels[i+2] < 10) ++green;
-    if (pixels[i] > 240 && pixels[i+1] > 150 && pixels[i+2] < 10) ++yellow;
+    if (pixels[i] > 240 && pixels[i+1] > 110 && pixels[i+1] < 145 && pixels[i+2] < 10) ++yellow;
     if (pixels[i] < 10 && pixels[i+1] > 240 && pixels[i+2] > 240) ++cyan;
   }
   EXPECT_GT(red, 0); EXPECT_GT(green, 3); EXPECT_GT(yellow, 50); EXPECT_GT(cyan, 50);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST(CollisionDebug, FieldAndTotalForceArrowsHaveDistinctBlueAndYellowPixels)
+{
+  WindowConfig config; config.visible = false; config.width = config.height = 256;
+  Window window(config);
+  Detail::OpenGLDevice device(window, false);
+  Detail::OpenGLDisplay display(device);
+  Detail::DebugDraw draw(device);
+  Scene scene; camera(scene);
+  const auto e = add(scene, Sphere{0.1f}); e.add<RigidBody>();
+  scene.physics().fields = {std::make_shared<const Physics::UniformGravity>(Vec3{1, 0, 0})};
+  Physics::System simulation; simulation.step(scene, 0.01f);
+  const auto debug = Detail::captureCollisionDebug(scene, false, false, false, &simulation, true);
+  ASSERT_EQ(debug.fieldForces.size(), 6u); ASSERT_EQ(debug.totalForces.size(), 6u);
+  const auto snapshot = Renderer::SceneSnapshot::capture(scene, Assets{});
+  display.begin({256, 256}); draw.colliders(debug, *snapshot.camera, {256, 256});
+  std::vector<unsigned char> pixels(256 * 256 * 4);
+  glReadBuffer(GL_BACK); glReadPixels(0, 0, 256, 256, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+  int blue = 0, yellow = 0;
+  for (std::size_t i = 0; i < pixels.size(); i += 4) {
+    if (pixels[i] < 10 && pixels[i + 1] > 50 && pixels[i + 1] < 80 && pixels[i + 2] > 240) ++blue;
+    if (pixels[i] > 240 && pixels[i + 1] > 240 && pixels[i + 2] < 10) ++yellow;
+  }
+  EXPECT_GT(blue, 3); EXPECT_GT(yellow, 3); EXPECT_EQ(glGetError(), GL_NO_ERROR);
 }
 
 TEST(CollisionDebug, LogsSimulationAndBodyValuesWithoutPerFrameSummarySpam)
@@ -571,13 +629,16 @@ TEST(CollisionDebug, LogsSimulationAndBodyValuesWithoutPerFrameSummarySpam)
   Application app(config);
   auto scene = std::make_shared<Scene>(); camera(*scene);
   add(*scene, Sphere{1}).add<RigidBody>();
+  const auto inactive = scene->create<Archetype<Transform, Collider, RigidBody>>();
+  inactive.get<Transform>().scale = {};
+  inactive.get<RigidBody>().mass = -1;
   app.runtime().setScene(scene);
   app.Run({4});
   int summaries = 0, bodies = 0;
   for (const auto& r : records) if (r.category == "Physics/Debug") {
     if (r.message.find("fixed_step=") != std::string::npos) {
       ++summaries;
-      EXPECT_NE(r.message.find("gravity="), std::string::npos);
+      EXPECT_NE(r.message.find("fields="), std::string::npos);
       EXPECT_NE(r.message.find("dynamic=1"), std::string::npos);
       EXPECT_NE(r.message.find("contacts="), std::string::npos);
     }

@@ -23,11 +23,11 @@ struct Contact {
 // derived from current components and ancestors on every call. Touching counts.
 // Box allows orthogonal nonuniform world scale; Sphere requires uniform scale.
 // Shear, invalid dimensions/transforms and unrepresentable results throw invalid_argument.
-// Missing Collider/Transform returns no contact. Foreign/dead entities throw.
+// Missing Collider/Transform or an empty Collider returns no contact. Foreign/dead entities throw.
 std::optional<Contact> contact(const Scene& scene, Entity a, Entity b);
 
 // One contact per pair, ordered by ascending Entity IDs. Entities without a
-// Transform are skipped. Does not mutate components or apply collision response.
+// Transform or with empty Colliders are skipped. Does not mutate components or apply collision response.
 std::vector<Contact> detect(const Scene& scene);
 
 } // namespace Jade::Physics

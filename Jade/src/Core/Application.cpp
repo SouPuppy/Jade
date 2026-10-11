@@ -148,8 +148,9 @@ void Application::Run(const RunOptions &options)
         if (m_Impl->debug && key->action == KeyAction::Pressed && key->event.modifiers == Modifiers::None &&
             flow == EventFlow::Continue && !m_Impl->stopRequested && !m_Impl->window.ShouldClose()) {
           if (key->event.key == Key::F3) {
-            runtime().setAxes(!runtime().axesEnabled());
-            applicationLog << Log::info("Axis Gizmo: {}", runtime().axesEnabled() ? "on" : "off");
+            const bool enabled = !(runtime().axesEnabled() || runtime().aabbsEnabled());
+            runtime().setAxes(enabled); runtime().setAabbs(enabled);
+            applicationLog << Log::info("Axes/AABB: {}", enabled ? "on" : "off");
           } else if (key->event.key == Key::F4) {
             runtime().setPhysicsDebug(!runtime().physicsDebugEnabled());
           } else if (key->event.key == Key::O && active) {

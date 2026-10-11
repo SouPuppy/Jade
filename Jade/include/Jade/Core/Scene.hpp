@@ -23,6 +23,8 @@
 
 namespace Jade {
 
+namespace Physics { struct Environment; }
+
 template<class... T>
 class SceneView final {
 public:
@@ -72,6 +74,8 @@ public:
   ~Scene();
   Scene(const Scene&) = delete;
   Scene& operator=(const Scene&) = delete;
+  Physics::Environment& physics() noexcept;
+  const Physics::Environment& physics() const noexcept;
 
   // Installs static void TModule::attach(Scene&) once per type and Scene.
   // Failed installations cancel new subscriptions and may be retried.
@@ -84,14 +88,15 @@ public:
   }
 
   Entity create();
-  template<class T, class... Args> T create(Args&&... args)
+  // Create exactly the descriptor's components. No descriptor instance is constructed.
+  template<class T> Entity create()
   {
-    static_assert(std::is_base_of_v<Entity, T>, "Typed entities derive from Jade::Archetype.");
+    static_assert(Detail::ComponentsOf<T>::descriptor,
+      "Scene::create<T> requires a Jade::Archetype or a type with using Components = Archetype<...>.");
     const auto entity = create();
     try {
-      T result(entity, std::forward<Args>(args)...);
-      Detail::CheckArchetype(entity, typename T::JadeArchetypeComponents{});
-      return result;
+      Detail::DefaultComponents(entity, typename Detail::ComponentsOf<T>::type{});
+      return entity;
     } catch (...) {
       if (owns(entity)) destroy(entity);
       throw;

@@ -8,10 +8,12 @@
 namespace {
 using namespace Jade;
 using Physical = Archetype<Transform, Collider, RigidBody>;
-class Block : public Physical {
-public:
-  explicit Block(Entity e) : Physical(e) { add<Collider>(Box{}); }
-};
+struct Block { using Components = Physical; };
+Entity block(Scene& scene) {
+  const auto e = scene.create<Block>();
+  e.get<Collider>() = Collider{Box{}};
+  return e;
+}
 Entity floor(Scene& scene) {
   const auto e = scene.create();
   e.add<Transform>().position = {0, -0.5f, 0};
@@ -27,7 +29,7 @@ EngineConfig hidden() {
 }
 TEST(Physics, GravityAndMassDependentLinearAndAngularImpulses) {
   Scene scene;
-  const auto a = scene.create<Block>(), b = scene.create<Block>();
+  const auto a = block(scene), b = block(scene);
   b.get<Transform>().position = {10, 0, 0};
   b.get<RigidBody>().mass = 2;
   Physics::System system;
@@ -46,7 +48,7 @@ TEST(Physics, GravityAndMassDependentLinearAndAngularImpulses) {
 }
 TEST(Physics, BoxFaceManifoldHasFourContactsAndSpherePairsHaveOne) {
   Scene scene;
-  const auto a = scene.create<Block>(), b = scene.create<Block>();
+  const auto a = block(scene), b = block(scene);
   b.get<Transform>().position.y = 0.9f;
   auto contacts = Physics::manifolds(scene);
   ASSERT_EQ(contacts.size(), 1u);
@@ -67,7 +69,7 @@ TEST(Physics, PyramidRestsForTwentySecondsWithGravityStillEnabled) {
   for (int layer = 0; layer < 3; ++layer) {
     const int width = 5 - 2 * layer;
     for (int i = 0; i < width; ++i) {
-      const auto e = scene.create<Block>();
+      const auto e = block(scene);
       e.get<Transform>().position = {static_cast<float>(i - width / 2), 0.6f + 1.1f * layer, 0};
       boxes.push_back(e);
     }
@@ -127,10 +129,10 @@ TEST(Physics, PyramidRestsForTwentySecondsWithGravityStillEnabled) {
 TEST(Physics, SphereSettlesAndZeroMassRemainsStatic) {
   Scene scene;
   floor(scene);
-  const auto ball = scene.create<Block>();
+  const auto ball = block(scene);
   ball.get<Collider>() = Collider{Sphere{0.5f}};
   ball.get<Transform>().position.y = 2;
-  const auto fixed = scene.create<Block>();
+  const auto fixed = block(scene);
   fixed.get<Transform>().position = {3, 2, 0}; fixed.get<RigidBody>().mass = 0;
   Physics::System system;
   for (int i = 0; i < 600; ++i) system.step(scene, 1.0f / 120);
@@ -141,7 +143,7 @@ TEST(Physics, SphereSettlesAndZeroMassRemainsStatic) {
 TEST(Physics, ValidationIsTransactionalAndCacheDoesNotSurviveRecycling) {
   Scene scene;
   floor(scene);
-  const auto a = scene.create<Block>(), b = scene.create<Block>();
+  const auto a = block(scene), b = block(scene);
   a.get<Transform>().position = {0, 3, 0}; b.get<Transform>().position = {3, 3, 0};
   Physics::System system;
   b.get<RigidBody>().mass = -1;
@@ -157,16 +159,88 @@ TEST(Physics, ValidationIsTransactionalAndCacheDoesNotSurviveRecycling) {
   a.get<RigidBody>().velocity = {};
   system.step(scene, 0.01f);
   scene.destroy(a); scene.destroy(b);
-  const auto fresh = scene.create<Block>(); fresh.get<Transform>().position.y = 5;
+  const auto fresh = block(scene); fresh.get<Transform>().position.y = 5;
   system.step(scene, 0.01f);
   EXPECT_NEAR(fresh.get<RigidBody>().velocity.y, -0.0981f, 1e-6);
   fresh.remove<Collider>();
   EXPECT_THROW(system.step(scene, 0.01f), std::invalid_argument);
 }
 
+TEST(Physics, EmptyColliderSuspendsBodiesAndClearsContactsInSerialAndJobs) {
+  for (const unsigned workers : {0u, 1u, 3u}) {
+    SCOPED_TRACE(workers);
+    std::unique_ptr<JobSystem> jobs;
+    if (workers) jobs = std::make_unique<JobSystem>(JobSystemConfig{workers});
+    auto system = jobs ? std::make_unique<Physics::System>(*jobs) : std::make_unique<Physics::System>();
+    Scene scene;
+    const auto ground = floor(scene);
+    const auto e = scene.create<Physical>();
+    e.get<Transform>().position.y = 0.5f;
+    e.get<RigidBody>().velocity = {0, -1, 0};
+    EXPECT_NO_THROW(system->step(scene, 1.0f / 120));
+    EXPECT_FLOAT_EQ(e.get<Transform>().position.y, 0.5f);
+    EXPECT_EQ(e.get<RigidBody>().velocity, (Vec3{0, -1, 0}));
+    EXPECT_EQ(system->statistics().dynamicBodies, 0u);
+    EXPECT_EQ(system->statistics().staticBodies, 1u);
+    EXPECT_THROW(system->applyImpulse(scene, e, {1, 0, 0}, {}), std::invalid_argument);
+    EXPECT_EQ(e.get<RigidBody>().velocity, (Vec3{0, -1, 0}));
+    EXPECT_EQ(e.get<RigidBody>().angularVelocity, (Vec3{}));
+    e.get<Collider>() = Collider{Box{}};
+    system->step(scene, 1.0f / 120);
+    EXPECT_EQ(system->statistics().dynamicBodies, 1u);
+    ASSERT_FALSE(system->contacts().empty());
+    const auto pose = e.get<Transform>();
+    const auto velocity = e.get<RigidBody>().velocity;
+    const auto angular = e.get<RigidBody>().angularVelocity;
+    e.get<Collider>() = {};
+    EXPECT_TRUE(system->contactSnapshot(scene).empty());
+    EXPECT_FALSE(Physics::contact(scene, e, ground));
+    system->step(scene, 1.0f / 120);
+    EXPECT_TRUE(system->contacts().empty());
+    EXPECT_EQ(system->statistics().dynamicBodies, 0u);
+    EXPECT_EQ(e.get<Transform>().position, pose.position);
+    EXPECT_EQ(e.get<Transform>().rotation, pose.rotation);
+    EXPECT_EQ(e.get<RigidBody>().velocity, velocity);
+    EXPECT_EQ(e.get<RigidBody>().angularVelocity, angular);
+    e.get<Collider>() = Collider{Sphere{0.5f}};
+    e.get<Transform>().position.y = 3;
+    e.get<RigidBody>().velocity = {};
+    system->step(scene, 1.0f / 120);
+    EXPECT_EQ(system->statistics().dynamicBodies, 1u);
+    EXPECT_LT(e.get<Transform>().position.y, 3);
+    EXPECT_LT(e.get<RigidBody>().velocity.y, 0);
+    EXPECT_TRUE(system->contacts().empty());
+  }
+}
+
+TEST(Physics, EmptyColliderSkipsUnusedDataAndZeroBodyJobGraphs) {
+  for (const unsigned workers : {0u, 1u, 3u}) {
+    SCOPED_TRACE(workers);
+    std::unique_ptr<JobSystem> jobs;
+    if (workers) jobs = std::make_unique<JobSystem>(JobSystemConfig{workers});
+    auto system = jobs ? std::make_unique<Physics::System>(*jobs) : std::make_unique<Physics::System>();
+    Scene scene;
+    const auto e = scene.create<Archetype<Collider, RigidBody>>();
+    e.get<RigidBody>().mass = -1;
+    EXPECT_NO_THROW(system->step(scene, 0.01f));
+    e.add<Transform>().scale = {};
+    EXPECT_NO_THROW(system->step(scene, 0.01f));
+    EXPECT_EQ(system->statistics().dynamicBodies, 0u);
+    EXPECT_EQ(system->statistics().staticBodies, 0u);
+    e.get<Collider>() = Collider{Box{}};
+    EXPECT_THROW(system->step(scene, 0.01f), std::invalid_argument);
+    e.get<RigidBody>().mass = 1;
+    EXPECT_THROW(system->step(scene, 0.01f), std::invalid_argument);
+    EXPECT_EQ(e.get<RigidBody>().velocity, (Vec3{}));
+    e.get<Transform>().scale = {1, 1, 1};
+    EXPECT_NO_THROW(system->step(scene, 0.01f));
+    EXPECT_EQ(system->statistics().dynamicBodies, 1u);
+  }
+}
+
 TEST(Physics, RestitutionAndFrictionChangeContactResponse) {
   Scene scene; floor(scene);
-  const auto ball = scene.create<Block>();
+  const auto ball = block(scene);
   ball.get<Collider>() = Collider{Sphere{0.5f}};
   ball.get<Transform>().position.y = 1;
   ball.get<RigidBody>().velocity.y = -2;
@@ -179,7 +253,7 @@ TEST(Physics, RestitutionAndFrictionChangeContactResponse) {
   }
   EXPECT_GT(upward, 1);
   const auto slide = [](float friction) {
-    Scene s; floor(s); const auto box = s.create<Block>();
+    Scene s; floor(s); const auto box = block(s);
     box.get<Transform>().position.y = 0.5f;
     box.get<RigidBody>().velocity.x = 2;
     box.get<RigidBody>().friction = friction;
@@ -194,7 +268,7 @@ TEST(Runtime, FixedClockIsFrameRateIndependentAndDropsExcessDebt) {
   const auto simulate = [](float dt, int frames) {
     Application app(hidden());
     const auto scene = std::make_shared<Scene>();
-    const auto e = scene->create<Block>();
+    const auto e = block(*scene);
     e.get<Transform>().position.y = 10;
     app.runtime().setScene(scene);
     for (int i = 0; i < frames; ++i) app.runtime().tick(dt);
@@ -205,7 +279,7 @@ TEST(Runtime, FixedClockIsFrameRateIndependentAndDropsExcessDebt) {
   const auto a = simulate(1.0f/30, 30), b = simulate(1.0f/60, 60);
   EXPECT_EQ(a, b);
   Application app(hidden());
-  auto scene = std::make_shared<Scene>(); scene->create<Block>(); app.runtime().setScene(scene);
+  auto scene = std::make_shared<Scene>(); block(*scene); app.runtime().setScene(scene);
   app.runtime().tick(1);
   EXPECT_EQ(app.runtime().substeps(), 8u);
   EXPECT_GT(app.runtime().droppedTime(), 0.9);
@@ -216,7 +290,7 @@ TEST(Runtime, FixedClockIsFrameRateIndependentAndDropsExcessDebt) {
 
 TEST(Runtime, PauseAndRunBoundariesDoNotAccumulateOldTime) {
   Application app(hidden());
-  auto scene = std::make_shared<Scene>(); const auto e = scene->create<Block>();
+  auto scene = std::make_shared<Scene>(); const auto e = block(*scene);
   e.get<Transform>().position.y = 10; app.runtime().setScene(scene);
   app.runtime().tick(1.0f/120);
   const auto position = e.get<Transform>().position;
@@ -234,7 +308,7 @@ TEST(Runtime, PauseAndRunBoundariesDoNotAccumulateOldTime) {
 TEST(Runtime, PausedDebugPreservesSolvedContactsAndRefreshesSceneEdits) {
   Application app(hidden());
   auto scene = std::make_shared<Scene>(); floor(*scene);
-  const auto e = scene->create<Block>(); e.get<Transform>().position.y = 0.5f;
+  const auto e = block(*scene); e.get<Transform>().position.y = 0.5f;
   app.runtime().setScene(scene); app.runtime().tick(1.0f / 120);
   auto& physics = app.runtime().physics();
   ASSERT_EQ(physics.contacts().size(), 1u);

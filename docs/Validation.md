@@ -1,5 +1,17 @@
 # Windows x64 validation
 
+## Scene force fields, three-body orbit and force overlays (2026-10-11)
+
+Debug and Release each passed 235/235 GoogleTest tests across 49 suites. Engine, Demo and tests built successfully without compiler warnings in isolated build/fields-debug and build/fields-release configurations. Eight public headers (ForceField, GravityField, Environment, System, Scene, EngineConfig, Runtime and Jade.hpp) passed standalone MSVC C++20 /W4 /WX compilation. The initial primary Debug build encountered an occupied renderer object; the isolated Debug build uses /Z7 embedded compiler debug information after an MSVC shared-PDB write failure. Repository presets are unchanged.
+
+Thirteen Fields tests verify mass-dependent force and mass-independent acceleration, scene-local Earth/Moon/empty environments, softened point gravity and composition, source validation, self exclusion and recycled identities, transactional failures at either Verlet stage, average applied force, support/friction/warm-start force accounting, stale snapshot invalidation, second-order orbital convergence and serial/worker equivalence. The three-body fixture advances 100 outer orbital periods at 1/120 second using masses 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Maximum relative energy error is approximately 0.000031 (0.0031%); normalized momentum drift is approximately 0.000006, below limits of 0.001 and 0.0001. The Moon remains within its bounded orbit. Existing 20-second stack and persistent-anchor regressions also pass.
+
+OpenGL back-buffer readback verifies distinct blue field-force and yellow total-force arrow pixels alongside updated orange Collider outlines, red contacts, green normals and cyan AABBs. Force geometry tests verify direction/length and suppression of balanced support force. Real input adapter tests cover grouped F3 axes/AABB controls, independent F4 physics controls, opt-in behavior, modifiers and event consumption. Existing render-revision tests pass with overlays excluded from ray snapshots.
+
+All four actual Release Demo scenes completed 40-frame launches with normal frame-limit shutdown and empty stderr. Scene 2 now uses independent dynamic roots and BodyGravity/VelocityVerlet, replacing scripted hierarchy motion. Scene 3 supplies Earth/Moon selection and a falling ball. The existing destruction wall and glass projectile remain available as Scene 4. These launches establish successful execution, not a realtime-performance guarantee.
+
+Artifacts are ignored under .temp/fields-debug-tests.xml/.log, .temp/fields-release-tests.xml/.log, .temp/fields-*-build.log, .temp/fields-*-configure.log and .temp/fields-demo-1 through fields-demo-4 .log/.err. Run the validated orbit with `./build/fields-release/bin/JadeDemo.exe --scene 2`; F3 controls axes/AABBs and F4 shows physics/forces. No commit was created.
+
 ## Scene2 resized to 10x10 (2026-10-10)
 
 Scene2 now contains 100 dynamic cubes in a ten-column, ten-row wall. The camera, 20x20 floor and emissive panel were resized to frame it. The projectile has radius one, mass 20 and initial/interactive launch speed 30; K spawns it 2.5 units in front of the camera. Lazy scene creation, automatic impact, P pause/resume, R reset and 1/2/3 selection remain available.

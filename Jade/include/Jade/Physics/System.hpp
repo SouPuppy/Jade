@@ -10,7 +10,6 @@ namespace Jade { class JobSystem; }
 
 namespace Jade::Physics {
 struct Config {
-  Vec3 gravity{0, -9.81f, 0};
   double fixedStep = 1.0 / 120.0;
   unsigned maxSubsteps = 8;
   unsigned velocityIterations = 20;
@@ -35,7 +34,14 @@ struct Statistics {
   float maximumPenetration = 0;
   std::uint64_t steps = 0;
 };
-// Read-only geometric queries, including static/static pairs. No GPU dependency.
+// Average forces over the last successful simulation step. Contact force is
+// the net applied contact impulse / dt, excluding positional corrections.
+struct BodyForceSnapshot {
+  Entity entity;
+  Vec3 position, fieldForce, contactForce, totalForce;
+  bool solved = false;
+};
+// Read-only geometric queries, including static/static pairs, skipping empty Colliders. No GPU dependency.
 std::vector<Manifold> manifolds(const Scene& scene, float distance = 0);
 
 class System final {
@@ -47,6 +53,7 @@ public:
   System& operator=(const System&) = delete;
   const Config& config() const noexcept;
   void step(Scene& scene, float dt);
+  // Requires a live Transform/RigidBody and a nonempty Collider; otherwise throws invalid_argument.
   void applyImpulse(Scene& scene, Entity entity, Vec3 impulse, Vec3 worldPoint);
   void reset() noexcept;
   const Statistics& statistics() const noexcept;
@@ -54,6 +61,8 @@ public:
   // Current solver anchors and impulses, or fresh geometry after Scene edits.
   // Includes static/static pairs for inspection without stepping the simulation.
   std::vector<Manifold> contactSnapshot(const Scene& scene) const;
+  // Stale states return fresh field force with solved=false (no total force).
+  std::vector<BodyForceSnapshot> forceSnapshot(const Scene& scene) const;
 private:
   struct Impl;
   std::unique_ptr<Impl> m_Impl;

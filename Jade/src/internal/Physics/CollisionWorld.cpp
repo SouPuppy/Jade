@@ -15,6 +15,8 @@ void positive(double value)
 
 WorldCollider resolveCollider(Entity entity, const Matrix4& world)
 {
+  const auto& collider = entity.get<Collider>();
+  const auto kind = ColliderAccess::kind(collider);
   constexpr double relativeTolerance = 1e-5;
   WorldCollider result;
   result.entity = entity;
@@ -38,8 +40,7 @@ WorldCollider resolveCollider(Entity entity, const Matrix4& world)
                                 result.axes[0] * collisionDot(result.axes[0], result.axes[1]));
   result.axes[2] = collisionUnit(collisionCross(result.axes[0], result.axes[1]));
 
-  const auto& collider = entity.get<Collider>();
-  result.kind = ColliderAccess::kind(collider);
+  result.kind = kind;
   CollisionVector extent;
   if (result.kind == CollisionKind::Sphere) {
     const auto radius = ColliderAccess::sphere(collider).radius;
@@ -75,8 +76,10 @@ std::vector<WorldCollider> captureColliders(const Scene& scene)
 {
   SceneTransforms transforms(scene);
   std::vector<WorldCollider> result;
-  for (const auto entity : scene.query<Collider, Transform>())
+  for (const auto entity : scene.query<Collider, Transform>()) {
+    if (entity.get<Collider>().empty()) continue;
     result.push_back(resolveCollider(entity, transforms.Resolve(entity).model));
+  }
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.entity.id() < b.entity.id(); });
   return result;
 }

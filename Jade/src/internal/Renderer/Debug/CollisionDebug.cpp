@@ -29,10 +29,10 @@ void boxLines(CollisionVector center, const std::array<CollisionVector, 3>& axes
 } // namespace
 
 CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts,
-                                         const Physics::System* simulation)
+                                         const Physics::System* simulation, bool forces)
 {
   CollisionDebugLines result;
-  if (!shapes && !aabbs && !contacts)
+  if (!shapes && !aabbs && !contacts && !forces)
     return result;
   const std::array<CollisionVector, 3> basis{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
   for (const auto& collider : captureColliders(scene)) {
@@ -76,6 +76,21 @@ CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool 
       const auto seed = std::abs(n.x) < 0.7f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
       const auto side = collisionUnit(collisionCross({n.x,n.y,n.z}, {seed.x,seed.y,seed.z})).vector() * 0.04f;
       result.normals.insert(result.normals.end(), {center, end, end, end - n * 0.07f + side, end, end - n * 0.07f - side});
+    }
+  }
+  if (forces && simulation) {
+    const auto arrow = [](Vec3 position, Vec3 force, double threshold, float length, std::vector<Vec3>& lines) {
+      const CollisionVector f{force.x, force.y, force.z};
+      if (collisionLength(f) <= threshold) return;
+      const auto n = collisionUnit(f).vector(), end = position + n * length;
+      const CollisionVector seed = std::abs(n.x) < 0.7f ? CollisionVector{1, 0, 0} : CollisionVector{0, 1, 0};
+      const auto side = collisionUnit(collisionCross({n.x, n.y, n.z}, seed)).vector() * 0.06f;
+      lines.insert(lines.end(), {position, end, end, end - n * 0.12f + side, end, end - n * 0.12f - side});
+    };
+    for (const auto& force : simulation->forceSnapshot(scene)) {
+      const double threshold = 1e-4 * std::max(1.0f, std::hypot(force.fieldForce.x, force.fieldForce.y, force.fieldForce.z));
+      arrow(force.position, force.fieldForce, threshold, 0.8f, result.fieldForces);
+      if (force.solved) arrow(force.position, force.totalForce, threshold, 0.6f, result.totalForces);
     }
   }
   return result;

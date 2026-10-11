@@ -21,6 +21,8 @@ std::atomic<std::uint64_t> nextSceneId{1};
 Scene::Impl::Impl() : id(nextSceneId.fetch_add(1)), events(std::format("Scene:{}", id)) {}
 Scene::Scene() : m_Registry(std::make_shared<Detail::Registry>()), m_Impl(std::make_unique<Impl>()) {}
 Scene::~Scene() = default;
+Physics::Environment& Scene::physics() noexcept { return m_Impl->physics; }
+const Physics::Environment& Scene::physics() const noexcept { return m_Impl->physics; }
 
 void Scene::InstallModule(std::type_index type, std::function<void()> attach)
 {

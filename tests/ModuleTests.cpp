@@ -226,6 +226,7 @@ TEST(ApplicationDebug, DebugShortcutsAreOptInAndWireframeAlwaysOperatesOncePerPr
     app.Run({1});
     EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
     EXPECT_EQ(app.runtime().axesEnabled(), debug);
+    EXPECT_EQ(app.runtime().aabbsEnabled(), debug);
     EXPECT_EQ(app.runtime().physicsDebugEnabled(), debug);
     EXPECT_EQ(lens.projection, debug ? Jade::Projection::Orthographic : Jade::Projection::Perspective);
     EXPECT_FLOAT_EQ(lens.fovDegrees, 47);
@@ -237,6 +238,7 @@ TEST(ApplicationDebug, DebugShortcutsAreOptInAndWireframeAlwaysOperatesOncePerPr
     app.Run({1});
     EXPECT_FALSE(app.runtime().renderer().wireframeEnabled());
     EXPECT_FALSE(app.runtime().axesEnabled());
+    EXPECT_FALSE(app.runtime().aabbsEnabled());
     EXPECT_FALSE(app.runtime().physicsDebugEnabled());
     EXPECT_EQ(lens.projection, Jade::Projection::Perspective);
     app.runtime().renderer().setRender(false); app.runtime().renderer().setWireframe(true);
@@ -246,6 +248,7 @@ TEST(ApplicationDebug, DebugShortcutsAreOptInAndWireframeAlwaysOperatesOncePerPr
     EXPECT_EQ(app.runtime().physicsDebugEnabled(), debug);
     EXPECT_TRUE(app.runtime().renderer().wireframeEnabled());
     EXPECT_FALSE(app.runtime().axesEnabled());
+    EXPECT_FALSE(app.runtime().aabbsEnabled());
     if (debug) {
       input.Tap(GLFW_KEY_F);
       app.Run({1});

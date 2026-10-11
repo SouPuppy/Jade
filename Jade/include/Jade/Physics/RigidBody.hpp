@@ -3,7 +3,8 @@
 
 namespace Jade {
 // SI units. Velocities are world-space; angularVelocity is radians/second.
-// Zero mass is static. Dynamic bodies require root Transform and Collider.
+// Zero mass is static. Empty Colliders suspend physics, preserving velocities.
+// Participating dynamic bodies require root Transform and a nonempty Collider.
 struct RigidBody {
   Vec3 velocity;
   Vec3 angularVelocity;

@@ -9,30 +9,47 @@ struct B {};
 struct C {};
 using Object = Jade::Archetype<Jade::Geometry, Jade::Transform, Jade::Material>;
 using Physical = Jade::Archetype<Jade::Transform, Jade::Collider, Jade::RigidBody>;
-class Ball : public Jade::Archetype<Object, Physical> {
-  using Base = Jade::Archetype<Object, Physical>;
-public:
-  explicit Ball(Jade::Entity entity) : Base(entity) { add<Jade::Collider>(Jade::Sphere{0.5f}); }
+struct Ball {
+  using Components = Jade::Archetype<Object, Physical>;
+  Ball() = delete;
 };
-struct Missing : Physical { using Physical::Physical; };
-struct Throws : Jade::Archetype<A> {
-  explicit Throws(Jade::Entity e) : Jade::Archetype<A>(e) { throw std::runtime_error("constructor"); }
+struct NamedAB { using Components = Jade::Archetype<A, B>; };
+struct NamedAgain { using Components = NamedAB; };
+struct Throws {
+  Throws() { throw std::runtime_error("component constructor"); }
 };
-struct Configured : Jade::Archetype<A, B> {
-  Configured(Jade::Entity e, int value, std::unique_ptr<int> payload) : Jade::Archetype<A, B>(e) {
-    get<A>().value = value + *payload;
-    if (value < 0) throw std::runtime_error("configuration");
+struct Tracked {
+  inline static int live = 0;
+  inline static int constructions = 0;
+  Tracked() { ++live; ++constructions; }
+  ~Tracked() { --live; }
+  Tracked(const Tracked&) = delete;
+  Tracked& operator=(const Tracked&) = delete;
+};
+struct RemovesPrevious {
+  inline static Jade::Scene* scene = nullptr;
+  RemovesPrevious() {
+    for (const auto entity : scene->query<Tracked>()) entity.remove<Tracked>();
   }
 };
 }
 static_assert(std::is_same_v<Jade::Archetype<Jade::Archetype<A, B>, B, C>, Jade::Archetype<A, B, C>>);
-TEST(Archetype, ComposesTypedHandlesAndQueriesActualComponents) {
+static_assert(std::is_same_v<Jade::Archetype<NamedAgain, B, C>, Jade::Archetype<A, B, C>>);
+static_assert(std::is_empty_v<Object>);
+static_assert(!std::is_base_of_v<Jade::Entity, Object>);
+static_assert(std::is_same_v<decltype(std::declval<Jade::Scene&>().create<Ball>()), Jade::Entity>);
+TEST(Archetype, DescriptorsCreateEntitiesAndQueriesMatchActualComponents) {
   Jade::Scene scene;
   const auto ball = scene.create<Ball>();
   EXPECT_TRUE(ball.has<Jade::Geometry>());
   EXPECT_TRUE(ball.has<Jade::Transform>());
   EXPECT_TRUE(ball.has<Jade::Collider>());
   EXPECT_TRUE(ball.has<Jade::RigidBody>());
+  EXPECT_TRUE(ball.get<Jade::Geometry>().mesh.empty());
+  EXPECT_TRUE(ball.get<Jade::Collider>().empty());
+  EXPECT_EQ(ball.get<Jade::Transform>().position, (Jade::Vec3{}));
+  EXPECT_EQ(ball.get<Jade::Transform>().scale, (Jade::Vec3{1, 1, 1}));
+  EXPECT_FLOAT_EQ(ball.get<Jade::RigidBody>().mass, 1);
   EXPECT_FALSE(ball.has<Ball>());
   const auto copy = ball;
   EXPECT_EQ(copy, ball);
@@ -44,6 +61,12 @@ TEST(Archetype, ComposesTypedHandlesAndQueriesActualComponents) {
   EXPECT_EQ(std::distance(query.begin(), query.end()), 2);
   manual.remove<Jade::RigidBody>();
   EXPECT_EQ(std::distance(query.begin(), query.end()), 1);
+  manual.add<Jade::Geometry>(); manual.add<Jade::Material>(); manual.add<Jade::RigidBody>();
+  const auto named = scene.query<Ball>();
+  EXPECT_EQ(std::distance(named.begin(), named.end()), 2);
+  ball.get<Jade::Collider>() = Jade::Collider{Jade::Sphere{0.5f}};
+  ball.get<Jade::Collider>() = {};
+  EXPECT_EQ(std::distance(named.begin(), named.end()), 2);
   scene.destroy(ball);
   EXPECT_FALSE(copy);
   const auto identities = scene.query<Jade::Archetype<>>();
@@ -54,21 +77,47 @@ TEST(Archetype, ComposesTypedHandlesAndQueriesActualComponents) {
 }
 TEST(Archetype, FailedCreationLeavesNoPartialEntities) {
   Jade::Scene scene;
-  EXPECT_THROW(scene.create<Missing>(), std::logic_error);
-  EXPECT_THROW(scene.create<Throws>(), std::runtime_error);
-  const auto physical = scene.query<Jade::Transform>();
-  EXPECT_EQ(physical.begin(), physical.end());
+  const auto existing = scene.create<Jade::Archetype<A>>();
+  auto* value = &existing.get<A>();
+  Tracked::constructions = 0;
+  EXPECT_THROW((scene.create<Jade::Archetype<A, Tracked, Throws, B>>()), std::runtime_error);
+  EXPECT_EQ(Tracked::constructions, 1);
+  EXPECT_EQ(Tracked::live, 0);
+  const auto identities = scene.query<Jade::Archetype<>>();
+  EXPECT_EQ(std::distance(identities.begin(), identities.end()), 1);
   const auto values = scene.query<A>();
-  EXPECT_EQ(values.begin(), values.end());
+  EXPECT_EQ(std::distance(values.begin(), values.end()), 1);
+  EXPECT_EQ(&existing.get<A>(), value);
   EXPECT_TRUE(scene.create<Jade::Archetype<A>>().has<A>());
 }
-TEST(Archetype, ForwardsConstructorArgumentsAndRollsBackConfigurationFailures) {
+TEST(Archetype, ExplicitComponentsDeduplicateAndAreConfiguredAfterCreation) {
   Jade::Scene scene;
-  const auto object = scene.create<Configured>(4, std::make_unique<int>(8));
+  Tracked::constructions = 0;
+  using Composite = Jade::Archetype<NamedAgain, Tracked, Jade::Archetype<Tracked, C>, A>;
+  const auto object = scene.create<Composite>();
+  EXPECT_EQ(Tracked::constructions, 1);
+  EXPECT_EQ(Tracked::live, 1);
+  EXPECT_FALSE(object.has<Jade::Transform>());
+  EXPECT_EQ(object.get<A>().value, 7);
+  object.get<A>().value = 12;
   EXPECT_EQ(object.get<A>().value, 12);
-  EXPECT_THROW(scene.create<Configured>(-1, std::make_unique<int>(8)), std::runtime_error);
-  const auto objects = scene.query<A, B>();
+  const auto objects = scene.query<NamedAgain, C>();
   EXPECT_EQ(std::distance(objects.begin(), objects.end()), 1);
+  const auto empty = scene.create<Jade::Archetype<>>();
+  EXPECT_FALSE(empty.has<Jade::Transform>());
+  scene.destroy(object);
+  EXPECT_EQ(Tracked::live, 0);
+}
+TEST(Archetype, ComponentConstructorStructuralEditsCannotPublishAnIncompleteEntity) {
+  Jade::Scene scene;
+  RemovesPrevious::scene = &scene;
+  EXPECT_THROW((scene.create<Jade::Archetype<Tracked, RemovesPrevious>>()), std::logic_error);
+  RemovesPrevious::scene = nullptr;
+  EXPECT_EQ(Tracked::live, 0);
+  const auto all = scene.query<Jade::Archetype<>>();
+  EXPECT_EQ(all.begin(), all.end());
+  const auto value = scene.create<Jade::Archetype<A>>();
+  EXPECT_EQ(value.get<A>().value, 7);
 }
 TEST(Archetype, StructuralChangesKeepStableComponentObjects) {
   Jade::Scene scene;

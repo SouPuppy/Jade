@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Jade/Core/Scene.hpp>
+#include <Jade/Physics/Environment.hpp>
 
 #include "../internal/Events/EventDispatcher.hpp"
 
@@ -13,6 +14,7 @@ struct Scene::Impl {
   };
   std::uint64_t id;
   Entity camera;
+  Physics::Environment physics;
   const Runtime* owner = nullptr;
   std::vector<ModuleEntry> modules;
   Detail::EventDispatcher events;

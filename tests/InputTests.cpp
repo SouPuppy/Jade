@@ -832,6 +832,7 @@ TEST(Application, OPressSwitchesProjectionOnceAndScrollUsesTheActiveMode)
 TEST(Application, AxisGizmoDefaultsOffAndF3TogglesOncePerUnconsumedPress)
 {
   EXPECT_FALSE(Jade::EngineConfig{}.debug.axes);
+  EXPECT_FALSE(Jade::EngineConfig{}.debug.aabbs);
   for (const bool enabled : {true, false}) {
     auto config = HiddenInputApplication();
     config.debug.shortcuts = true;
@@ -844,10 +845,12 @@ TEST(Application, AxisGizmoDefaultsOffAndF3TogglesOncePerUnconsumedPress)
     input.Send(GLFW_KEY_F3, GLFW_REPEAT);
     app.Run({2});
     EXPECT_EQ(app.runtime().axesEnabled(), !enabled);
+    EXPECT_EQ(app.runtime().aabbsEnabled(), !enabled);
     input.Send(GLFW_KEY_F3, GLFW_RELEASE);
     input.Send(GLFW_KEY_F3, GLFW_PRESS);
     app.Run({1});
     EXPECT_EQ(app.runtime().axesEnabled(), enabled);
+    EXPECT_EQ(app.runtime().aabbsEnabled(), enabled);
     const auto consumed = app.runtime().scene()->on<Jade::KeyPressed<"F3">>([] { return Jade::EventFlow::Stop; });
     input.Send(GLFW_KEY_F3, GLFW_RELEASE);
     input.Send(GLFW_KEY_F3, GLFW_PRESS);

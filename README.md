@@ -37,9 +37,9 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with image rendering off and Wireframe on, showing a 5/3/1 pyramid of nine dynamic cubes above a static floor. F toggles Wireframe; I toggles image rendering independently. Both can be enabled for an overlay, or disabled while physics/input/debug continue. Press 3 to return to the pyramid; K gives its top cube an off-center impulse. Press 1 for the bunny/metal/glass showroom or 2 for the destruction scene: a 10-column, 10-row vertical wall of 100 dynamic cubes and a heavy sphere that automatically strikes the wall. K repositions and fires that sphere from the current camera direction. In both physics scenes, P pauses/resumes and R rebuilds the current scene, including its projectile. Scene2 is created on first selection and retains its state when switching away. Start directly with `JadeDemo --scene 2`; `--frames N` remains available and can be combined with `--scene`.
+Demo starts with image rendering off and Wireframe on in Scene 3: a 5/3/1 pyramid and a falling ball above a static floor. G switches Earth/Moon gravity and K gives the top cube an off-center impulse. Scene 1 is the bunny/metal/glass showroom. Scene 2 is a mutually attracting three-body orbit, driven by mass, initial velocity and VelocityVerlet; it has no parenting or scripted rotation. Its scaled masses are 100/10/0.1, distances 8/0.9, G=1 and softening=0.001. Scene 4 preserves the destruction wall and heavy glass projectile; K fires it from the current camera. Select scenes with 1/2/3/4, pause physics with P and rebuild the active physics scene with R. Scene 3 reset retains the selected gravity. Scenes retain state while inactive. Launch with `JadeDemo --scene 1|2|3|4`; `--frames N` can be combined with it. F/I independently toggle Wireframe/image rendering.
 
-F4 toggles cyan AABBs, yellow Collider outlines, red contact markers, green normal arrows and Physics/Debug logging. Scene selection preserves both render switches. RayTracing uses resolutionScale 0.5; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and Q/E roll. O switches projection, F3 toggles axes and Esc exits. Demo objects use Archetype constructors and share a single unit-cube mesh.
+F3 toggles axes and cyan AABBs together. F4 toggles orange Collider outlines, red contact markers, green normal arrows, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow arrows show direction using lengths 0.8/0.6, so coincident directions remain visible; near-zero forces are hidden. A supported resting body retains downward field force while total force is approximately zero. Scene selection preserves render/debug switches. RayTracing uses resolutionScale 0.5; presentation targets 24 FPS. WASD/arrows move, Space/Ctrl+Space fly, Shift/Ctrl+W changes speed, left dragging turns, the wheel zooms and Q/E roll. O switches projection and Esc exits. Demo uses Archetype descriptors and shared meshes.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -101,7 +101,6 @@ for (auto entity : scene->query<Jade::Transform, Velocity>()) {
 
 ```cpp
 Jade::EngineConfig config;
-config.physics.gravity = {0, -9.81f, 0};
 config.physics.fixedStep = 1.0 / 120.0;
 config.renderer.render = false;
 config.renderer.wireframe = true;
@@ -109,6 +108,10 @@ config.debug.shortcuts = true;
 Jade::Application app(config);
 auto& runtime = app.runtime();
 // runtime.assets(), runtime.scene(), runtime.renderer(), runtime.physics()
+auto scene = std::make_shared<Jade::Scene>();
+scene->physics().fields = {
+  std::make_shared<const Jade::Physics::UniformGravity>(Jade::Vec3{0, -9.81f, 0})};
+runtime.setScene(scene);
 ```
 
 Renderer has independent `setRender(bool)` / `renderEnabled()` and `setWireframe(bool)` / `wireframeEnabled()` controls. F toggles Wireframe; I toggles image rendering, regardless of debug-shortcut settings. Sampling configuration and progress are available through `runtime.renderer().rayTracing()` and `runtime.renderer().progress()`. Changing only Wireframe preserves path-tracing samples. Disabling image rendering stops/joins ray work and clears its image; re-enabling starts fresh samples. Both flags default to render=true, wireframe=false; Demo starts with render=false, wireframe=true.
@@ -122,27 +125,36 @@ Renderer has independent `setRender(bool)` / `renderEnabled()` and `setWireframe
 
 Axes and physics debug drawing remain independently available in all four states. Physics is independently usable as `Jade::Physics::System` with `step(scene, dt)`. Runtime accumulates frame time into fixed steps after FrameUpdate and before rendering. At most eight substeps run per frame; excess whole steps are discarded and logged. Scene selection, Run boundaries and `runtime.setPaused(...)` reset accumulated time and contact caches. Inactive scenes do not simulate.
 
+Each Scene owns a `Physics::Environment` through `scene.physics()`. Its immutable `ForceField` objects sample world-space center forces from a read-only body snapshot. `GravityField::acceleration` returns acceleration; its final `sample` multiplies by target mass. Thus identical gravity gives different forces but the same acceleration to different masses. New scenes default to Earth `UniformGravity`; replace it with `{0,-1.62f,0}` for Moon gravity or clear `fields` for no field force. `Physics::Config` contains clock and solver settings; the old `gravity` member is removed.
+
+`PointGravity(center, mass, G, softening)` supplies a fixed source; `CompositeGravity` sums child accelerations. `BodyGravity(sources, G, softening)` opts selected root dynamic entities into source generation, reading source mass and position from each stage snapshot and excluding self-gravity. Destroyed sources expire without attaching to recycled identities; live foreign or malformed sources throw. Point sources use `G*M*r/(r²+softening²)^(3/2)` with positive softening (default 0.001). Fields must be immutable and safe for concurrent sampling; `validate(scene)` runs on the owning thread before sampling.
+
+`Environment::integration` defaults to `SemiImplicitEuler`. `VelocityVerlet` takes a half velocity kick, moves all bodies, resamples a consistent new-position snapshot, then completes the kick before contact solving. Dynamics, collision and contact solving have separate internal implementations; the existing Job System still schedules integration, bounds, broad/narrow phase and islands. Any invalid input, field sample or output rejects the step before Scene components, statistics or caches are committed.
+
+`physics.forceSnapshot(scene)` returns per-body average field force, contact force and total force over the last successful step. Contact force is the net applied normal/friction impulse divided by dt, including warm starting once; positional corrections and separately applied instantaneous impulses are excluded. A stale snapshot supplies fresh field force with `solved=false`; total force remains unavailable until the next successful step.
+
 ```cpp
 using Object = Jade::Archetype<Jade::Geometry, Jade::Transform, Jade::Material>;
 using Physical = Jade::Archetype<Jade::Transform, Jade::Collider, Jade::RigidBody>;
-class Ball : public Jade::Archetype<Object, Physical> {
-  using Base = Jade::Archetype<Object, Physical>;
-public:
-  Ball(Jade::Entity entity, Jade::MeshHandle mesh, Jade::Vec3 position, float mass = 1) : Base(entity) {
-    add<Jade::Collider>(Jade::Sphere{0.5f});
-    get<Jade::Geometry>().mesh = mesh;
-    get<Jade::Transform>().position = position;
-    get<Jade::RigidBody>().mass = mass;
-  }
+struct Ball {
+  using Components = Jade::Archetype<Object, Physical>;
 };
-auto ball = scene->create<Ball>(sphereMesh, Jade::Vec3{0, 2, 0}, 2.0f);
+Jade::Entity ball = scene->create<Ball>();
+// Geometry.mesh and Collider are initially empty; bind them when ready.
+ball.get<Jade::Geometry>().mesh = sphereMesh;
+ball.get<Jade::Collider>() = Jade::Collider{Jade::Sphere{0.5f}};
+ball.get<Jade::Transform>().position = {0, 2, 0};
+ball.get<Jade::RigidBody>().mass = 2;
 ball.get<Jade::RigidBody>().velocity = {1, 0, 0};
 for (auto entity : scene->query<Physical>()) { /* includes manually composed entities */ }
+ball.get<Jade::Collider>() = {}; // Suspend physics without removing components.
 ```
 
-Archetype recursively flattens and deduplicates component types in first-appearance order. Composition groups are aliases; only the final handle constructor initializes custom values. `scene.create<T>(args...)` forwards constructor arguments after the Entity identity, including move-only arguments. Default-constructible components are added automatically; use get to edit them and add to initialize non-default-constructible components such as Collider. Missing declared components or a throwing constructor roll back the new entity. Ball is an identity handle, not the component owner. Queries cache matching component signatures and enumerate those groups instead of scanning all entity slots. Components remain in stable type pools; this version adds signature indexing, not packed movable component chunks.
+Archetype is a type-only component description. Use an alias such as `using Ball = Jade::Archetype<Object, Physical>` or a named descriptor with `using Components = ...`; both use the same creation and query mechanism. Composition recursively flattens descriptors and deduplicates components in first-appearance order. `scene.create<T>()` returns Entity and default-constructs exactly the declared components, without instantiating the descriptor or running its constructor. Transform must be declared explicitly. Every declared component must be default-constructible; a throwing component constructor rolls back the new entity. Configure values through `get<T>()` after creation; non-default-constructible components can still be added manually with `add<T>(args...)`.
 
-RigidBody uses world-space velocity and angularVelocity (radians/second), mass in kg, friction 0.6 and restitution 0 by default. A Collider without RigidBody, or with mass 0, is static. Positive-mass bodies require a root Transform and Collider; parented dynamic bodies are rejected. Inertia is derived from the scaled Box/Sphere. `runtime.physics().applyImpulse(scene, entity, impulse, worldPoint)` changes both linear and angular velocity for off-center impulses.
+An empty `Geometry.mesh` is skipped by rendering, and `Collider{}` is skipped by collision queries, simulation, debug drawing and physics logs. Material retains its valid default parameters. Component queries match presence, including components with empty resources; binding or clearing a resource does not change the signature. Dynamic add/remove remains supported. `scene.create<Jade::Archetype<>>()` creates an empty entity, and `scene.query<Jade::Archetype<>>()` matches all live entities. Queries cache matching component signatures and enumerate those groups instead of scanning all entity slots. Components remain in stable type pools, not packed movable component chunks. The previous Entity-derived Archetype handles and `create<T>(args...)` constructor API are removed; configure the returned Entity instead.
+
+RigidBody uses world-space velocity and angularVelocity (radians/second), mass in kg, friction 0.6 and restitution 0 by default. An empty Collider suspends participation, preserving pose and velocities. `collider.empty()` reports this state; assigning a Box/Sphere Collider activates it. A nonempty Collider without RigidBody, or with mass 0, is static. Participating positive-mass bodies require a root Transform and Collider; parented dynamic bodies are rejected. Inertia is derived from the scaled Box/Sphere. `runtime.physics().applyImpulse(scene, entity, impulse, worldPoint)` changes both linear and angular velocity for off-center impulses; an empty Collider throws invalid_argument without changing velocities.
 
 The solver uses semi-implicit integration, up to four Box face contacts, speculative contact retention (5 mm), accumulated normal/tangent impulses, warm starting and Coulomb friction. Defaults are 20 velocity iterations, four separate position-correction iterations and 2 mm penetration slop. Restitution applies only above a 1 m/s closing speed. Static/static pairs remain available to geometric queries/debug drawing but do not enter the dynamics solver. No sleeping, CCD, joints, kinematic bodies or dedicated physics thread are introduced. Runtime Physics uses the shared Job System; independently constructed Physics::System remains serial unless a JobSystem is injected.
 
@@ -320,7 +332,7 @@ config.debug.physics = true; // AABBs, shapes, contact points/normals and loggin
 app.runtime().setPhysicsDebug(true);
 ```
 
-With config.debug.shortcuts=true, bare F4 toggles all physics debug drawing and logging independently of the render mode. Ordinary mesh wireframe is gray-white, AABBs cyan, shapes yellow, contact markers red and normal arrows green. These overlays work over RayTracing and Wireframe, including entities without Geometry, and are excluded from path tracing snapshots. Physics/Debug logs configuration, substeps, body/contact counts, maximum penetration and per-body mass/velocities on activation and at most once per second. Trace adds contact point/normal/impulse records. Dynamics maintains contact impulses between fixed steps; Broad Phase still uses all-pairs tests among Colliders.
+With config.debug.shortcuts=true, F3 toggles axes/cyan AABBs and F4 independently toggles orange shapes, red contact markers, green normals, blue field force, yellow total force and Physics/Debug logging. Overlays work over image/Wireframe or a cleared background and stay outside path tracing snapshots. Physics/Debug reports environment, body, contact and force information on activation and at most once per second; Trace adds contact witnesses and solved impulses. Dynamics retains contact impulses between fixed steps and Broad Phase uses sweep-and-prune.
 
 ## Scene modules and controls
 
@@ -369,7 +381,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-Bare F (Wireframe) and I (image rendering) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it additionally permits F3 (axes), F4 (physics overlays/logs) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/config.debug.physics independently. Direct controls use runtime.renderer().setRender(), runtime.renderer().setWireframe(), runtime.setAxes() and runtime.setPhysicsDebug(); this flag does not change the process-wide logger threshold.
+Bare F (Wireframe) and I (image rendering) always work once per unconsumed press. `EngineConfig::debug.shortcuts` defaults to false; enabling it permits F3 (axes/AABBs), F4 (physics/forces/logs) and O (camera projection). Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses defaults. Initial visibility follows config.debug.axes/aabbs/physics independently. Runtime exposes setAxes(), setAabbs() and setPhysicsDebug(); this flag does not change the process-wide logger threshold.
 
 ## Events and controls
 
@@ -577,7 +589,7 @@ Jade/src/Graphics/   # Mesh, Motion, builtins/Cube and Sphere
 Jade/src/Assets/     # Shared resource storage
 Jade/src/Renderer/   # Common/ snapshots/images and RayTracing/ transport
 Jade/src/internal/   # Registry, ProgressiveSession, display/line shaders, platform and input
-Demo/               # Showroom, 10x10 destruction wall and nine-cube pyramid
+Demo/               # Showroom, three-body orbit, pyramid/drop and destruction wall
 assets/             # Bunny OBJ and attribution
 tests/              # ECS, assets, math, input, scheduling and pixel checks
 ```

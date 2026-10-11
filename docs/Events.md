@@ -6,7 +6,7 @@ Application owns a global main-thread dispatcher; each Scene owns a dispatcher f
 
 ```cpp
 Jade::EngineConfig config;
-config.debug.shortcuts = true; // F3: axes, F4: physics debug/logs, O: projection. F/I always work.
+config.debug.shortcuts = true; // F3: axes/AABB, F4: physics/forces/logs, O: projection. F/I always work.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
 scene->use<Jade::Module::FreeCameraControl>();
@@ -167,7 +167,7 @@ scene->on<Jade::KeyPressed<"Escape">>([] {
 scene->on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 ```
 
-With config.debug.shortcuts=true, unconsumed bare F3, F4 and O toggle axes, the complete physics debug overlay/logging and camera projection once per press. F4 toggles cyan AABBs, yellow Collider outlines, red contact points and green normals together; it works even with image/Wireframe disabled. Physics/Debug logs state changes and rate-limited configuration/body/contact information. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. O preserves both lens zoom values, pose and clip planes. Initial debug visibility follows config.debug.axes/config.debug.physics independently. Direct controls live on runtime.renderer(), runtime.setAxes() and runtime.setPhysicsDebug().
+With config.debug.shortcuts=true, unconsumed bare F3 toggles axes and cyan AABBs together: if either is enabled, both turn off; otherwise both turn on. F4 independently toggles orange Collider outlines, red contact points, green normals, blue field-force arrows, yellow total-force arrows and Physics/Debug logging. Blue/yellow lengths encode direction only; near-zero forces are hidden and unsolved total forces are unavailable. O switches camera projection while preserving both zoom values, pose and clip planes. All overlays work with image/Wireframe disabled. Repeat and modified keys do not trigger defaults; EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents them. Initial visibility uses config.debug.axes/aabbs/physics. Runtime provides independent setAxes(), setAabbs() and setPhysicsDebug() controls. Logging reports field count, integration method, bodies, contacts and forces at most once per second.
 
 Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
