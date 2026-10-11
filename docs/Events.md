@@ -6,7 +6,7 @@ Application owns a global main-thread dispatcher; each Scene owns a dispatcher f
 
 ```cpp
 Jade::ApplicationConfig config;
-config.debug = true; // F: wireframe, F3: axes, O: projection.
+config.debug = true; // F: wireframe, F3: axes, F4: Collider shapes, O: projection.
 Jade::Application app(config);
 // Create/select a scene camera, then install reusable controls.
 scene->use<Jade::Module::FreeCameraControl>();
@@ -167,7 +167,7 @@ scene->on<Jade::KeyPressed<"Escape">>([] {
 scene->on<Jade::KeyPressed<"C-q">>([&] { app.stop(); });
 ```
 
-With config.debug=true, unconsumed bare F, F3 and O toggle wireframe, unit axes and the retained scene camera projection once per press, logging actual changes at Info under Application. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger these defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents the action. O ignores absent or incomplete cameras and preserves both lens zoom values, pose and clip planes. Without debug these keys have no default action. Initial axes follow config.axisGizmo independently, and direct set/get APIs for wireframe and axes remain available.
+With config.debug=true, unconsumed bare F, F3, F4 and O toggle wireframe, unit axes, yellow Collider shapes and the retained scene camera projection once per press, logging actual changes at Info under Application. F4 leaves wireframe and AABB visibility unchanged. Repeat and Shift/Ctrl/Alt/Super combinations do not trigger these defaults. EventFlow::Stop in either dispatcher, app.stop() or a closed window prevents the action. O ignores absent or incomplete cameras and preserves both lens zoom values, pose and clip planes. Without debug these keys have no default action. Initial axes and Collider shapes follow config.axisGizmo/config.colliderGizmo independently, and direct set/get APIs for wireframe, axes and Collider visibility remain available.
 
 Unconsumed Escape closes the window by default. stop() ends only the current Run, without closing the window, and can be followed by another Run. stop() also prevents Escape's default close action when called by an Escape callback. New runs reset timing and the stop request while retaining subscriptions, the selected Scene, Assets and current key state. A bounded Run explicitly stopped by a callback returns normally before reaching its frame limit.
 
@@ -198,7 +198,7 @@ and skipped subscribers. `consumed_by` identifies the subscription returning
 EventFlow::Stop; zero means propagation continued. This uses the same level as
 the event, so a consumed FrameUpdate does not generate a per-frame Debug message.
 Dispatch records are emitted after successful callbacks, including unhandled input
-with zero handlers. Application default Escape and enabled F/F3/O actions run afterward.
+with zero handlers. Application default Escape and enabled F/F3/F4/O actions run afterward.
 
 KeyHeld, MouseHeld, MouseMoved, MouseScrolled and FrameUpdate use Trace, including
 their relevant dt, position/deltas or frame index. Enable them explicitly with

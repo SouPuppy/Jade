@@ -1,6 +1,7 @@
 #pragma once
 #include "../Device/OpenGL/OpenGLDevice.hpp"
 #include "../Device/OpenGL/OpenGLProgram.hpp"
+#include "CollisionDebug.hpp"
 #include <Jade/Renderer/Common/SceneSnapshot.hpp>
 namespace Jade::Detail {
 class DebugDraw final {
@@ -9,6 +10,7 @@ public:
   ~DebugDraw();
   void wireframe(const Renderer::SceneSnapshot &, Renderer::ImageSize);
   void axes(const Renderer::CameraFrame &, Renderer::ImageSize);
+  void colliders(const CollisionDebugLines &, const Renderer::CameraFrame &, Renderer::ImageSize);
 
 private:
   void lines(std::span<const Vec3>, const Matrix4 &, Vec3, bool);

@@ -16,7 +16,8 @@ public:
   void invalidate() noexcept;
   void rethrowError();
   Renderer::RenderProgress progress() const;
-  void draw(const Renderer::SceneSnapshot *, Renderer::ImageSize, bool wireframe, bool axes);
+  void draw(const Renderer::SceneSnapshot *, Renderer::ImageSize, bool wireframe, bool axes,
+            const CollisionDebugLines* colliders = nullptr);
 
 private:
   Window &m_Window;

@@ -37,7 +37,7 @@ cmake --build build/no-demo-debug --parallel
 
 ## Scenes and entities
 
-Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun and a fixed area emitter lighting the camera-facing planets; P pauses that animation. Demo starts in RayTracing with resolutionScale 0.5. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, I switches RayTracing/Wireframe, F also toggles wireframe when debug shortcuts are enabled, F3 toggles axes and Esc exits.
+Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere and an emissive ceiling mesh. Press 1 for this scene or 2 for an animated three-level sphere hierarchy with an emissive sun and a fixed area emitter lighting the camera-facing planets; P pauses that animation. Demo starts in RayTracing with resolutionScale 0.5. The input/presentation loop targets 24 FPS, independently of path-tracing sample throughput. Each scene retains its own camera and controls. WASD/arrows move the camera, Space/Ctrl+Space move along parent Y, Shift+W is faster and Ctrl+W slower. Left-button dragging turns the camera, the wheel zooms, Q/E roll, O switches projection, I switches RayTracing/Wireframe, F also toggles wireframe when debug shortcuts are enabled, F3 toggles axes, F4 toggles yellow Collider shapes and Esc exits. Demo's cubes and spheres have matching Box/Sphere Colliders; the bunny has none.
 
 ```cpp
 #include <Jade/Jade.hpp>
@@ -45,7 +45,7 @@ Demo starts with a diffuse Stanford Bunny, a rough metal cube, a glass sphere an
 int main()
 {
   Jade::ApplicationConfig config;
-  config.debug = true; // Enable Application F/F3/O shortcuts.
+  config.debug = true; // Enable Application F/F3/F4/O shortcuts.
   Jade::Application app(config);
   auto scene = std::make_shared<Jade::Scene>();
 
@@ -207,6 +207,43 @@ Perspective makes distant geometry smaller; orthographic keeps its size. FOV con
 
 `scene->setCamera()` rejects foreign/dead entities and missing components. If the selected camera is later destroyed or loses Transform/Camera, Run keeps processing input and clearing/presenting without world or axis drawing. Selecting a valid camera resumes rendering.
 
+## Collision detection
+
+Collider is independent of render geometry. Box stores local half-extents and Sphere stores a local radius; both are centered at the Entity's origin. Transform supplies the full hierarchy position, rotation and scale. Include Jade/Physics/Collider.hpp and Jade/Physics/Collision.hpp, or Jade/Jade.hpp:
+
+```cpp
+auto box = scene->create();
+box.add<Jade::Transform>();
+box.add<Jade::Collider>(Jade::Box{{1.0f, 2.0f, 1.0f}});
+
+auto sphere = scene->create();
+sphere.add<Jade::Transform>().position = {1.5f, 0, 0};
+sphere.add<Jade::Collider>(Jade::Sphere{1.0f});
+
+if (auto hit = Jade::Physics::contact(*scene, box, sphere)) {
+  // hit->point: representative world contact point
+  // hit->normal: unit separation direction for hit->b
+  // hit->penetration: separation distance; zero for touching
+}
+auto contacts = Jade::Physics::detect(*scene);
+```
+
+Queries automatically derive world shapes and AABBs from current components. AABB overlap only selects candidates; precise detection uses Sphere–Sphere, Sphere–Box and rotated Box–Box. No Auto shape or AABB component is required. Box dimensions are half-extents: {1, 2, 1} describes a box of size {2, 4, 2}. Box supports nonuniform world scale, provided its world basis remains orthogonal. Sphere requires uniform world scale; nonuniform scale and hierarchy shear throw std::invalid_argument. Dimensions must be finite and positive. Scale/orthogonality checks allow a 1e-5 relative rounding tolerance. There is no gravity, collision response or continuous detection.
+
+These main-thread queries need no window, camera, mesh or material. detect returns one Contact per pair in ascending Entity-ID order and skips Colliders without Transform. contact returns no hit for missing Collider/Transform or self-pairs, and rejects foreign/dead entities. It preserves the supplied entity order; reversing the pair reverses its normal. The point is a midpoint of surface witnesses, including a representative of clipped face contacts. Normal remains a separation direction during containment, rather than necessarily pointing between centers. Touching and rounding-sized gaps count as zero-penetration contacts, using a distance tolerance of 1e-6 times max(1, the pair's largest world half-extent or radius).
+
+Collider stores a copy of the supplied shape. Shape data needs no separate allocation and its storage is private. Replace it with `entity.get<Jade::Collider>() = Jade::Collider{Jade::Sphere{2}}`; the next query observes the change. Calling detect is explicit; an application may call it in FrameUpdate after moving entities. Queries do not move entities or emit collision events.
+
+```cpp
+config.colliderGizmo = true;      // Yellow actual shapes; defaults to false.
+config.colliderAabbGizmo = true;  // Cyan world AABBs; defaults to false.
+// Or change them while running:
+app.setColliderGizmo(true);
+app.setColliderAabbGizmo(true);
+```
+
+With config.debug=true, bare F4 toggles the yellow Collider shapes once per press, independently of wireframe and AABB visibility. Ordinary mesh wireframe remains gray-white; world AABBs remain cyan. Both overlays work in RayTracing and Wireframe, including for entities with no Geometry. They use current collision transforms and remain separate from path tracing snapshots: changing only a Collider, a Collider-only Transform or these display flags does not restart sampling. Debug drawing validates the displayed shapes. Disable both flags to avoid consuming Collider data during rendering. Broad Phase currently checks all entity pairs; no spatial index or contact manifold persistence is introduced in this version.
+
 ## Scene modules and controls
 
 Choose one camera control module per Scene. Demo uses free flight:
@@ -254,7 +291,7 @@ scene->use<Spin>();
 
 `use<T>()` installs once per type per Scene; repeated calls do nothing, including after reactivation. Recursive installation of the same type throws `std::logic_error`. If attach throws, new scene subscriptions are cancelled and new nested module installation records are removed, permitting retry; pre-existing subscriptions and modules remain. Other side effects, such as component changes or external registrations, are the module's responsibility. There is no module unload API; callbacks live with Scene.
 
-`ApplicationConfig::debug` defaults to false in both Debug and Release builds. Setting it to true enables unmodified F (wireframe), F3 (axes) and O (current scene camera projection), once per press. Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses the default. O skips an absent/incomplete camera and preserves pose, both zoom settings and clipping planes. Toggle diagnostics use the Application logger at Info. `config.axisGizmo` still controls initial visibility independently. `app.setWireframe()` / `wireframeEnabled()` and `app.setAxisGizmo()` / `axisGizmoEnabled()` work with either flag value. This flag does not change logging; terminal logging still defaults to Debug.
+`ApplicationConfig::debug` defaults to false in both Debug and Release builds. Setting it to true enables unmodified F (wireframe), F3 (axes), F4 (Collider shapes) and O (current scene camera projection), once per press. Global and scene callbacks run first; Stop, app.stop() or a closed window suppresses the default. O skips an absent/incomplete camera and preserves pose, both zoom settings and clipping planes. Toggle diagnostics use the Application logger at Info. `config.axisGizmo` and `config.colliderGizmo` still control initial visibility independently. `app.setWireframe()` / `wireframeEnabled()`, `app.setAxisGizmo()` / `axisGizmoEnabled()` and `app.setColliderGizmo()` / `colliderGizmoEnabled()` work with either flag value. This flag does not change logging; terminal logging still defaults to Debug.
 
 ## Events and controls
 
@@ -299,7 +336,7 @@ scene->on<Jade::SceneDeactivated>([&] { dragging = false; });
 scene->on<Jade::SceneActivated>([&] { dragging = false; });
 ```
 
-`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape and enabled F/F3/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
+`app.on` handles global events first; the active scene's `on` handles them next, followed by unconsumed Escape and enabled F/F3/F4/O defaults. Inactive scenes retain state and subscriptions but receive no input/update events. During Run, selection is queued until the next processing pass; the current pass uses one retained scene for input, update and rendering. The last request wins. Outside Run it commits immediately. Selecting the current scene emits no lifecycle events.
 
 Deactivation runs before committing the pointer; activation runs after. Lifecycle Stop ends listener propagation but does not cancel the switch. Reentrant selections queue another switch. A deactivation exception retains the old scene; an activation exception retains the new scene. Both discard pending requests and propagate the original exception. Application destruction releases ownership without calling lifecycle callbacks. One scene can be active/reserved in only one Application at a time.
 

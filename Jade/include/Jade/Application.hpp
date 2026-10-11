@@ -24,7 +24,7 @@ struct ApplicationConfig {
   WindowConfig window;
   Renderer::RayTracingConfig rayTracing;
   bool vsync = false;
-  // Built-in F/F3/O shortcuts, independent of logging and build type.
+  // Built-in F/F3/F4/O shortcuts, independent of logging and build type.
   // Unmodified I toggles RayTracing/Wireframe even with debug disabled.
   bool debug = false;
   // Frames per second. RunOptions::frameLimit controls total frames per run.
@@ -34,6 +34,10 @@ struct ApplicationConfig {
   bool logPerformance = true;
   // Unit XYZ axes at the world origin, visible over objects. Debug enables F3.
   bool axisGizmo = true;
+  // Collision shapes (yellow); debug enables F4. Independent of Wireframe.
+  bool colliderGizmo = false;
+  // World AABBs (cyan), over either render mode.
+  bool colliderAabbGizmo = false;
 };
 
 struct RunOptions {
@@ -89,6 +93,10 @@ public:
   bool wireframeEnabled() const noexcept;
   void setAxisGizmo(bool enabled) noexcept;
   bool axisGizmoEnabled() const noexcept;
+  void setColliderGizmo(bool enabled) noexcept;
+  bool colliderGizmoEnabled() const noexcept;
+  void setColliderAabbGizmo(bool enabled) noexcept;
+  bool colliderAabbGizmoEnabled() const noexcept;
   void Run(const RunOptions &options = {});
 
 private:

@@ -3,6 +3,7 @@ add_executable(JadeSmokeTests
   MathTests.cpp
   CoreTests.cpp
   ComponentTests.cpp
+  CollisionTests.cpp
   MeshTests.cpp
   RendererTests.cpp
 

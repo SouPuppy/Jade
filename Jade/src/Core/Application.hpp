@@ -15,6 +15,8 @@ struct Application::Impl {
   bool logPerformance;
   bool debug;
   bool axisGizmo;
+  bool colliderGizmo;
+  bool colliderAabbGizmo;
   bool running = false;
   bool stopRequested = false;
   bool switching = false;
@@ -28,7 +30,8 @@ struct Application::Impl {
 
   explicit Impl(const ApplicationConfig &config)
       : frameLimits(config.frameLimits), logPerformance(config.logPerformance), debug(config.debug),
-        axisGizmo(config.axisGizmo), window(config.window),
+        axisGizmo(config.axisGizmo), colliderGizmo(config.colliderGizmo),
+        colliderAabbGizmo(config.colliderAabbGizmo), window(config.window),
         rendering(window, config.vsync, config.window.title, config.rayTracing)
   {
   }

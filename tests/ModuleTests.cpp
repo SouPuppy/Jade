@@ -221,22 +221,34 @@ TEST(ApplicationDebug, ShortcutsAreOptInAndOperateOncePerPress)
     Input input;
     input.Tap(GLFW_KEY_F);
     input.Tap(GLFW_KEY_F3);
+    input.Tap(GLFW_KEY_F4);
     input.Tap(GLFW_KEY_O);
     app.Run({1});
     EXPECT_EQ(app.wireframeEnabled(), debug);
     EXPECT_EQ(app.axisGizmoEnabled(), debug);
+    EXPECT_EQ(app.colliderGizmoEnabled(), debug);
+    EXPECT_FALSE(app.colliderAabbGizmoEnabled());
     EXPECT_EQ(lens.projection, debug ? Jade::Projection::Orthographic : Jade::Projection::Perspective);
     EXPECT_FLOAT_EQ(lens.fovDegrees, 47);
     EXPECT_FLOAT_EQ(lens.viewHeight, 9);
     input.Tap(GLFW_KEY_F);
     input.Tap(GLFW_KEY_F3);
+    input.Tap(GLFW_KEY_F4);
     input.Tap(GLFW_KEY_O);
     app.Run({1});
     EXPECT_FALSE(app.wireframeEnabled());
     EXPECT_FALSE(app.axisGizmoEnabled());
+    EXPECT_FALSE(app.colliderGizmoEnabled());
     EXPECT_EQ(lens.projection, Jade::Projection::Perspective);
     app.setWireframe(true);
     EXPECT_TRUE(app.wireframeEnabled());
+    app.setColliderAabbGizmo(true);
+    input.Tap(GLFW_KEY_F4);
+    app.Run({1});
+    EXPECT_EQ(app.colliderGizmoEnabled(), debug);
+    EXPECT_TRUE(app.wireframeEnabled());
+    EXPECT_TRUE(app.colliderAabbGizmoEnabled());
+    EXPECT_FALSE(app.axisGizmoEnabled());
     if (debug) {
       input.Tap(GLFW_KEY_F);
       app.Run({1});
@@ -253,24 +265,29 @@ TEST(ApplicationDebug, ModifiersAndEventConsumptionPreventDefaults)
   for (const int modifier : {GLFW_MOD_SHIFT, GLFW_MOD_CONTROL, GLFW_MOD_ALT, GLFW_MOD_SUPER}) {
     input.Tap(GLFW_KEY_F, modifier);
     input.Tap(GLFW_KEY_F3, modifier);
+    input.Tap(GLFW_KEY_F4, modifier);
     input.Tap(GLFW_KEY_O, modifier);
   }
   app.Run({1});
   EXPECT_FALSE(app.wireframeEnabled());
   EXPECT_FALSE(app.axisGizmoEnabled());
+  EXPECT_FALSE(app.colliderGizmoEnabled());
   EXPECT_EQ(scene->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
   int sceneF = 0;
   app.on<Jade::KeyPressed<"f">>([] { return Jade::EventFlow::Stop; });
   scene->on<Jade::KeyPressed<"f">>([&] { ++sceneF; });
   scene->on<Jade::KeyPressed<"F3">>([] { return Jade::EventFlow::Stop; });
+  scene->on<Jade::KeyPressed<"F4">>([] { return Jade::EventFlow::Stop; });
   scene->on<Jade::KeyPressed<"o">>([] { return Jade::EventFlow::Stop; });
   input.Tap(GLFW_KEY_F);
   input.Tap(GLFW_KEY_F3);
+  input.Tap(GLFW_KEY_F4);
   input.Tap(GLFW_KEY_O);
   app.Run({1});
   EXPECT_EQ(sceneF, 0);
   EXPECT_FALSE(app.wireframeEnabled());
   EXPECT_FALSE(app.axisGizmoEnabled());
+  EXPECT_FALSE(app.colliderGizmoEnabled());
   EXPECT_EQ(scene->camera().get<Jade::Camera>().projection, Jade::Projection::Perspective);
 }
 

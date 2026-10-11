@@ -74,4 +74,11 @@ void DebugDraw::axes(const Renderer::CameraFrame &camera, Renderer::ImageSize si
     lines(points, projection, axis, false);
   }
 }
+void DebugDraw::colliders(const CollisionDebugLines &debug, const Renderer::CameraFrame &camera,
+                          Renderer::ImageSize size)
+{
+  const auto projection = camera.viewProjection(size);
+  lines(debug.shapes, projection, {1, 0.75f, 0}, false);
+  lines(debug.aabbs, projection, {0, 1, 1}, false);
+}
 } // namespace Jade::Detail

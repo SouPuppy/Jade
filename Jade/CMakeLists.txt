@@ -1,4 +1,12 @@
 add_library(Jade STATIC
+  include/Jade/Physics/Collider.hpp
+  include/Jade/Physics/Collision.hpp
+  src/Physics/Collision.cpp
+  src/Physics/Collision.hpp
+  src/internal/Physics/CollisionWorld.cpp
+  src/internal/Physics/CollisionWorld.hpp
+  src/internal/Renderer/Debug/CollisionDebug.cpp
+  src/internal/Renderer/Debug/CollisionDebug.hpp
   include/Jade/Graphics/MeshData.hpp
   include/Jade/Materials/Presets.hpp
   src/Materials/Presets.cpp

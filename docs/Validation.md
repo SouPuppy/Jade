@@ -1,5 +1,17 @@
 # Windows x64 validation
 
+## F4 Collider debug shortcut (2026-10-10)
+
+Debug and Release each passed all 14 ApplicationDebug, CollisionDebug and RenderMode tests. Existing keyboard callback checks now cover F4 opt-in, repeats, modifiers, event consumption and independent wireframe/axis/AABB state. OpenGL readback verifies yellow Collider shapes and cyan AABBs alongside actual gray-white mesh wireframe. Both isolated configurations rebuilt the engine, Demo and tests successfully. Demo cubes and spheres now carry matching Colliders. No commit was created.
+
+## Collider v1 (2026-10-10)
+
+Debug and Release GoogleTest both passed 183/183 tests across 43 suites. Sixteen added Collider/Collision/CollisionDebug tests cover value copying and shape replacement; Sphere–Sphere, Sphere–Box and rotated Box–Box contacts; containment and coincident centers; symmetry and stable pair ordering; AABB false positives; skew edge contacts; hierarchy bounds and scale rules; invalid dimensions, shear, missing components and dead/foreign entities. A deterministic 250-pair rotated-box fixture guarantees intersection by construction and verifies that the reported normal/penetration separates the pair. A large-coordinate regression verifies that Sphere–Box normal calculation preserves the local closest displacement when absolute world witnesses round together.
+
+Actual OpenGL readback verifies independent yellow shape and cyan AABB overlays over both image and wireframe presentation, including Collider-only entities. Application tests verify opt-in validation, runtime flags and unchanged path tracing revisions after Collider-only edits, shape removal and display toggles. Existing camera, input, rendering and Scene regressions remain included in the full runs.
+
+Isolated build/collision-debug and build/collision-release configurations built the engine, Demo and tests successfully without compiler warnings. The two new public Physics headers and Jade.hpp passed standalone MSVC C++20 /W4 /WX compilation. All eight new engine files and the new test source are explicitly listed in CMake, and git diff --check passed. No commit was created. The implementation provides explicit discrete collision queries, automatic world AABB screening and one representative Contact per pair; rigid bodies, physical response, continuous detection and spatial-index performance are outside this validation.
+
 ## Camera control split (2026-10-10)
 
 Debug and Release GoogleTest both passed 167/167 tests across 40 suites after replacing CameraControl with FreeCameraControl and FPSCameraControl. The added checks cover mutually exclusive installation and dependency rollback, horizontal movement at full speed while pitched, continuous mouse look and +/-89-degree pitch limits, absent roll/flight bindings, stationary quaternion stability, external pose edits, camera replacement/removal, cursor capture, scene/focus transitions and subscription ownership. Free flight and existing application/input/rendering regressions also passed.

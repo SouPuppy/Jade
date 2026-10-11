@@ -42,7 +42,7 @@ Renderer::RenderProgress RenderHost::progress() const
   return result;
 }
 void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSize size, bool wireframe,
-                      bool axes)
+                      bool axes, const CollisionDebugLines* colliders)
 {
   if (m_Wireframe != wireframe) {
     m_Wireframe = wireframe;
@@ -68,6 +68,8 @@ void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSi
     }
     if (axes)
       m_Debug.axes(*snapshot->camera, size);
+    if (colliders)
+      m_Debug.colliders(*colliders, *snapshot->camera, size);
   } else
     invalidate();
   m_Display.present();

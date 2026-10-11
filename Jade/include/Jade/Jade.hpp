@@ -31,6 +31,8 @@
 #include <Jade/Module/FreeCameraControl.hpp>
 #include <Jade/Module/FPSCameraControl.hpp>
 #include <Jade/WindowConfig.hpp>
+#include <Jade/Physics/Collider.hpp>
+#include <Jade/Physics/Collision.hpp>
 #include <Jade/Renderer/RayTracing/BSDF.hpp>
 #include <Jade/Renderer/Common/RenderSettings.hpp>
 #include <Jade/Renderer/Common/RenderProgress.hpp>

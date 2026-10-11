@@ -118,6 +118,11 @@ void Application::setAxisGizmo(bool enabled) noexcept { m_Impl->axisGizmo = enab
 
 bool Application::axisGizmoEnabled() const noexcept { return m_Impl->axisGizmo; }
 
+void Application::setColliderGizmo(bool enabled) noexcept { m_Impl->colliderGizmo = enabled; }
+bool Application::colliderGizmoEnabled() const noexcept { return m_Impl->colliderGizmo; }
+void Application::setColliderAabbGizmo(bool enabled) noexcept { m_Impl->colliderAabbGizmo = enabled; }
+bool Application::colliderAabbGizmoEnabled() const noexcept { return m_Impl->colliderAabbGizmo; }
+
 EventConnection Application::Connect(KeyAction action, KeyChord chord,
                                      std::function<EventFlow(const KeyEvent &)> callback)
 {
@@ -225,6 +230,9 @@ void Application::Run(const RunOptions &options)
           } else if (key->event.key == Key::F3) {
             setAxisGizmo(!axisGizmoEnabled());
             applicationLog << Log::info("Axis Gizmo: {}", axisGizmoEnabled() ? "on" : "off");
+          } else if (key->event.key == Key::F4) {
+            setColliderGizmo(!colliderGizmoEnabled());
+            applicationLog << Log::info("Collider Gizmo: {}", colliderGizmoEnabled() ? "on" : "off");
           } else if (key->event.key == Key::O && active) {
             const auto camera = active->camera();
             if (camera.has<Transform>() && camera.has<Camera>()) {
@@ -313,7 +321,11 @@ void Application::Run(const RunOptions &options)
       if (camera.has<Transform>() && camera.has<Camera>())
         snapshot = Renderer::SceneSnapshot::capture(*active, m_Impl->assets);
     }
-    m_Impl->rendering.draw(snapshot ? &*snapshot : nullptr, imageSize, m_Impl->wireframe, m_Impl->axisGizmo);
+    std::optional<Detail::CollisionDebugLines> collisionDebug;
+    if (active && snapshot && (m_Impl->colliderGizmo || m_Impl->colliderAabbGizmo))
+      collisionDebug = Detail::captureCollisionDebug(*active, m_Impl->colliderGizmo, m_Impl->colliderAabbGizmo);
+    m_Impl->rendering.draw(snapshot ? &*snapshot : nullptr, imageSize, m_Impl->wireframe, m_Impl->axisGizmo,
+                          collisionDebug ? &*collisionDebug : nullptr);
     const auto completed = Clock::now();
     const auto stats = frameClock.FinishFrame(completed);
     frames = stats.frame;

@@ -75,23 +75,30 @@ int main(int argc, char **argv)
         std::min_element(bunnyVertices.begin(), bunnyVertices.end(), [](const auto &a, const auto &b) {
           return a.position.y < b.position.y;
         })->position.y;
-    Instance(*showroom, cubeMesh, {0, -2, 0}, floor, {5, 0.1f, 4});
-    Instance(*showroom, cubeMesh, {-2.2f, -1.1f, 0}, metal, {0.8f, 0.8f, 0.8f});
+    Instance(*showroom, cubeMesh, {0, -2, 0}, floor, {5, 0.1f, 4})
+        .add<Jade::Collider>(Jade::Box{{1, 1, 1}});
+    Instance(*showroom, cubeMesh, {-2.2f, -1.1f, 0}, metal, {0.8f, 0.8f, 0.8f})
+        .add<Jade::Collider>(Jade::Box{{1, 1, 1}});
     Instance(*showroom, bunnyMesh, {0, -1.9f - bunnyBottom * 16, 0}, diffuse, {16, 16, 16});
-    Instance(*showroom, sphereMesh, {2.2f, -0.9f, 0}, glass);
-    Instance(*showroom, cubeMesh, {0, 4, 0}, lamp, {2, 0.05f, 1.5f});
+    Instance(*showroom, sphereMesh, {2.2f, -0.9f, 0}, glass).add<Jade::Collider>(Jade::Sphere{1});
+    Instance(*showroom, cubeMesh, {0, 4, 0}, lamp, {2, 0.05f, 1.5f})
+        .add<Jade::Collider>(Jade::Box{{1, 1, 1}});
 
     // Scene II: the sun emits light; a fixed area emitter lights the camera-facing planets.
     // P freezes the animation.
     auto hierarchy = CreateScene({7, 5, 11});
     auto sun = Instance(*hierarchy, sphereMesh, {}, lamp, {0.7f, 0.7f, 0.7f});
+    sun.add<Jade::Collider>(Jade::Sphere{1});
     const auto earthMaterial = Jade::Materials::Diffuse({0.1f, 0.35f, 0.8f});
     auto earth = Instance(*hierarchy, sphereMesh, {4, 0, 0}, earthMaterial, {0.5f, 0.5f, 0.5f});
+    earth.add<Jade::Collider>(Jade::Sphere{1});
     hierarchy->setParent(earth, sun);
     const auto moonMaterial = Jade::Materials::Diffuse({0.6f, 0.6f, 0.6f});
     auto moon = Instance(*hierarchy, sphereMesh, {3, 0, 0}, moonMaterial, {0.35f, 0.35f, 0.35f});
+    moon.add<Jade::Collider>(Jade::Sphere{1});
     hierarchy->setParent(moon, earth);
-    Instance(*hierarchy, cubeMesh, {3, 5, 6}, Jade::Materials::Emissive({18, 18, 18}), {2, 0.05f, 1.5f});
+    Instance(*hierarchy, cubeMesh, {3, 5, 6}, Jade::Materials::Emissive({18, 18, 18}), {2, 0.05f, 1.5f})
+        .add<Jade::Collider>(Jade::Box{{1, 1, 1}});
     bool animate = true;
     hierarchy->on<Jade::FrameUpdate>([sun, earth, &animate](const auto &frame) {
       if (animate) {
