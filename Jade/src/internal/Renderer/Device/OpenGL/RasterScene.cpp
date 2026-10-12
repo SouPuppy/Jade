@@ -145,6 +145,14 @@ struct RasterScene::Impl {
     for(std::size_t instanceIndex=0;instanceIndex<scene.instances.size();++instanceIndex) {
       const auto& instance=scene.instances[instanceIndex];
       const auto& data=instance.mesh->data();
+      if(instance.kind!=GeometryKind::Mesh) {
+        auto inverse=Math::inverseAffine(instance.objectToWorld); Bounds bound;
+        const Vec3 extent=instance.kind==GeometryKind::Sphere?Vec3{1,1,1}:Vec3{.5f,.0001f,.5f};
+        for(int corner=0;corner<8;++corner) bound.add(Math::point(instance.objectToWorld,{corner&1?extent.x:-extent.x,corner&2?extent.y:-extent.y,corner&4?extent.z:-extent.z}));
+        std::array<Float4,5> primitive{};primitive[0]={static_cast<float>(instance.kind),static_cast<float>(instanceIndex),0,-2};
+        for(int column=0;column<4;++column)primitive[column+1]={inverse.at(0,column),inverse.at(1,column),inverse.at(2,column),inverse.at(3,column)};
+        triangles.push_back(primitive);bounds.push_back(bound);continue;
+      }
       for(std::size_t i=0;i<data.indices.size();i+=3) {
         std::array<Vec3,3> local{},world{}; Bounds b;
         for(int j=0;j<3;++j) {

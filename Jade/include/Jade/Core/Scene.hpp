@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Core/Entity.hpp>
+#include <Jade/World/World.hpp>
 #include <Jade/Core/Archetype.hpp>
 #include <Jade/Events/Event.hpp>
 #include <Jade/Events/FrameUpdate.hpp>
@@ -23,62 +23,17 @@
 
 namespace Jade {
 
-namespace Physics { struct Environment; class World; class System; struct BodyID; }
 namespace Module { struct FPSCameraControl; }
 
-template<class... T>
-class SceneView final {
-public:
-  class Iterator {
-  public:
-    using value_type = Entity;
-    using reference = Entity;
-    using difference_type = std::ptrdiff_t;
-    using iterator_category = std::forward_iterator_tag;
-    using iterator_concept = std::forward_iterator_tag;
-
-    Iterator() = default;
-    Entity operator*() const { return (*m_Entities)[m_Index]; }
-    Iterator& operator++() { ++m_Index; Skip(); return *this; }
-    Iterator operator++(int) { auto previous = *this; ++*this; return previous; }
-    bool operator==(const Iterator&) const = default;
-
-  private:
-    friend class SceneView;
-    Iterator(const std::vector<Entity>* entities, std::size_t index)
-      : m_Entities(entities), m_Index(index) { Skip(); }
-    void Skip()
-    {
-      while (m_Index < m_Entities->size()) {
-        const auto& entity = (*m_Entities)[m_Index];
-        if (entity.valid() && (entity.template has<T>() && ...)) break;
-        ++m_Index;
-      }
-    }
-    const std::vector<Entity>* m_Entities = nullptr;
-    std::size_t m_Index = 0;
-  };
-
-  Iterator begin() const { return Iterator(&m_Entities, 0); }
-  Iterator end() const { return Iterator(&m_Entities, m_Entities.size()); }
-
-private:
-  friend class Scene;
-  explicit SceneView(std::vector<Entity> entities) : m_Entities(std::move(entities)) {}
-  std::vector<Entity> m_Entities;
-};
-
-// Main-thread scene owner. New scenes are empty and do not require a window.
+// Owner-thread observation and input context for an explicitly supplied World.
 class Scene final {
 public:
-  Scene();
+  explicit Scene(std::shared_ptr<World> world);
+  World& world() const noexcept { return *m_World; }
+  std::shared_ptr<World> worldHandle() const noexcept { return m_World; }
   ~Scene();
   Scene(const Scene&) = delete;
   Scene& operator=(const Scene&) = delete;
-  Physics::Environment& physics() noexcept;
-  const Physics::Environment& physics() const noexcept;
-  Physics::World& physicsWorld();
-  Physics::BodyID physicsBody(Entity entity) const;
 
   // Installs static void TModule::attach(Scene&) once per type and Scene.
   // Failed installations cancel new subscriptions and may be retried.
@@ -90,36 +45,6 @@ public:
     InstallModule(typeid(TModule), [this] { TModule::attach(*this); });
   }
 
-  Entity create();
-  // Create exactly the descriptor's components. No descriptor instance is constructed.
-  template<class T> Entity create()
-  {
-    static_assert(Detail::ComponentsOf<T>::descriptor,
-      "Scene::create<T> requires a Jade::Archetype or a type with using Components = Archetype<...>.");
-    const auto entity = create();
-    try {
-      Detail::DefaultComponents(entity, typename Detail::ComponentsOf<T>::type{});
-      return entity;
-    } catch (...) {
-      if (owns(entity)) destroy(entity);
-      throw;
-    }
-  }
-  void destroy(Entity entity);
-  bool owns(Entity entity) const noexcept;
-  // Snapshot identities; skip removals and defer new matches until the next view.
-  template<class... T>
-  auto query() const
-  {
-    static_assert(sizeof...(T) > 0, "Scene::query requires at least one component type.");
-    return QueryTypes(typename Detail::FlattenComponents<Detail::ComponentList<>, T...>::type{});
-  }
-
-  // Reparenting retains local TRS. Empty parent detaches; deletion destroys the subtree.
-  void setParent(Entity child, Entity parent = {});
-  Entity parent(Entity entity) const;
-  std::vector<Entity> children(Entity entity) const;
-  Matrix4 worldMatrix(Entity entity) const;
   Entity camera() const noexcept;
   void setCamera(Entity camera);
 
@@ -177,15 +102,9 @@ public:
 private:
   friend class Application;
   friend class Runtime;
-  friend class Physics::System;
   friend struct Module::FPSCameraControl;
-  template<class... T> SceneView<T...> QueryTypes(Detail::ComponentList<T...>) const {
-    return SceneView<T...>(Snapshot({typeid(T)...}));
-  }
   bool CapturesMouse() const noexcept;
   void InstallModule(std::type_index type, std::function<void()> attach);
-  void RequireOwned(Entity entity) const;
-  std::vector<Entity> Snapshot(std::initializer_list<std::type_index> types) const;
   EventConnection Connect(KeyAction, KeyChord, std::function<EventFlow(const KeyEvent&)>);
   EventConnection Connect(MouseAction, MouseButton, std::function<EventFlow(const MouseEvent&)>);
   EventConnection Connect(std::function<EventFlow(const FrameUpdate&)>);
@@ -193,7 +112,7 @@ private:
   EventConnection Connect(std::function<EventFlow(const MouseScrolled&)>);
   EventConnection ConnectLifecycle(bool activated, std::function<EventFlow()>);
   struct Impl;
-  std::shared_ptr<Detail::Registry> m_Registry;
+  std::shared_ptr<World> m_World;
   std::unique_ptr<Impl> m_Impl;
 };
 

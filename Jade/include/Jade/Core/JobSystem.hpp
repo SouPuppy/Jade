@@ -57,7 +57,7 @@ private:
 };
 
 // Callables may run concurrently. Captures must outlive completion; the scheduler
-// does not infer memory dependencies or make Scene/Registry access thread-safe.
+// does not infer memory dependencies or make World/Registry access thread-safe.
 class JobSystem final {
 public:
   using Function = std::function<void()>;

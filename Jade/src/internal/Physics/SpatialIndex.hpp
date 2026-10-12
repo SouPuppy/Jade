@@ -8,10 +8,12 @@ namespace Jade::Detail {
 class SpatialIndex {
 public:
   void clear() noexcept;
-  void update(std::span<const WorldCollider> shapes, std::span<const std::size_t> members, double padding);
+  std::size_t memoryUsage() const noexcept { return nodes.capacity()*sizeof(Node)+fat.capacity()*sizeof(CollisionAabb)+(membership.capacity()+order.capacity())*sizeof(std::size_t); }
+  void update(std::span<const WorldCollider> shapes, std::span<const std::size_t> members, double padding,
+              std::span<const CollisionAabb> predicted = {});
   template<class Visitor> void query(const CollisionAabb& bounds, double margin, Visitor&& visit) const {
     if (nodes.empty()) return;
-    std::array<std::uint32_t,256> stack{}; std::size_t count = 1;
+    std::array<std::uint32_t,512> stack{}; std::size_t count = 1;
     while (count) {
       const auto& n = nodes[stack[--count]];
       if (!n.bounds.overlaps(bounds,margin)) continue;

@@ -1,6 +1,6 @@
 #include "Collision.hpp"
 
-#include "../internal/Core/SceneTransforms.hpp"
+#include "../internal/Core/WorldTransforms.hpp"
 #include "../internal/Physics/CollisionWorld.hpp"
 #include "../internal/Physics/BroadPhase.hpp"
 
@@ -250,7 +250,7 @@ std::optional<Contact> query(const WorldCollider& a, const WorldCollider& b)
 
 } // namespace
 
-std::optional<Contact> contact(const Scene& scene, Entity a, Entity b)
+std::optional<Contact> contact(const Jade::World& scene, Entity a, Entity b)
 {
   if (!scene.owns(a) || !scene.owns(b))
     throw std::invalid_argument("Collision queries require live entities in the supplied Scene.");
@@ -260,7 +260,7 @@ std::optional<Contact> contact(const Scene& scene, Entity a, Entity b)
   const bool reversed = a.id() > b.id();
   if (reversed)
     std::swap(a, b);
-  Detail::SceneTransforms transforms(scene);
+  Detail::WorldTransforms transforms(scene);
   const auto first = Detail::resolveCollider(a, transforms.Resolve(a).model);
   const auto second = Detail::resolveCollider(b, transforms.Resolve(b).model);
   auto result = query(first, second);
@@ -271,7 +271,7 @@ std::optional<Contact> contact(const Scene& scene, Entity a, Entity b)
   return result;
 }
 
-std::vector<Contact> detect(const Scene& scene)
+std::vector<Contact> detect(const Jade::World& scene)
 {
   const auto colliders = Detail::captureColliders(scene);
   std::vector<Contact> result;

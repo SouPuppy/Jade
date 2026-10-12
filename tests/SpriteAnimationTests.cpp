@@ -7,18 +7,18 @@ namespace {
 using namespace Jade;
 using namespace Jade::Renderer;
 Entity sprite(Scene& scene, TextureHandle texture) {
-  auto entity = scene.create<Archetype<Transform, SpriteRenderer>>();
+  auto entity = scene.world().create<Archetype<Transform, SpriteRenderer>>();
   entity.get<SpriteRenderer>().frame.texture = texture;
   entity.get<SpriteRenderer>().size = {2,1};
   entity.get<SpriteRenderer>().billboard = false;
   return entity;
 }
 struct SpriteFixture {
-  Scene scene;
+  Scene scene{std::make_shared<World>()};
   Assets assets;
   Entity camera, hero;
   SpriteFixture() {
-    camera = scene.create<Archetype<Transform, Camera>>();
+    camera = scene.world().create<Archetype<Transform, Camera>>();
     camera.get<Transform>().position = {0,0.5f,5};
     camera.get<Camera>().projection = Projection::Orthographic;
     camera.get<Camera>().viewHeight = 2;
@@ -44,27 +44,27 @@ TEST(Texture, ValidatesStorageAndConvertsSrgbWithoutPremultiplication) {
 
 TEST(SpriteAnimation, HandlesVariableDurationsLoopPauseAndCompletion) {
   Assets assets;
-  Scene scene;
-  auto entity = scene.create<Archetype<Animator, SpriteRenderer>>();
+  Scene scene{std::make_shared<World>()};
+  auto entity = scene.world().create<Archetype<Animator, SpriteRenderer>>();
   AnimationClip clip{{{{},{0,0,0.25f,1},0.125f}, {{},{0.25f,0,0.25f,1},0.25f}, {{},{0.5f,0,0.25f,1},0.125f}},true};
   auto& animator = entity.get<Animator>();
   animator.play(assets.add(clip));
   Animation::System system;
-  system.update(scene,assets,0.125f);
+  system.update(scene.world(),assets,0.125f);
   EXPECT_EQ(animator.frame,1u);
   EXPECT_EQ(entity.get<SpriteRenderer>().frame.region.x,0.25f);
-  system.update(scene,assets,0.25f);
+  system.update(scene.world(),assets,0.25f);
   EXPECT_EQ(animator.frame,2u);
-  system.update(scene,assets,10.125f);
+  system.update(scene.world(),assets,10.125f);
   EXPECT_EQ(animator.frame,0u);
   EXPECT_DOUBLE_EQ(animator.time,0);
   animator.paused = true;
-  system.update(scene,assets,5);
+  system.update(scene.world(),assets,5);
   EXPECT_DOUBLE_EQ(animator.time,0);
   clip.loop = false;
   animator.paused = false;
   animator.play(assets.add(clip));
-  system.update(scene,assets,2);
+  system.update(scene.world(),assets,2);
   EXPECT_TRUE(animator.finished);
   EXPECT_EQ(animator.frame,2u);
   EXPECT_DOUBLE_EQ(animator.time,0.5);
@@ -72,33 +72,33 @@ TEST(SpriteAnimation, HandlesVariableDurationsLoopPauseAndCompletion) {
 
 TEST(SpriteAnimation, PreservesPhaseAcrossDirectionAndResetsOnStateChange) {
   Assets assets;
-  Scene scene;
-  auto entity = scene.create<Archetype<Animator, SpriteRenderer>>();
+  Scene scene{std::make_shared<World>()};
+  auto entity = scene.world().create<Archetype<Animator, SpriteRenderer>>();
   const auto first = assets.add(AnimationClip{{SpriteFrame{{},{},0.5f}, SpriteFrame{{},{},0.5f}}});
   const auto second = assets.add(AnimationClip{{SpriteFrame{{},{},0.5f}, SpriteFrame{{},{},0.5f}}});
   auto& animator = entity.get<Animator>();
   animator.play(first);
   Animation::System system;
-  system.update(scene,assets,0.75f);
+  system.update(scene.world(),assets,0.75f);
   animator.play(second,true);
-  system.update(scene,assets,0);
+  system.update(scene.world(),assets,0);
   EXPECT_EQ(animator.frame,1u);
   EXPECT_DOUBLE_EQ(animator.time,0.75);
   animator.play(first);
-  system.update(scene,assets,0);
+  system.update(scene.world(),assets,0);
   EXPECT_EQ(animator.frame,0u);
 }
 
 TEST(SpriteAnimation, RejectsInvalidClipsAndTime) {
   Assets assets;
-  Scene scene;
-  auto entity = scene.create<Archetype<Animator, SpriteRenderer>>();
+  Scene scene{std::make_shared<World>()};
+  auto entity = scene.world().create<Archetype<Animator, SpriteRenderer>>();
   Animation::System system;
   entity.get<Animator>().clip = assets.add(AnimationClip{});
-  EXPECT_THROW(system.update(scene,assets,0),std::invalid_argument);
+  EXPECT_THROW(system.update(scene.world(),assets,0),std::invalid_argument);
   entity.get<Animator>().clip = assets.add(AnimationClip{{SpriteFrame{{},{},0}}});
-  EXPECT_THROW(system.update(scene,assets,0),std::invalid_argument);
-  EXPECT_THROW(system.update(scene,assets,-1),std::invalid_argument);
+  EXPECT_THROW(system.update(scene.world(),assets,0),std::invalid_argument);
+  EXPECT_THROW(system.update(scene.world(),assets,-1),std::invalid_argument);
 }
 
 TEST(SpriteRenderer, TransparentPixelsDoNotOccludeAndFrameChangesReuseGeometry) {
@@ -145,7 +145,7 @@ TEST(SpriteRenderer, BillboardRemainsVerticalAndKeepsItsFootAnchor) {
 
 TEST(SpriteRenderer, CpuAndGpuAgreeOnCutoutColorAndFrameUpdates) {
   SpriteFixture f;
-  auto background = f.scene.create<Archetype<Transform, SpriteRenderer>>();
+  auto background = f.scene.world().create<Archetype<Transform, SpriteRenderer>>();
   background.get<Transform>().position = {0,0,-1};
   background.get<SpriteRenderer>().size = {3,2};
   background.get<SpriteRenderer>().billboard = false;
@@ -176,20 +176,30 @@ TEST(SpriteRenderer, CpuAndGpuAgreeOnCutoutColorAndFrameUpdates) {
 }
 
 TEST(CharacterController, StopsAtWallsAndSlidesWithoutRigidBody) {
-  Scene scene;
-  auto player = scene.create<Archetype<Transform, Collider, CharacterController>>();
+  Scene scene{std::make_shared<World>()};
+  auto player = scene.world().create<Archetype<Transform, Collider, CharacterController>>();
   player.get<Collider>() = Collider{Box{{0.2f,0.3f,0.2f}}};
-  auto wall = scene.create<Archetype<Transform, Collider>>();
+  auto wall = scene.world().create<Archetype<Transform, Collider>>();
   wall.get<Transform>().position = {1,0,0};
   wall.get<Collider>() = Collider{Box{{0.1f,1,10}}};
-  const auto actual = player.get<CharacterController>().move(scene,player,{3,0,2});
+  const auto actual = player.get<CharacterController>().move(scene.world(),player,{3,0,2});
   EXPECT_LE(actual.x,0.7001f);
   EXPECT_GE(actual.x,0.69f);
   EXPECT_NEAR(actual.z,2,0.0001f);
   EXPECT_EQ(actual.y,0);
   EXPECT_FALSE(player.has<RigidBody>());
-  EXPECT_THROW(player.get<CharacterController>().move(scene,player,{INFINITY,0,0}),std::invalid_argument);
-  const auto parent = scene.create();
-  scene.setParent(player,parent);
-  EXPECT_THROW(player.get<CharacterController>().move(scene,player,{1,0,0}),std::invalid_argument);
+  EXPECT_THROW(player.get<CharacterController>().move(scene.world(),player,{INFINITY,0,0}),std::invalid_argument);
+  const auto parent = scene.world().create();
+  scene.world().setParent(player,parent);
+  EXPECT_THROW(player.get<CharacterController>().move(scene.world(),player,{1,0,0}),std::invalid_argument);
+}
+
+TEST(CharacterController, InitialPenetrationIsResolvedWithoutMovement) {
+  Jade::World world;
+  const auto player = world.create<Archetype<Transform,Collider,CharacterController>>();
+  player.get<Collider>() = Collider{Box{{.2f,.3f,.2f}}}; player.get<Transform>().position = {.85f,0,0};
+  const auto wall = world.create<Archetype<Transform,Collider>>();
+  wall.get<Collider>() = Collider{Box{{.1f,1,10}}}; wall.get<Transform>().position = {1,0,0};
+  player.get<CharacterController>().move(world,player,{});
+  EXPECT_LT(player.get<Transform>().position.x,.7f); EXPECT_GT(player.get<Transform>().position.x,.699f);
 }

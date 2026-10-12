@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 namespace Untitled {
-void PlayerController::update(Jade::Scene& scene, Jade::Entity player, const CameraController& camera, Jade::Vec2 input, float dt) {
+void PlayerController::update(Jade::World& scene, Jade::Entity player, const CameraController& camera, Jade::Vec2 input, float dt) {
   if (!std::isfinite(dt) || dt < 0 || !std::isfinite(input.x) || !std::isfinite(input.y))
     throw std::invalid_argument("Invalid player input or dt.");
   const float magnitude = std::hypot(input.x, input.y);

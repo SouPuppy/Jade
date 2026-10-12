@@ -66,7 +66,7 @@ struct Input {
 
 Jade::Entity AddCamera(Jade::Scene &scene)
 {
-  const auto camera = scene.create();
+  const auto camera = scene.world().create();
   camera.add<Jade::Transform>().position = {0, 0, 5};
   camera.add<Jade::Camera>();
   return camera;
@@ -74,7 +74,7 @@ Jade::Entity AddCamera(Jade::Scene &scene)
 
 std::shared_ptr<Jade::Scene> SelectScene(Jade::Application &app)
 {
-  auto scene = std::make_shared<Jade::Scene>();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   scene->setCamera(AddCamera(*scene));
   app.runtime().setScene(scene);
   return scene;
@@ -136,7 +136,7 @@ TEST(SceneModules, InstallsOncePerSceneAndKeepsSubscriptionsAcrossActivation)
 {
   CounterModule::installs = CounterModule::updates = 0;
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   a->use<CounterModule>();
   a->use<CounterModule>();
   b->use<CounterModule>();
@@ -157,7 +157,7 @@ TEST(SceneModules, FailureCancelsNestedInstallationsAndPreservesExistingSubscrib
   CounterModule::installs = CounterModule::updates = 0;
   OuterModule::fail = true;
   Jade::Application app(Hidden());
-  auto scene = std::make_shared<Jade::Scene>();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   int existingUpdates = 0;
   const auto existing = scene->on<Jade::FrameUpdate>([&] { ++existingUpdates; });
   EXPECT_THROW(scene->use<OuterModule>(), std::runtime_error);
@@ -185,7 +185,7 @@ TEST(SceneModules, FailureRetainsPreviouslyInstalledDependency)
 {
   CounterModule::installs = CounterModule::updates = 0;
   Jade::Application app(Hidden());
-  auto scene = std::make_shared<Jade::Scene>();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   scene->use<CounterModule>();
   const auto original = CounterModule::connection;
   OuterModule::fail = true;
@@ -202,7 +202,7 @@ TEST(SceneModules, FailureRetainsPreviouslyInstalledDependency)
 
 TEST(SceneModules, RejectsRecursiveInstallationAndAllowsRetry)
 {
-  Jade::Scene scene;
+  Jade::Scene scene{std::make_shared<Jade::World>()};
   RecursiveModule::recurse = true;
   EXPECT_THROW(scene.use<RecursiveModule>(), std::logic_error);
   EXPECT_FALSE(RecursiveModule::connection.connected());
@@ -320,7 +320,7 @@ TEST(ApplicationDebug, CallbacksRunBeforeDefaultsAndStopCanPreventThem)
 TEST(ApplicationDebug, ProjectionUsesRetainedSceneDuringDeferredSwitch)
 {
   Jade::Application app(Hidden(true));
-  auto a = SelectScene(app), b = std::make_shared<Jade::Scene>();
+  auto a = SelectScene(app), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   b->setCamera(AddCamera(*b));
   app.on<Jade::KeyPressed<"2">>([&] { app.runtime().setScene(b); });
   Input input;
@@ -341,7 +341,7 @@ TEST(ApplicationDebug, MissingCameraAndComponentsAreIgnored)
   Input input;
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
-  auto scene = std::make_shared<Jade::Scene>();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   app.runtime().setScene(scene);
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
@@ -355,7 +355,7 @@ TEST(ApplicationDebug, MissingCameraAndComponentsAreIgnored)
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
   EXPECT_EQ(camera.get<Jade::Camera>().projection, Jade::Projection::Perspective);
-  scene->destroy(camera);
+  scene->world().destroy(camera);
   input.Tap(GLFW_KEY_O);
   EXPECT_NO_THROW(app.Run({1}));
 }
@@ -593,7 +593,7 @@ TEST(FPSCameraControl, ScrollReversalRestoresBothProjectionsEvenPastLimits)
 
 TEST(FPSCameraControl, MissingComponentsAndSceneOwnershipAreSafe)
 {
-  Jade::Application app(Hidden()); auto scene=std::make_shared<Jade::Scene>();
+  Jade::Application app(Hidden()); auto scene=std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   scene->use<Jade::Module::FPSCameraControl>(); app.runtime().setScene(scene);
   Input input; input.Key(GLFW_KEY_W,GLFW_PRESS); input.Button(GLFW_PRESS);
   input.Move(0,0);input.Move(20,0); input.scroll(input.window,0,1); EXPECT_NO_THROW(app.Run({2}));
@@ -601,7 +601,7 @@ TEST(FPSCameraControl, MissingComponentsAndSceneOwnershipAreSafe)
   ExpectNear(Jade::Motion::getFront(camera.get<Jade::Transform>()),{0,0,-1});
   camera.remove<Jade::Transform>();input.Move(60,0);EXPECT_NO_THROW(app.Run({2}));
   camera.remove<Jade::Camera>();input.scroll(input.window,0,1);EXPECT_NO_THROW(app.Run({1}));
-  scene->destroy(camera);EXPECT_NO_THROW(app.Run({1}));
+  scene->world().destroy(camera);EXPECT_NO_THROW(app.Run({1}));
   const auto connection=scene->on<Jade::FrameUpdate>([]{});std::weak_ptr<Jade::Scene> weak=scene;
   app.runtime().setScene(nullptr);scene.reset();EXPECT_TRUE(weak.expired());EXPECT_FALSE(connection.connected());
 }

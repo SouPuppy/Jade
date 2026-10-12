@@ -12,7 +12,7 @@
 
 static_assert(std::is_aggregate_v<Jade::Transform>);
 static_assert(std::is_aggregate_v<Jade::Camera>);
-static_assert(std::is_aggregate_v<Jade::Geometry>);
+static_assert(std::is_default_constructible_v<Jade::Geometry>);
 static_assert(std::is_aggregate_v<Jade::Material>);
 
 TEST(Camera, LookAtRejectsInvalidFramesWithoutReplacingRotation)
@@ -70,15 +70,15 @@ TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
   EXPECT_TRUE(initial.has<Jade::Transform>());
   EXPECT_TRUE(initial.has<Jade::Camera>());
   EXPECT_EQ(initial.get<Jade::Transform>().position, (Jade::Vec3{3, 3, 5}));
-  const auto selected = app.runtime().scene()->create();
+  const auto selected = app.runtime().scene()->world().create();
   selected.add<Jade::Camera>().projection = Jade::Projection::Orthographic;
   EXPECT_EQ(app.runtime().scene()->camera(), initial);
   EXPECT_THROW(app.runtime().scene()->setCamera(selected), std::invalid_argument);
   selected.add<Jade::Transform>().position = {0, 0, 5};
   app.runtime().scene()->setCamera(selected);
   EXPECT_EQ(app.runtime().scene()->camera(), selected);
-  Jade::Scene other;
-  const auto foreign = other.create();
+  Jade::Scene other{std::make_shared<Jade::World>()};
+  const auto foreign = other.world().create();
   foreign.add<Jade::Transform>();
   foreign.add<Jade::Camera>();
   EXPECT_THROW(app.runtime().scene()->setCamera(foreign), std::invalid_argument);
@@ -87,7 +87,7 @@ TEST(Application, ExplicitCameraSelectionRejectsForeignAndIncompleteEntities)
   EXPECT_NO_THROW(app.Run({2}));
   selected.add<Jade::Camera>();
   EXPECT_NO_THROW(app.Run({1}));
-  app.runtime().scene()->destroy(selected);
+  app.runtime().scene()->world().destroy(selected);
   EXPECT_FALSE(app.runtime().scene()->camera().valid());
   EXPECT_NO_THROW(app.Run({1}));
   EXPECT_THROW(app.runtime().scene()->setCamera(selected), std::invalid_argument);

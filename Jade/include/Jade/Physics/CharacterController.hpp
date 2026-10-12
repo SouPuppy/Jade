@@ -1,5 +1,5 @@
 #pragma once
-#include <Jade/Core/Scene.hpp>
+#include <Jade/World/World.hpp>
 #include <Jade/Math/Vector.hpp>
 
 namespace Jade {
@@ -8,6 +8,6 @@ namespace Jade {
 struct CharacterController {
   float groundHeight = 0;
   float maxStepDistance = 0.025f;
-  Vec3 move(Scene& scene, Entity character, Vec3 displacement) const;
+  Vec3 move(Jade::World& scene, Entity character, Vec3 displacement) const;
 };
 } // namespace Jade

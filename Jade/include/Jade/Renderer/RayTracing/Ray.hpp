@@ -22,6 +22,7 @@ struct SurfaceHit {
   Vec3 shadingNormal;
   Vec3 positionError;
   Vec3 barycentric;
+  Vec2 uv;
   std::uint32_t instance = 0;
   std::uint32_t primitive = 0;
   // Scene-local numeric identity; worker hits never retain live ECS handles.

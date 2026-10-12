@@ -60,6 +60,19 @@ TEST(Jobs, GraphForkJoinDynamicCountsReuseAndPriorityInheritance) {
   fork.depends(c, a); fork.depends(c, b); jobs.wait(jobs.submit(fork));
 }
 
+TEST(Jobs, FastRootsCannotResubmitTheirSuccessorsDuringSubmission) {
+  JobSystem jobs({6});
+  for (unsigned round = 0; round < 24; ++round) {
+    std::vector<std::atomic<unsigned>> executions(512);
+    TaskGraph graph; auto previous = graph.add([&] { ++executions[0]; });
+    for (std::size_t i = 1; i < executions.size(); ++i) {
+      const auto next = graph.add([&,i] { ++executions[i]; }); graph.depends(next,previous); previous = next;
+    }
+    jobs.wait(jobs.submit(graph));
+    for (const auto& count : executions) EXPECT_EQ(count.load(),1u);
+  }
+}
+
 TEST(Jobs, WeightedPrioritiesAndBackgroundCategoriesMakeProgress) {
   JobSystem jobs({1});
   std::latch entered(1); std::binary_semaphore release(0);

@@ -1,14 +1,10 @@
 #include "Registry.hpp"
-
-#include <algorithm>
-#include <limits>
-#include <stdexcept>
-
 namespace Jade::Detail {
-
 std::pair<std::uint32_t, std::uint32_t> Registry::Create()
 {
-  m_Groups[0].entities.reserve(m_Groups[0].entities.size() + 1);
+  RequireMutation();
+  if (m_Groups[0].entities.size() == m_Groups[0].entities.capacity())
+    m_Groups[0].entities.reserve(std::max<std::size_t>(16, m_Groups[0].entities.size() * 2));
   if (!m_Free.empty()) {
     const auto index = m_Free.back();
     m_Free.pop_back();
@@ -19,7 +15,7 @@ std::pair<std::uint32_t, std::uint32_t> Registry::Create()
     return {index, m_Slots[index].generation};
   }
   if (m_Slots.size() >= std::numeric_limits<std::uint32_t>::max()) {
-    throw std::overflow_error("Scene has exhausted its entity slots.");
+    throw std::overflow_error("Registry has exhausted its entity slots.");
   }
   const auto index = static_cast<std::uint32_t>(m_Slots.size());
   m_Slots.push_back({});
@@ -33,108 +29,85 @@ bool Registry::Alive(std::uint32_t index, std::uint32_t generation) const noexce
   return index < m_Slots.size() && m_Slots[index].alive && m_Slots[index].generation == generation;
 }
 
-void Registry::Destroy(std::uint32_t index, std::uint32_t generation)
-{
-  if (!Alive(index, generation)) {
-    throw std::logic_error("Entity is no longer alive.");
-  }
-  // Collect without recursion or mutation. All allocation precedes invalidation.
+
+void Registry::Destroy(std::uint32_t index, std::uint32_t generation) {
+  RequireMutation();
+  if (!Alive(index, generation)) throw std::logic_error("Dead entity.");
   std::vector<std::uint32_t> nodes{index};
-  for (std::size_t cursor = 0; cursor < nodes.size(); ++cursor) {
-    const auto& children = m_Slots[nodes[cursor]].children;
+  for (std::size_t i = 0; i < nodes.size(); ++i) {
+    const auto& children = m_Slots[nodes[i]].children;
     nodes.insert(nodes.end(), children.begin(), children.end());
   }
   std::reverse(nodes.begin(), nodes.end());
-  std::size_t count = 0;
-  for (const auto node : nodes) {
-    for (const auto& [type, pool] : m_Pools) {
-      (void)type;
-      count += pool.contains(node);
-    }
+  std::vector<std::function<void()>> retired;
+  std::size_t total = 0;
+  for (auto node : nodes) total += m_Groups[m_Slots[node].group].types.size();
+  retired.reserve(total);
+  if (m_Free.size() + nodes.size() > m_Free.capacity())
+    m_Free.reserve(std::max(m_Free.size() + nodes.size(), std::max<std::size_t>(16, m_Free.capacity() * 2)));
+  // Prepare every allocation before changing any live identity.
+  for (auto node : nodes) {
+    const auto& types = m_Groups[m_Slots[node].group].types;
+    for (auto type : types) retired.push_back(m_Pools[m_TypeIds.at(type)]->prepare(node));
   }
-  std::vector<std::shared_ptr<void>> removed;
-  removed.reserve(count);
-  m_Free.reserve(m_Free.size() + nodes.size());
-  constexpr auto none = std::numeric_limits<std::uint32_t>::max();
-  const auto parent = m_Slots[index].parent;
-  if (parent != none) std::erase(m_Slots[parent].children, index);
-  for (const auto node : nodes) {
+  for (auto node : nodes) {
+    for (auto type : m_Groups[m_Slots[node].group].types) m_Pools[m_TypeIds.at(type)]->unlink(node);
+  }
+  auto parent = m_Slots[index].parent;
+  if (parent != UINT32_MAX) std::erase(m_Slots[parent].children, index);
+  for (auto node : nodes) {
     RemoveFromGroup(node);
-    auto& slot = m_Slots[node];
-    slot.alive = false;
-    slot.parent = none;
-    slot.children.clear();
-    if (slot.generation != none) {
-      ++slot.generation;
-      m_Free.push_back(node);
-    }
+    auto& slot = m_Slots[node]; slot.alive = false; slot.parent = UINT32_MAX; slot.children.clear();
+    if (slot.generation != UINT32_MAX) { ++slot.generation; m_Free.push_back(node); }
   }
-  for (const auto node : nodes) {
-    for (auto& [type, pool] : m_Pools) {
-      (void)type;
-      const auto found = pool.find(node);
-      if (found != pool.end()) {
-        removed.push_back(std::move(found->second));
-        pool.erase(found);
-      }
-    }
-  }
-  // No live container iterator or doomed identity crosses a user destructor.
-  for (auto& component : removed) component.reset();
+  for (auto& destroy : retired) if (destroy) destroy();
 }
-
-bool Registry::Has(std::uint32_t index, std::type_index type) const noexcept
-{
-  const auto pool = m_Pools.find(type);
-  return pool != m_Pools.end() && pool->second.contains(index);
+bool Registry::Has(std::uint32_t e, std::type_index type) const noexcept {
+  auto it = m_TypeIds.find(type);
+  return it != m_TypeIds.end() && m_Pools[it->second]->has(e);
 }
-
-void* Registry::Add(std::uint32_t index, std::type_index type, std::shared_ptr<void> component)
-{
-  auto signature = m_Groups[m_Slots[index].group].types;
-  if (std::binary_search(signature.begin(), signature.end(), type))
-    throw std::logic_error("Entity already has this component.");
-  signature.insert(std::lower_bound(signature.begin(), signature.end(), type), type);
-  const auto group = FindGroup(std::move(signature));
-  m_Groups[group].entities.reserve(m_Groups[group].entities.size() + 1);
-  const auto [entry, inserted] = m_Pools[type].emplace(index, std::move(component));
-  if (!inserted) {
-    throw std::logic_error("Entity already has this component.");
-  }
-  ChangeGroup(index, group);
-  return entry->second.get();
+void* Registry::Get(std::uint32_t e, std::type_index type) const {
+  auto it = m_TypeIds.find(type);
+  if (it == m_TypeIds.end()) throw std::out_of_range("Missing component.");
+  return m_Pools[it->second]->get(e);
 }
-
-void* Registry::Get(std::uint32_t index, std::type_index type) const
-{
-  const auto pool = m_Pools.find(type);
-  if (pool == m_Pools.end()) {
-    throw std::out_of_range("Entity does not have this component.");
+void Registry::AddSignature(std::uint32_t e, std::type_index type) {
+  const auto previous = m_Slots[e].group;
+  const auto cached = m_Groups[previous].additions.find(type);
+  std::size_t group;
+  if (cached != m_Groups[previous].additions.end()) group = cached->second;
+  else {
+    auto types = m_Groups[previous].types;
+    if (std::binary_search(types.begin(), types.end(), type)) throw std::logic_error("Duplicate component.");
+    types.insert(std::lower_bound(types.begin(), types.end(), type), type);
+    group = FindGroup(std::move(types));
+    m_Groups[previous].additions.emplace(type,group);
   }
-  const auto entry = pool->second.find(index);
-  if (entry == pool->second.end()) {
-    throw std::out_of_range("Entity does not have this component.");
-  }
-  return entry->second.get();
+  if (m_Groups[group].entities.size() == m_Groups[group].entities.capacity())
+    m_Groups[group].entities.reserve(std::max<std::size_t>(16, m_Groups[group].entities.size() * 2));
+  ChangeGroup(e, group);
+  Changed(e);
 }
-
-void Registry::Remove(std::uint32_t index, std::type_index type)
-{
-  const auto pool = m_Pools.find(type);
-  if (pool != m_Pools.end()) {
-    if (!pool->second.contains(index)) return;
-    auto signature = m_Groups[m_Slots[index].group].types;
-    std::erase(signature, type);
-    const auto group = FindGroup(std::move(signature));
-    m_Groups[group].entities.reserve(m_Groups[group].entities.size() + 1);
-    ChangeGroup(index, group);
-    // Node extraction ensures a destructor cannot invalidate a live map operation.
-    auto removed = pool->second.extract(index);
+void Registry::Remove(std::uint32_t e, std::type_index type) {
+  RequireMutation();
+  if (!Has(e, type)) return;
+  const auto previous = m_Slots[e].group;
+  const auto cached = m_Groups[previous].removals.find(type);
+  std::size_t group;
+  if (cached != m_Groups[previous].removals.end()) group = cached->second;
+  else {
+    auto types = m_Groups[previous].types; std::erase(types, type);
+    group = FindGroup(std::move(types));
+    m_Groups[previous].removals.emplace(type,group);
   }
+  if (m_Groups[group].entities.size() == m_Groups[group].entities.capacity())
+    m_Groups[group].entities.reserve(std::max<std::size_t>(16, m_Groups[group].entities.size() * 2));
+  auto retired = m_Pools[m_TypeIds.at(type)]->detach(e);
+  ChangeGroup(e, group); Changed(e); if (retired) retired();
 }
-
 void Registry::SetParent(std::uint32_t child, std::optional<std::uint32_t> parent)
 {
+  RequireMutation();
   constexpr auto none = std::numeric_limits<std::uint32_t>::max();
   const auto next = parent.value_or(none);
   if (m_Slots[child].parent == next) return;
@@ -146,6 +119,7 @@ void Registry::SetParent(std::uint32_t child, std::optional<std::uint32_t> paren
   if (previous != none) std::erase(m_Slots[previous].children, child);
   m_Slots[child].parent = next;
   if (next != none) m_Slots[next].children.push_back(child);
+  Changed(child);
 }
 
 std::optional<std::pair<std::uint32_t, std::uint32_t>> Registry::Parent(std::uint32_t index) const
@@ -162,10 +136,8 @@ std::vector<std::pair<std::uint32_t, std::uint32_t>> Registry::Children(std::uin
   return result;
 }
 
-std::vector<std::pair<std::uint32_t, std::uint32_t>> Registry::Matching(
-  std::initializer_list<std::type_index> types) const
-{
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> result;
+
+const std::vector<std::size_t>& Registry::Groups(std::initializer_list<std::type_index> types) const {
   std::vector<std::type_index> signature(types);
   std::sort(signature.begin(), signature.end());
   signature.erase(std::unique(signature.begin(), signature.end()), signature.end());
@@ -177,16 +149,21 @@ std::vector<std::pair<std::uint32_t, std::uint32_t>> Registry::Matching(
         groups.push_back(i);
     found = m_QueryGroups.emplace(std::move(signature), std::move(groups)).first;
   }
-  m_LastQueryRows = 0;
-  for (const auto group : found->second)
-    for (const auto index : m_Groups[group].entities) {
-      ++m_LastQueryRows;
-      result.emplace_back(index, m_Slots[index].generation);
-    }
-  std::sort(result.begin(), result.end());
-  return result;
+  return found->second;
 }
-
+std::vector<std::pair<std::uint32_t, std::uint32_t>> Registry::Matching(std::initializer_list<std::type_index> types) const {
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> result;
+  m_LastQueryRows = 0;
+  for (auto group : Groups(types)) for (auto index : m_Groups[group].entities) {
+    ++m_LastQueryRows; result.emplace_back(index, m_Slots[index].generation);
+  }
+  std::sort(result.begin(), result.end()); return result;
+}
+void Registry::Visit(std::initializer_list<std::type_index> types, const std::function<void(std::uint32_t, std::uint32_t)>& fn) {
+  const auto& groups = Groups(types); ++m_IterationDepth;
+  struct Guard { unsigned& depth; ~Guard() { --depth; } } guard{m_IterationDepth};
+  for (auto group : groups) for (auto index : m_Groups[group].entities) fn(index, m_Slots[index].generation);
+}
 std::size_t Registry::FindGroup(std::vector<std::type_index> types)
 {
   if (const auto found = m_GroupLookup.find(types); found != m_GroupLookup.end()) return found->second;

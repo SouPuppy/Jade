@@ -28,8 +28,14 @@ void World::Impl::ensureIndex() const {
   movingTree.update(shapes,moving,config.contactDistance*2); indexDirty = false;
 }
 void World::Impl::updateIndex() {
-  shapes.resize(work.size()); statics.clear(); moving.clear();
-  parallel(work.size(),[&](auto i) { if (slots[i].alive) { Detail::updateBounds(work[i].shape); shapes[i] = work[i].shape; } });
+  shapes.resize(work.size()); predicted.resize(work.size()); statics.clear(); moving.clear();
+  parallel(work.size(),[&](auto i) { if (slots[i].alive) {
+    auto& b = work[i]; Detail::updateBounds(b.shape); shapes[i] = b.shape; predicted[i] = b.shape.bounds;
+    const auto translation = b.velocity*(config.fixedStep*2);
+    const double radius = b.shape.kind == Detail::CollisionKind::Sphere ? b.shape.radius : collisionLength(b.shape.halfExtents);
+    const double rotation = radius*std::min(2.0,Internal::angularSpeedBound(b)*config.fixedStep*2);
+    for (unsigned k = 0; k < 3; ++k) { predicted[i].minimum[k] += std::min(0.0,translation[k])-rotation; predicted[i].maximum[k] += std::max(0.0,translation[k])+rotation; }
+  } });
   for (std::size_t i = 0; i < slots.size(); ++i) {
     const auto& s = slots[i]; if (!s.alive || !s.description.enabled || s.description.shape.empty()) continue;
     (s.description.motion == MotionType::Static ? statics : moving).push_back(i);
@@ -38,9 +44,9 @@ void World::Impl::updateIndex() {
   if (jobs && work.size() >= config.parallelThreshold) {
     TaskGraph g;
     g.add([&] { staticTree.update(shapes,statics,config.contactDistance*2); },{JobCategory::Physics});
-    g.add([&] { movingTree.update(shapes,moving,config.contactDistance*2); },{JobCategory::Physics});
+    g.add([&] { movingTree.update(shapes,moving,config.contactDistance*2,predicted); },{JobCategory::Physics});
     jobs->wait(jobs->submit(g),WaitMode::Help);
-  } else { staticTree.update(shapes,statics,config.contactDistance*2); movingTree.update(shapes,moving,config.contactDistance*2); }
+  } else { staticTree.update(shapes,statics,config.contactDistance*2); movingTree.update(shapes,moving,config.contactDistance*2,predicted); }
   indexDirty = false;
 }
 void World::Impl::sample(double sampleTime) {
@@ -49,18 +55,20 @@ void World::Impl::sample(double sampleTime) {
     const auto& b = work[i];
     snapshot[i] = {slots[i].entity,b.shape.center.vector(),b.velocity.vector(),
       slots[i].alive && slots[i].description.enabled && !slots[i].description.shape.empty() && slots[i].description.motion == MotionType::Dynamic
-        ? slots[i].description.mass : 0,id(i),b.shape.center,b.velocity};
+        ? slots[i].description.mass : 0,id(i),b.shape.center,b.velocity,b.orientation,b.angular,b.momentum()};
     if (!slots[i].alive) snapshot[i].id = {};
   });
   for (std::size_t i = 0; i < snapshot.size(); ++i) if (snapshot[i].entity.valid()) entityIndex.emplace_back(snapshot[i].entity.id(),i);
   std::sort(entityIndex.begin(),entityIndex.end());
+  kernels.clear(); kernels.reserve(fields.size());
+  for (const auto& field : fields) if (field.field) kernels.push_back(field.field->prepare(snapshot,entityIndex));
   parallel(work.size(),[&](auto i) {
     FieldSample sum;
     if (slots[i].alive && snapshot[i].mass > 0) {
       if (!awake[i] && !slots[i].edited && !wakeAll) { samples[i] = {slots[i].forces.fieldForce,slots[i].forces.fieldTorque}; return; }
       const FieldContext context{snapshot[i],snapshot,entityIndex,sampleTime};
-      for (const auto& field : fields) if (field.field) {
-        const auto next = field.field->sampleStage(context); sum.force = sum.force+next.force; sum.torque = sum.torque+next.torque;
+      for (const auto& kernel : kernels) {
+        const auto next = kernel(context); sum.force = sum.force+next.force; sum.torque = sum.torque+next.torque;
         (void)sum.force.vector(); (void)sum.torque.vector();
       }
       sum.force = sum.force+slots[i].force+slots[i].persistentForce;
@@ -100,7 +108,7 @@ void World::Impl::collectPairs() {
 void World::Impl::collide(double dt,Statistics& result,bool continuousImpact) {
   auto begin = Clock::now(); updateIndex(); collectPairs(); result.candidatePairs += candidates.size(); result.timing.broadPhase += elapsed(begin);
   // Wake whole cached islands when an active body reaches a sleeping member.
-  std::vector<unsigned char> reached(work.size());
+  reached.assign(work.size(),0);
   for (const auto p : candidates) {
     if (work[p.a].inverseMass && awake[p.b]) reached[root(parents,p.a)] = 1;
     if (work[p.b].inverseMass && awake[p.a]) reached[root(parents,p.b)] = 1;
@@ -120,12 +128,14 @@ void World::Impl::collide(double dt,Statistics& result,bool continuousImpact) {
     if (found != pairs.end() && key(found->a,found->b) == k && found->generationA == slots[p.a].generation && found->generationB == slots[p.b].generation)
       previous = {found->anchors.data(),found->count};
     batch.constraints = buildConstraints(work[p.a],work[p.b],p.a,p.b,previous,config,static_cast<float>(dt),solvePass == 0 ? previousDt : 0);
+    batch.cacheHit = !previous.empty() && !work[p.a].edited && !work[p.b].edited;
     if (continuousImpact) for (auto& c : batch.constraints) if (c.target < 0) c.target = 0;
   },32);
   result.timing.narrowPhase += elapsed(begin);
+  for (const auto& batch : batches) if (batch.cacheHit) ++result.cacheHits;
   begin = Clock::now();
   for (const auto& batch : batches) if (!batch.constraints.empty() && work[batch.a].inverseMass && work[batch.b].inverseMass) join(parents,batch.a,batch.b);
-  std::vector<std::uint64_t> masks(work.size());
+  colorMasks.assign(work.size(),0); auto& masks = colorMasks;
   for (auto& color : colors) color.clear(); if (colors.size() < 65) colors.resize(65);
   for (std::size_t i = 0; i < batches.size(); ++i) {
     const auto& b = batches[i]; if (b.constraints.empty()) continue;
@@ -146,6 +156,7 @@ void World::Impl::collide(double dt,Statistics& result,bool continuousImpact) {
 void World::Impl::solve(Statistics& result) {
   const auto begin = Clock::now();
   solverVelocity.resize(work.size()); parallel(work.size(),[&](auto i) { solverVelocity[i] = work[i].velocity; });
+  solverMomentum.resize(work.size());
   const auto run = [&](const auto& operation) {
     for (std::size_t color = 0; color < colors.size(); ++color) {
       const auto& group = colors[color];
@@ -186,8 +197,12 @@ void World::Impl::solve(Statistics& result) {
     // Warm starting is already applied above; only iteration barriers enter this graph.
     for (unsigned iteration = 0; iteration < config.velocityIterations; ++iteration)
       for (std::size_t color = 0; color < colors.size(); ++color) append(1,color);
+    const auto beforePosition = graph.addParallelFor(work.size(),[&](auto i) { solverMomentum[i] = work[i].momentum(); },{JobCategory::Physics});
+    if (hasPrevious) graph.depends(beforePosition,previous); previous = beforePosition; hasPrevious = true;
     for (unsigned iteration = 0; iteration < config.positionIterations; ++iteration)
       for (std::size_t color = 0; color < colors.size(); ++color) append(2,color);
+    const auto afterPosition = graph.addParallelFor(work.size(),[&](auto i) { if (work[i].inverseMass) work[i].angular = work[i].inertia(solverMomentum[i]); },{JobCategory::Physics});
+    graph.depends(afterPosition,previous);
     jobs->wait(jobs->submit(graph),WaitMode::Help);
     parallel(work.size(),[&](auto i) { if (work[i].inverseMass) contactImpulse[i] = contactImpulse[i]+(work[i].velocity-solverVelocity[i])*slots[i].description.mass; });
     result.timing.solve += elapsed(begin); return;
@@ -208,23 +223,14 @@ void World::Impl::solve(Statistics& result) {
       },8);
     }
   }
+  for (std::size_t i = 0; i < work.size(); ++i) solverMomentum[i] = work[i].momentum();
   for (unsigned i = 0; i < config.positionIterations; ++i) run([&](auto& c) { solvePosition(work,c,config); });
+  for (std::size_t i = 0; i < work.size(); ++i) if (work[i].inverseMass) work[i].angular = work[i].inertia(solverMomentum[i]);
   parallel(work.size(),[&](auto i) { if (work[i].inverseMass) contactImpulse[i] = contactImpulse[i]+(work[i].velocity-solverVelocity[i])*slots[i].description.mass; });
   result.timing.solve += elapsed(begin);
 }
 void World::Impl::integrateOrientation(Body& b,double dt) {
-  if (!nonzero(b.angular)) return;
-  if (!b.inverseMass || b.shape.kind == Detail::CollisionKind::Sphere) { b.turn(b.angular*dt); return; }
-  const auto momentum = b.momentum(); const Body initial = b; auto omega = b.angular;
-  bool converged = false;
-  for (unsigned iteration = 0; iteration < 32; ++iteration) {
-    Body midpoint = initial; midpoint.turn(omega*(dt*.5));
-    const auto next = midpoint.inertia(momentum);
-    if (collisionLength(next-omega)*dt < 2e-7) { omega = next; converged = true; break; }
-    omega = (omega+next)*.5;
-  }
-  if (!converged) throw std::runtime_error("Angular midpoint integration failed to converge.");
-  b = initial; b.turn(omega*dt); b.angular = b.inertia(momentum);
+  Internal::integrateOrientation(b,dt);
 }
 void World::Impl::drift(double dt) {
   parallel(work.size(),[&](auto i) {
@@ -233,18 +239,31 @@ void World::Impl::drift(double dt) {
     const double h = s.hasTarget ? std::min(dt,s.targetTime) : dt;
     b.shape.center = b.shape.center+b.velocity*h; integrateOrientation(b,h);
     if (s.hasTarget && dt+1e-12 >= s.targetTime) {
-      b.shape.center = s.targetPosition; b.pose.rotation = s.targetRotation; b.velocity = {}; b.angular = {};
-      b.shape.axes = {v(b.pose.rotation.rotate({1,0,0})),v(b.pose.rotation.rotate({0,1,0})),v(b.pose.rotation.rotate({0,0,1}))};
+      b.shape.center = s.targetPosition; b.orientation = s.targetRotation; b.velocity = {}; b.angular = {};
+      b.shape.axes = {b.orientation.rotate({1,0,0}),b.orientation.rotate({0,1,0}),b.orientation.rotate({0,0,1})};
     }
   });
 }
 void World::Impl::sleep(double dt,Statistics& result) {
-  const auto n = work.size(); std::vector<unsigned char> stable(n,1),hasContact(n),hasIsland(n);
+  const auto n = work.size(); stable.assign(n,1); hasContact.assign(n,0); hasIsland.assign(n,0);
+  if (!config.sleeping) {
+    // Keep island diagnostics without evaluating equilibrium/contact residuals.
+    // Disabling sleep must not change the contact solution or retain quiet time.
+    for (const auto& batch : batches) if (!batch.constraints.empty()) {
+      if (work[batch.a].inverseMass) hasIsland[root(parents,batch.a)] = 1;
+      if (work[batch.b].inverseMass) hasIsland[root(parents,batch.b)] = 1;
+    }
+    result.islands = std::count(hasIsland.begin(),hasIsland.end(),1);
+    for (std::size_t i = 0; i < n; ++i) if (work[i].inverseMass) { quiet[i] = 0; ++result.activeBodies; }
+    return;
+  }
   bool fieldsAllow = true; for (const auto& f : fields) if (f.field && !f.field->permitsSleep()) fieldsAllow = false;
   for (const auto& batch : batches) for (const auto& c : batch.constraints) {
     const double separation = collisionDot((work[c.b].shape.center-work[c.a].shape.center)+work[c.b].offset(c.localB)-work[c.a].offset(c.localA),c.normal);
     for (const auto i : {c.a,c.b}) if (work[i].inverseMass) {
       hasContact[i] = 1; hasIsland[root(parents,i)] = 1;
+      const auto other = i == c.a ? c.b : c.a;
+      if (slots[other].description.motion == MotionType::Kinematic && (nonzero(work[other].velocity) || nonzero(work[other].angular))) stable[root(parents,i)] = 0;
       if (separation < -config.contactDistance || std::abs(collisionDot(relative(work[c.a],work[c.b],c.ra,c.rb),c.normal)) > config.sleepVelocity)
         stable[root(parents,i)] = 0;
     }
@@ -264,7 +283,7 @@ void World::Impl::sleep(double dt,Statistics& result) {
         (awake[i] && collisionLength(residual)/d.mass*dt > config.sleepVelocity)) stable[r] = 0;
     if (!hasContact[i] && collisionLength(samples[i].force)/d.mass*dt > config.sleepVelocity) stable[r] = 0;
   }
-  std::vector<double> islandQuiet(n,std::numeric_limits<double>::infinity());
+  islandQuiet.assign(n,std::numeric_limits<double>::infinity());
   for (std::size_t i = 0; i < n; ++i) if (work[i].inverseMass) {
     const auto r = root(parents,i); quiet[i] = stable[r] ? quiet[i]+dt : 0; islandQuiet[r] = std::min(islandQuiet[r],quiet[i]);
   }
@@ -276,7 +295,14 @@ void World::Impl::sleep(double dt,Statistics& result) {
 }
 void World::step(double dt) {
   auto& p = *m_Impl; p.writable();
-  if (!std::isfinite(dt) || dt <= 0 || dt > std::numeric_limits<float>::max()) throw std::invalid_argument("Physics dt must be positive and finite.");
+  if (!std::isfinite(dt) || dt <= 0 || dt > std::numeric_limits<float>::max() || !std::isfinite(p.time+dt)) throw std::invalid_argument("Physics dt must be positive and finite.");
+  if (p.config.sleeping && !p.dirty && !p.wakeAll && !p.graphDirty && p.wakeRegions.empty() &&
+      p.stats.dynamicBodies == p.stats.sleepingBodies && !p.stats.kinematicBodies &&
+      std::all_of(p.fields.begin(),p.fields.end(),[](const auto& field) { return !field.field || field.field->permitsSleep(); })) {
+    const auto begin = Clock::now(); p.time += dt; ++p.stats.steps;
+    p.stats.candidatePairs = p.stats.cacheHits = p.stats.toiEvents = p.stats.colors = 0;
+    p.stats.timing = {}; p.stats.timing.total = elapsed(begin); return;
+  }
   p.stepping = true;
   struct Guard { Impl& p; bool committed = false; ~Guard() { p.stepping = false; if (!committed) { p.indexDirty = true; p.staticTree.clear(); p.movingTree.clear(); } } } guard{p};
   const auto start = Clock::now(); Statistics result; result.steps = p.stats.steps+1;
@@ -292,11 +318,25 @@ void World::step(double dt) {
   if (p.graphDirty || p.islandParents.size() != n) for (const auto& pair : p.pairs) if (pair.count && p.slots[pair.a].alive && p.slots[pair.b].alive && p.slots[pair.a].description.enabled && p.slots[pair.b].description.enabled &&
       pair.generationA == p.slots[pair.a].generation && pair.generationB == p.slots[pair.b].generation && p.work[pair.a].inverseMass && p.work[pair.b].inverseMass)
     join(p.parents,pair.a,pair.b);
-  std::vector<unsigned char> wakeRoots(n);
+  p.wakeRoots.assign(n,0); auto& wakeRoots = p.wakeRoots;
   for (std::size_t i = 0; i < n; ++i) if (p.awake[i]) wakeRoots[root(p.parents,i)] = 1;
-  for (std::size_t i = 0; i < n; ++i) if (p.work[i].inverseMass && wakeRoots[root(p.parents,i)]) p.awake[i] = 1;
+  for (const auto& pair : p.pairs) if (pair.count && pair.generationA == p.slots[pair.a].generation && pair.generationB == p.slots[pair.b].generation) {
+    for (const auto i : {pair.a,pair.b}) {
+      const auto other = i == pair.a ? pair.b : pair.a;
+      if (p.work[i].inverseMass && (p.slots[other].edited || (p.slots[other].description.motion == MotionType::Kinematic && p.awake[other]))) wakeRoots[root(p.parents,i)] = 1;
+    }
+  }
+  if (!p.wakeRegions.empty() && !p.wakeAll) {
+    p.updateIndex();
+    for (const auto& region : p.wakeRegions) p.movingTree.query(region,p.config.contactDistance,[&](auto i) {
+      if (p.work[i].inverseMass && p.shapes[i].bounds.overlaps(region,p.config.contactDistance)) wakeRoots[root(p.parents,i)] = 1;
+    });
+  }
+  for (std::size_t i = 0; i < n; ++i) if (p.work[i].inverseMass && wakeRoots[root(p.parents,i)]) {
+    if (!p.awake[i]) p.quiet[i] = 0; p.awake[i] = 1;
+  }
   auto begin = Clock::now(); p.sample(p.time); result.timing.fields = elapsed(begin);
-  const auto firstSamples = p.samples;
+  if (p.integration == Integration::VelocityVerlet) p.firstSamples = p.samples;
   begin = Clock::now();
   const double kick = p.integration == Integration::VelocityVerlet ? .5 : 1;
   p.parallel(n,[&](auto i) {
@@ -325,15 +365,14 @@ void World::step(double dt) {
     begin = Clock::now(); p.sample(p.time+dt); result.timing.fields += elapsed(begin);
     p.parallel(n,[&](auto i) { auto& b = p.work[i]; if (p.awake[i] && b.inverseMass) {
       b.velocity = b.velocity+p.samples[i].force*(b.inverseMass*dt*.5); b.angular = b.angular+b.inertia(p.samples[i].torque*(dt*.5));
-    } p.samples[i].force = (p.samples[i].force+firstSamples[i].force)*.5; p.samples[i].torque = (p.samples[i].torque+firstSamples[i].torque)*.5; });
+    } p.samples[i].force = (p.samples[i].force+p.firstSamples[i].force)*.5; p.samples[i].torque = (p.samples[i].torque+p.firstSamples[i].torque)*.5; });
   }
   p.parallel(n,[&](auto i) { p.velocityBefore[i] = p.work[i].velocity; });
   p.collide(dt,result,continuous);
   p.sleep(dt,result);
-  begin = Clock::now(); p.nextPairs.clear(); p.nextPairs.resize(p.batches.size());
-  std::vector<unsigned char> valid(p.batches.size());
+  begin = Clock::now(); p.nextPairs.resize(p.batches.size());
   p.parallel(p.batches.size(),[&](auto i) {
-    const auto& batch = p.batches[i]; auto& next = p.nextPairs[i]; next = {};
+    const auto& batch = p.batches[i]; auto& next = p.nextPairs[i]; next.count = 0; next.contact.count = 0;
     next.a = static_cast<std::uint32_t>(batch.a); next.b = static_cast<std::uint32_t>(batch.b);
     next.generationA = p.slots[batch.a].generation; next.generationB = p.slots[batch.b].generation;
     const auto& a = p.work[batch.a]; const auto& b = p.work[batch.b];
@@ -346,7 +385,7 @@ void World::step(double dt) {
       next.contact.points[next.count++] = {pa,pb,friction,collisionDot((b.shape.center-a.shape.center)+b.offset(c.localB)-a.offset(c.localA),c.normal),c.normalImpulse};
       next.contact.normal = c.normal;
     }
-    next.contact.count = next.count; valid[i] = next.count > 0;
+    next.contact.count = next.count;
   });
   // Retain sleeping contacts; no integration or solver work is necessary for them.
   for (const auto& old : p.pairs) if (p.slots[old.a].alive && p.slots[old.b].alive && p.slots[old.a].description.enabled && p.slots[old.b].description.enabled && old.generationA == p.slots[old.a].generation && old.generationB == p.slots[old.b].generation &&
@@ -355,13 +394,26 @@ void World::step(double dt) {
     const auto it = std::lower_bound(p.candidates.begin(),p.candidates.end(),k,[](auto c,auto value) { return Impl::key(c.a,c.b) < value; });
     if (it == p.candidates.end() || Impl::key(it->a,it->b) != k) p.nextPairs.push_back(old);
   }
-  std::sort(p.nextPairs.begin(),p.nextPairs.end(),[](const auto& a,const auto& b) { return Impl::key(a.a,a.b) < Impl::key(b.a,b.b); });
-  std::vector<WorldContact> nextContacts; nextContacts.reserve(p.nextPairs.size());
-  for (const auto& pair : p.nextPairs) if (pair.count) {
-    nextContacts.push_back(pair.contact); result.contacts += pair.count;
-    for (unsigned k = 0; k < pair.count; ++k) result.maximumPenetration = std::max(result.maximumPenetration,static_cast<float>(-pair.contact.points[k].separation));
+  if (!p.batches.empty() && p.nextPairs.size() > p.batches.size())
+    std::inplace_merge(p.nextPairs.begin(),p.nextPairs.begin()+p.batches.size(),p.nextPairs.end(),[](const auto& a,const auto& b) { return Impl::key(a.a,a.b) < Impl::key(b.a,b.b); });
+  p.contactOffsets.resize(p.nextPairs.size()); std::size_t contactCount = 0;
+  for (std::size_t i = 0; i < p.nextPairs.size(); ++i) {
+    p.contactOffsets[i] = contactCount; if (p.nextPairs[i].count) ++contactCount; result.contacts += p.nextPairs[i].count;
   }
-  std::vector<ForceState> forces(n);
+  auto& nextContacts = p.nextContacts; nextContacts.resize(contactCount);
+  constexpr std::size_t publicationBlock = 64;
+  p.penetrationBlocks.assign((p.nextPairs.size()+publicationBlock-1)/publicationBlock,0);
+  p.parallel(p.penetrationBlocks.size(),[&](auto block) {
+    double maximum = 0;
+    for (std::size_t i = block*publicationBlock; i < std::min(p.nextPairs.size(),(block+1)*publicationBlock); ++i) {
+      const auto& pair = p.nextPairs[i]; if (!pair.count) continue;
+      nextContacts[p.contactOffsets[i]] = pair.contact;
+      for (unsigned k = 0; k < pair.count; ++k) maximum = std::max(maximum,-pair.contact.points[k].separation);
+    }
+    p.penetrationBlocks[block] = maximum;
+  },1);
+  for (const auto maximum : p.penetrationBlocks) result.maximumPenetration = std::max(result.maximumPenetration,static_cast<float>(maximum));
+  auto& forces = p.nextForces; forces.assign(n,{});
   p.parallel(n,[&](auto i) {
     if (!p.slots[i].alive) return;
     auto& b = p.work[i]; (void)b.shape.center.vector(); (void)b.velocity.vector(); (void)b.angular.vector();
@@ -373,7 +425,8 @@ void World::step(double dt) {
         forces[i] = {p.samples[i].force,p.samples[i].torque,contact,p.samples[i].force+contact,
           p.awake[i] ? ForceStatus::Solved : ForceStatus::SleepingEquilibrium};
       }
-      (void)forces[i].totalForce.vector(); (void)b.momentum().vector();
+      (void)forces[i].totalForce.vector(); const auto momentum = b.momentum();
+      for (unsigned k = 0; k < 3; ++k) if (!std::isfinite(momentum[k])) throw std::invalid_argument("Nonfinite angular momentum.");
     }
   });
   bool splitRequired = false;
@@ -388,7 +441,7 @@ void World::step(double dt) {
     auto& s = p.slots[i]; auto& b = p.work[i];
     Impl::StateStorage::put(p.state.position,i,b.shape.center); Impl::StateStorage::put(p.state.velocity,i,b.velocity);
     Impl::StateStorage::put(p.state.angular,i,b.angular); Impl::StateStorage::put(p.state.momentum,i,b.momentum());
-    p.state.rotation[i] = b.pose.rotation; p.state.sleeping[i] = b.inverseMass && !p.awake[i];
+    p.state.rotation[i] = b.orientation; p.state.sleeping[i] = b.inverseMass && !p.awake[i];
     s.quiet = p.quiet[i]; s.edited = false; s.geometryEdited = false; s.force = {}; s.torque = {}; s.forces = forces[i];
     s.prototype = b;
     if (s.hasTarget) { s.targetTime -= dt; if (s.targetTime <= 1e-12) s.hasTarget = false; }
@@ -399,6 +452,8 @@ void World::step(double dt) {
     }
   }
   p.contacts.swap(nextContacts); p.pairs.swap(p.nextPairs); p.previousDt = dt; p.time += dt; p.wakeAll = false;
+  p.wakeRegions.clear();
+  p.dirty = false;
   std::copy(p.parents.begin(),p.parents.end(),p.islandParents.begin()); p.graphDirty = splitRequired;
   p.indexDirty = true; result.timing.publication = elapsed(begin); result.timing.total = elapsed(start); p.stats = result; guard.committed = true;
 }

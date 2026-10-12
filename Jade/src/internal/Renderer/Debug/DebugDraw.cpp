@@ -1,12 +1,46 @@
 #include "DebugDraw.hpp"
 #include <JadeShaders.hpp>
 #include <array>
+#include <cctype>
 #include "../RaySceneAccess.hpp"
 #include "../../Mesh/MeshAccess.hpp"
 #include "../../../Renderer/Common/Math.hpp"
 namespace Jade::Detail {
 DebugDraw::DebugDraw(OpenGLDevice &device) : m_Device(device) {}
 DebugDraw::~DebugDraw() = default;
+void DebugDraw::text(std::string_view text, Renderer::ImageSize size) {
+  if (size.width <= 0 || size.height <= 0) return;
+  // Built-in 5x7 diagnostic font: no texture asset or UI framework lifetime.
+  static constexpr std::array<std::array<unsigned char,7>,36> glyphs{{
+    {{14,17,19,21,25,17,14}},{{4,12,4,4,4,4,14}},{{14,17,1,2,4,8,31}},{{30,1,1,14,1,1,30}},
+    {{2,6,10,18,31,2,2}},{{31,16,16,30,1,1,30}},{{14,16,16,30,17,17,14}},{{31,1,2,4,8,8,8}},
+    {{14,17,17,14,17,17,14}},{{14,17,17,15,1,1,14}},
+    {{14,17,17,31,17,17,17}},{{30,17,17,30,17,17,30}},{{14,17,16,16,16,17,14}},{{30,17,17,17,17,17,30}},
+    {{31,16,16,30,16,16,31}},{{31,16,16,30,16,16,16}},{{14,17,16,23,17,17,15}},{{17,17,17,31,17,17,17}},
+    {{14,4,4,4,4,4,14}},{{7,2,2,2,2,18,12}},{{17,18,20,24,20,18,17}},{{16,16,16,16,16,16,31}},
+    {{17,27,21,21,17,17,17}},{{17,25,25,21,19,19,17}},{{14,17,17,17,17,17,14}},{{30,17,17,30,16,16,16}},
+    {{14,17,17,17,21,18,13}},{{30,17,17,30,20,18,17}},{{15,16,16,14,1,1,30}},{{31,4,4,4,4,4,4}},
+    {{17,17,17,17,17,17,14}},{{17,17,17,17,17,10,4}},{{17,17,17,21,21,21,10}},{{17,17,10,4,10,17,17}},
+    {{17,17,10,4,4,4,4}},{{31,1,2,4,8,16,31}}
+  }};
+  std::vector<Vec3> foreground, background;
+  auto point=[&](float x,float y){return Vec3{2*x/size.width-1,1-2*y/size.height,0};};
+  float x=10,y=10,maxX=10;
+  for(unsigned char value:text) {
+    if(value=='\n'){maxX=std::max(maxX,x);x=10;y+=18;continue;}
+    const int c=std::toupper(value), index=c>='0'&&c<='9'?c-'0':c>='A'&&c<='Z'?10+c-'A':-1;
+    for(int row=0;row<7;++row) {
+      const unsigned bits=index>=0?glyphs[index][row]:c==':'&&(row==2||row==5)?4:c=='-'&&row==3?14:c==','&&row==6?4:c=='('? (row==0||row==6?2:4):c==')'?(row==0||row==6?8:4):0;
+      for(int col=0;col<5;++col) if(bits&(1u<<(4-col))) for(int dy=0;dy<2;++dy)
+        foreground.insert(foreground.end(),{point(x+col*2,y+row*2+dy),point(x+col*2+2,y+row*2+dy)});
+    }
+    x+=12;
+  }
+  maxX=std::max(maxX,x);
+  for(float row=6;row<y+18;++row)background.insert(background.end(),{point(6,row),point(std::min(maxX+4,static_cast<float>(size.width)),row)});
+  lines(background,Matrix4::Identity(),{.02f,.025f,.02f},false);
+  lines(foreground,Matrix4::Identity(),{.85f,.95f,.85f},false);
+}
 void DebugDraw::lines(std::span<const Vec3> points,const Matrix4& transform,Vec3 color,bool depth) {
   m_Device.drawLines(points,transform,color,depth);
 }

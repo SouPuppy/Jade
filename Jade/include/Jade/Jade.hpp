@@ -1,4 +1,7 @@
 #pragma once
+#include <Jade/ECS/Registry.hpp>
+#include <Jade/World/World.hpp>
+#include <Jade/World/Streaming.hpp>
 #include <Jade/Graphics/Texture.hpp>
 #include <Jade/Graphics/SpriteRenderer.hpp>
 #include <Jade/Animation/AnimationClip.hpp>

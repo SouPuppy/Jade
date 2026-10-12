@@ -28,8 +28,8 @@ void boxLines(CollisionVector center, const std::array<CollisionVector, 3>& axes
 
 } // namespace
 
-CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool aabbs, bool contacts,
-                                         const Physics::System* simulation, bool forces)
+CollisionDebugLines captureCollisionDebug(const World& scene, bool shapes, bool aabbs, bool contacts,
+                                         const Physics::System* simulation, bool forces, std::size_t maxContactMarkers)
 {
   CollisionDebugLines result;
   if (!shapes && !aabbs && !contacts && !forces)
@@ -59,7 +59,18 @@ CollisionDebugLines captureCollisionDebug(const Scene& scene, bool shapes, bool 
   }
   if (contacts) {
     result.contacts = simulation ? simulation->contactSnapshot(scene) : Physics::manifolds(scene);
+    for (const auto& manifold : result.contacts) result.totalContactPoints += manifold.points.size();
+    // Full solver diagnostics remain available. Only expensive presentation geometry
+    // is sampled uniformly across the set, rather than drawing just its first rows.
+    const auto stride = maxContactMarkers ? result.totalContactPoints/maxContactMarkers+
+      (result.totalContactPoints%maxContactMarkers != 0) : 0;
+    const auto capacity = std::min(result.totalContactPoints,maxContactMarkers);
+    result.points.reserve(capacity*96); result.normals.reserve(capacity*6);
+    std::size_t pointIndex = 0;
     for (const auto& manifold : result.contacts) for (const auto& contact : manifold.points) {
+      const auto index = pointIndex++;
+      if (!stride || index%stride) continue;
+      ++result.shownContactPoints;
       const auto center = (contact.pointA + contact.pointB) * 0.5f;
       constexpr std::size_t segments = 16;
       for (std::size_t circle = 0; circle < 3; ++circle) {

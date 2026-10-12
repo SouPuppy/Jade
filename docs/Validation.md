@@ -1,5 +1,74 @@
 # Windows x64 validation
 
+## General CPU physics reconstruction and worker execution (2026-10-12)
+
+The native CPU pipeline now owns double-precision body state and generational
+BodyIDs, persistent static/moving BVH4 indexes, double contact witnesses and
+four-point caches, whole-manifold graph coloring, Scalar/SSE2/AVX2 constraint
+packets, island sleep/wake, kinematics, queries and conservative relative/angular
+CCD. Immutable field stages preserve composable gravity, custom force/torque,
+Euler and Verlet. The bridge integrates the concurrent `Jade::World`/ECS/runtime
+refactor. Worker-local queues, stealing, atomic range leases and a submission-race
+fix make parallel work execute on the actual worker threads.
+
+Independent `build/physics-release` and `build/physics-debug` builds use explicit
+MSVC Hostx64/x64 compiler/linker paths. The final Release suite passes 334 tests
+across 59 suites in 23.080 seconds. Debug's full suite passes 332 tests across 59
+suites in 113.434 seconds; after the final sleep-disabled scan optimization, all
+75 affected physics/field/job/character/WorldRuntime tests also pass in Debug
+(22.931 seconds). Engine, Showcase Demo and benchmark build in both configurations.
+Ten public Physics headers pass independent C++20 `/W4 /WX /permissive-` syntax
+checks with only Jade/include exposed. `git diff --check` passes.
+
+Regression checks cover foreign/recycled BodyIDs and FieldIDs, immutable concurrent
+queries, full field pose/momentum snapshots, stage-only torque kernels, native-only
+gravity sources in read-only bridge previews, cross-body invalidation, transactional
+field/worker/CCD failures, retained one-step loads, free asymmetric angular momentum,
+distant/support/kinematic wake propagation, large-coordinate witnesses, multiple
+continuous impacts and rotation-only impact, all SIMD backends and multi-worker
+determinism. The pyramid quality test keeps gravity enabled and sleeping disabled.
+
+The final benchmark matrix contains 30 successful runs: 0/1/3/6/12/23 workers on
+100k-body Scene 5; sparse/dense/rest/mixed/64-source fields/CCD at 1k/10k/100k;
+240-step Scene 5, per-step ECS bridge, default-budget Scene 5 CCD, allocation
+counting and sleep-disabled rest. Scene 5 stays fully active and receives no
+scenario-specific physics shortcuts. Serial p50 is 908.7 ms versus 171.3 ms with
+23 workers, approximately 5.3x faster. All 23 workers execute physics jobs; their
+summed execution overlap averages 16.68 workers. This counter measures job wall
+time, not OS CPU utilization. [Physics.md](Physics.md) records the full measured
+table, capacity/allocation definitions and remaining costs.
+
+A headless harness includes the actual Showcase source and constructs precisely
+100,000 wall cubes and the projectile. After 28 native fixed steps, 368 cubes have
+moved more than 0.01 m off their original wall plane, all positions remain finite,
+and the actual launch helper updates both native and authored state while paused.
+Actual hidden Release Showcase launches for Scenes 1 through 5 all complete two
+frames; Debug Scene 5 also completes two frames. Scene 5's actual two-frame run
+takes 24.95 seconds in Release and 41.51 seconds in Debug with wireframe drawing.
+This validates execution and exposes the remaining rendering cost, rather than
+establishing realtime performance or manual interaction quality.
+
+Artifacts: `build/physics-{release,debug}/build.log`, `all-tests.log/.xml`,
+`physics-tests.log/.xml`, Release `header-checks/`, `scene5-validation.cpp/.log`,
+`demo-1.log` through `demo-5.log`, Debug `demo-5.log`, and benchmark CSV/worker logs
+under `build/physics-release/validation/`. Reproduce measurements with
+`benchmarks/run-physics.ps1 -Suite all`. Historical Scene 5 measurements below used
+the earlier engine/build and are not a controlled speedup baseline for this run.
+
+## World Runtime, streaming and analytic geometry (2026-10-12)
+
+World now owns Registry, hierarchy, streaming, fixed clocks and native physics state. Scene requires an explicit World reference and supplies view/input context. Untitled reads 256 authored Chunk files, streams a 25-Chunk render/static-collision window and simulates nine Chunks away from edges. Low mesh, analytic and high mesh balls support interaction, migration, deletion and durable state restoration.
+
+Independent x64 Debug/Release builds use `build/world-debug-x64` and `build/world-release-x64`, with compiler architecture `x64` and eight-byte pointers verified in CMake metadata. Earlier x86 terminal-cache checks are not counted as target-platform validation. Release passes all 334 tests across 59 suites in 22.363 seconds; Debug passes the same 334 tests in 129.170 seconds.
+
+New coverage verifies stable paged references, traversal mutation barriers and commands, headless/multiple World scheduling, shared-view body identity, per-World contact/force snapshots, fixed-boundary equivalence, negative coordinates, independent residency, CPU-only prefetch, source union, capacity errors, obsolete async results, failed-spawn rollback, save-failure retention, edits during in-flight saves, cross-Chunk parenting/migration, pending migration restart, runtime spawn residency, persistent identity reuse rejection, tombstones and atomic restart. Actual Untitled tests push/delete balls, restore their pose/velocities, and verify clipped edge counts. A movement regression traverses Chunk seams in four cardinal and two diagonal directions: floor side normals previously stopped the player 0.22 metres before the seam. The controller now requires vertical overlap for planar blocking, with wall sliding and initial penetration tests retained. GLFW callbacks verify Q/E rotation and F interaction, including paused interaction rejection. CPU/GPU readback covers analytic sphere/ellipsoid/finite plane visibility and normals, emissive sampling and moving Hybrid shadows.
+
+`JadeWorldStoreProbe` writes and reads through two independent x64 processes, restoring ownership and deletion state. All 77 public headers compile independently with only Jade/include under MSVC C++20 `/W4 /WX /permissive-`. Both Untitled binaries complete three hidden frames in Raster, Hybrid, GPU RayTracing and None. Showcase completes hidden Release showroom and Debug pyramid launches. Raster/Hybrid/observer preview exports were visually inspected; these checks establish rendering behavior and startup rather than manual interaction quality or a sustained frame-rate guarantee.
+
+The three-run ECS benchmark compares 400, 4,096 and 100,000 entities against the Registry from `5d9fb3b`; [measured results](WorldRuntimeBenchmarks.md) distinguish cumulative allocation traffic from observed peak process memory. At 100,000 entities, median creation is 315.645 ms versus 17.135 ms and creation allocations are 1,200,088 versus 1,458.
+
+Artifacts: `build/world-{debug,release}-full.log/.xml`, `world-headers-build.log`, `world-smoke-results.log`, `world-showcase-*-smoke.log`, `world-ecs-measurements.json` and preview PNG/PPM files under `build/world-release-x64/validation`. World store v1 is a single-writer local Windows store; corrupted/incompatible saves throw, and normal shutdown performs an explicit save. Earlier sections below describe historical engine versions.
+
 ## Scene 5 ten-wall stress test (2026-10-12)
 
 JadeDemo now accepts --scene 5 and key 5. Scene 5 lazily creates ten parallel

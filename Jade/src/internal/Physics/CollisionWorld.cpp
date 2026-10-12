@@ -1,6 +1,7 @@
 #include "CollisionWorld.hpp"
+#include <Jade/World/Streaming.hpp>
 
-#include "../Core/SceneTransforms.hpp"
+#include "../Core/WorldTransforms.hpp"
 
 namespace Jade::Detail {
 namespace {
@@ -72,14 +73,15 @@ WorldCollider resolveCollider(Entity entity, const Matrix4& world)
   return result;
 }
 
-std::vector<WorldCollider> captureColliders(const Scene& scene)
+std::vector<WorldCollider> captureColliders(const Jade::World& scene)
 {
-  SceneTransforms transforms(scene);
+  WorldTransforms transforms(scene);
   std::vector<WorldCollider> result;
-  for (const auto entity : scene.query<Collider, Transform>()) {
-    if (entity.get<Collider>().empty()) continue;
-    result.push_back(resolveCollider(entity, scene.parent(entity) ? transforms.Resolve(entity).model : ModelMatrix(entity.get<Transform>())));
-  }
+  scene.registry().each<Collider, Transform>([&](Entity entity, Collider& collider, Transform& transform) {
+    if (entity.has<Residency>() && !entity.get<Residency>().collision) return;
+    if (collider.empty()) return;
+    result.push_back(resolveCollider(entity, scene.parent(entity) ? transforms.Resolve(entity).model : ModelMatrix(transform)));
+  });
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.entity.id() < b.entity.id(); });
   return result;
 }

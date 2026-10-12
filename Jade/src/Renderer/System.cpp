@@ -72,6 +72,7 @@ void System::setRayTracingEnabled(bool enabled) noexcept {
 void System::setWireframe(bool enabled) noexcept { m_Impl->wireframe = enabled; }
 void System::setNormalDebug(bool enabled) noexcept { m_Impl->normalDebug = enabled; }
 bool System::normalDebugEnabled() const noexcept { return m_Impl->normalDebug; }
+void System::setOverlayText(std::string text) { m_Impl->host.setOverlayText(std::move(text)); }
 void System::start() { m_Impl->host.start(rayTracingEnabled() && !normalDebugEnabled()); }
 void System::stop() noexcept { m_Impl->host.stop(); }
 void System::invalidate() noexcept { m_Impl->host.invalidate(); }

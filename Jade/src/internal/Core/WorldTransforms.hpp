@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Core/Scene.hpp>
+#include <Jade/World/World.hpp>
 #include <Jade/Core/Transform.hpp>
 
 #include "../Math/Matrix4.hpp"
@@ -17,19 +17,19 @@ struct WorldPose {
 };
 
 // Fresh per render/query because component TRS is directly editable.
-class SceneTransforms final {
+class WorldTransforms final {
 public:
-  explicit SceneTransforms(const Scene& scene) : m_Scene(scene) {}
+  explicit WorldTransforms(const World& world) : m_World(world) {}
 
   const WorldPose& Resolve(Entity entity)
   {
     std::vector<Entity> path;
-    for (auto cursor = entity; cursor && !m_Poses.contains(cursor.id()); cursor = m_Scene.parent(cursor)) {
+    for (auto cursor = entity; cursor && !m_Poses.contains(cursor.id()); cursor = m_World.parent(cursor)) {
       path.push_back(cursor);
     }
     for (auto cursor = path.rbegin(); cursor != path.rend(); ++cursor) {
       WorldPose pose;
-      const auto parent = m_Scene.parent(*cursor);
+      const auto parent = m_World.parent(*cursor);
       if (parent) pose = m_Poses.at(parent.id());
       if (cursor->has<Transform>()) {
         const auto& local = cursor->get<Transform>();
@@ -46,7 +46,7 @@ public:
   {
     const auto& local = camera.get<Transform>();
     WorldPose parentPose;
-    if (const auto parent = m_Scene.parent(camera)) parentPose = Resolve(parent);
+    if (const auto parent = m_World.parent(camera)) parentPose = Resolve(parent);
     // Own scale is irrelevant to the eye. Ancestor scale affects its position.
     Transform rigid = local;
     rigid.scale = {1, 1, 1};
@@ -57,7 +57,7 @@ public:
   }
 
 private:
-  const Scene& m_Scene;
+  const World& m_World;
   std::unordered_map<std::uint64_t, WorldPose> m_Poses;
 };
 

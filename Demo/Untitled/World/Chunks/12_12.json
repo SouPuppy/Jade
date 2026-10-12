@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "x": 12,
+  "z": 12,
+  "objects": [
+    {
+      "id": 2041,
+      "type": "grass",
+      "persistent": false,
+      "dynamic": false,
+      "state": {
+        "x": 12,
+        "z": 12
+      }
+    },
+    {
+      "id": 2042,
+      "type": "ball",
+      "persistent": true,
+      "dynamic": true,
+      "state": {
+        "version": 1,
+        "visual": 0,
+        "position": [
+          197,
+          1,
+          198
+        ],
+        "rotation": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "angular": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": 2043,
+      "type": "ball",
+      "persistent": true,
+      "dynamic": true,
+      "state": {
+        "version": 1,
+        "visual": 1,
+        "position": [
+          200,
+          1,
+          198
+        ],
+        "rotation": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "angular": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": 2044,
+      "type": "ball",
+      "persistent": true,
+      "dynamic": true,
+      "state": {
+        "version": 1,
+        "visual": 2,
+        "position": [
+          203,
+          1,
+          198
+        ],
+        "rotation": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "angular": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

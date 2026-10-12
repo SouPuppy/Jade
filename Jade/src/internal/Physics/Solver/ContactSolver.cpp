@@ -1,6 +1,5 @@
 #include "ContactSolver.hpp"
 #include "../Manifold.hpp"
-#include <map>
 
 namespace Jade::Physics::Internal {
 V relative(const Body &a, const Body &b, V ra, V rb) {
@@ -10,16 +9,6 @@ double effective(const Body &a, const Body &b, V ra, V rb, V axis) {
   return a.inverseMass + b.inverseMass +
          collisionDot(axis, collisionCross(a.inertia(collisionCross(ra, axis)), ra) +
                                 collisionCross(b.inertia(collisionCross(rb, axis)), rb));
-}
-void impulse(Body &a, Body &b, V ra, V rb, V p) {
-  if (a.inverseMass > 0) {
-    a.velocity = a.velocity - p * a.inverseMass;
-    a.angular = a.angular - a.inertia(collisionCross(ra, p));
-  }
-  if (b.inverseMass > 0) {
-    b.velocity = b.velocity + p * b.inverseMass;
-    b.angular = b.angular + b.inertia(collisionCross(rb, p));
-  }
 }
 // Refresh paired surface anchors instead of replacing them with an arbitrarily
 // far-away intersection of two almost parallel clipping planes each frame.
@@ -31,24 +20,24 @@ bool validAnchor(const Body &a, const Body &b, V localA, V localB, V normal, dou
       margin + 8 * std::numeric_limits<float>::epsilon() * std::max(a.shape.size(), b.shape.size());
   return separation <= tolerance && collisionDot(tangent, tangent) <= tolerance * tolerance;
 }
-SmallList<ContactPoint,24> persistentPoints(const Body &a, const Body &b, const Manifold &hit,
+SmallList<Detail::PreciseContactPoint,24> persistentPoints(const Body &a, const Body &b, const Detail::CollisionManifold &hit,
                                            std::span<const Cached> cache, double margin) {
   if (a.shape.kind != Detail::CollisionKind::Box || b.shape.kind != Detail::CollisionKind::Box)
     return hit.points;
   const auto normal = v(hit.normal);
-  SmallList<ContactPoint,24> points;
+  SmallList<Detail::PreciseContactPoint,24> points;
   for (const auto &old : cache) {
     if (a.geometryEdited || b.geometryEdited || old.a != hit.a || old.b != hit.b ||
         collisionDot(old.normal, normal) < 0.99 || !validAnchor(a, b, old.localA, old.localB, normal, margin))
       continue;
     const auto pa = a.shape.center + a.offset(old.localA), pb = b.shape.center + b.offset(old.localB);
-    points.push_back({pa.vector(), pb.vector(), static_cast<float>(collisionDot(pb - pa, normal))});
+    points.push_back({pa, pb, collisionDot(pb - pa, normal)});
   }
   const double weld =
       std::max(8 * std::numeric_limits<float>::epsilon() * std::min(a.shape.size(), b.shape.size()),
                std::min(margin, 0.01 * std::min(a.shape.size(), b.shape.size())));
-  const auto append = [&](const ContactPoint &next) {
-    const auto duplicate = std::any_of(points.begin(), points.end(), [&](const ContactPoint &kept) {
+  const auto append = [&](const Detail::PreciseContactPoint &next) {
+    const auto duplicate = std::any_of(points.begin(), points.end(), [&](const Detail::PreciseContactPoint &kept) {
       const auto da = v(next.pointA) - v(kept.pointA), db = v(next.pointB) - v(kept.pointB);
       return collisionDot(da, da) + collisionDot(db, db) < weld * weld * 2;
     });
@@ -91,7 +80,7 @@ SmallList<ContactPoint,24> persistentPoints(const Body &a, const Body &b, const 
           }
           const auto pa = reverse ? q : p, pb = reverse ? p : q;
           if (validAnchor(a, b, a.local(pa), b.local(pb), normal, margin))
-            append({pa.vector(), pb.vector(), static_cast<float>(collisionDot(pb - pa, normal))});
+            append({pa, pb, collisionDot(pb - pa, normal)});
         }
       };
       corners(a, fa, b, fb, false);
@@ -106,7 +95,7 @@ SmallList<ContactPoint,24> persistentPoints(const Body &a, const Body &b, const 
   // anchors come first so equally good patches retain their original points.
   const auto deepest =
       static_cast<std::size_t>(std::min_element(points.begin(), points.end(),
-                                                [](const ContactPoint &x, const ContactPoint &y) {
+                                                [](const Detail::PreciseContactPoint &x, const Detail::PreciseContactPoint &y) {
                                                   return x.separation < y.separation;
                                                 }) -
                                points.begin());
@@ -131,7 +120,7 @@ SmallList<ContactPoint,24> persistentPoints(const Body &a, const Body &b, const 
             selected = {i, j, k, l};
           }
         }
-  SmallList<ContactPoint,24> reduced;
+  SmallList<Detail::PreciseContactPoint,24> reduced;
   for (const auto i : selected)
     reduced.push_back(points[i]);
   return reduced;
@@ -150,58 +139,6 @@ void positionImpulse(Body &a, Body &b, V ra, V rb, V p) {
     a.turn(limit(aa));
   if (b.inverseMass > 0)
     b.turn(limit(ab));
-}
-void solveIsland(std::span<Body> bodies, std::span<Constraint> constraints,
-                 std::span<const std::size_t> island, const Config &config) {
-  for (const auto ci : island) prepareConstraint(bodies,constraints[ci]);
-  for (const auto ci : island) {
-    const auto &c = constraints[ci];
-    auto &a = bodies[c.a];
-    auto &b = bodies[c.b];
-    impulse(a, b, a.offset(c.localA), b.offset(c.localB),
-            c.normal * c.normalImpulse + c.tangent1 * c.tangentImpulse1 + c.tangent2 * c.tangentImpulse2);
-  }
-  for (unsigned iteration = 0; iteration < config.velocityIterations; ++iteration) {
-    for (const auto ci : island) {
-      auto &c = constraints[ci];
-      auto &a = bodies[c.a];
-      auto &b = bodies[c.b];
-      const auto ra = a.offset(c.localA), rb = b.offset(c.localB);
-      const double mass = effective(a, b, ra, rb, c.normal);
-      if (mass <= 0)
-        continue;
-      const double old = c.normalImpulse;
-      c.normalImpulse =
-          std::max(0.0, old + (c.target - collisionDot(relative(a, b, ra, rb), c.normal)) / mass);
-      impulse(a, b, ra, rb, c.normal * (c.normalImpulse - old));
-      const auto rv = relative(a, b, ra, rb);
-      const double m1 = effective(a, b, ra, rb, c.tangent1), m2 = effective(a, b, ra, rb, c.tangent2);
-      double next1 = c.tangentImpulse1 - collisionDot(rv, c.tangent1) / m1;
-      double next2 = c.tangentImpulse2 - collisionDot(rv, c.tangent2) / m2;
-      const double limit = c.friction * c.normalImpulse, length = std::hypot(next1, next2);
-      if (length > limit && length > 0) {
-        next1 *= limit / length;
-        next2 *= limit / length;
-      }
-      impulse(a, b, ra, rb,
-              c.tangent1 * (next1 - c.tangentImpulse1) + c.tangent2 * (next2 - c.tangentImpulse2));
-      c.tangentImpulse1 = next1;
-      c.tangentImpulse2 = next2;
-    }
-  }
-  for (unsigned iteration = 0; iteration < config.positionIterations; ++iteration) {
-    for (const auto ci : island) {
-      const auto &c = constraints[ci];
-      auto &a = bodies[c.a];
-      auto &b = bodies[c.b];
-      const auto ra = a.offset(c.localA), rb = b.offset(c.localB);
-      const double separation = collisionDot(b.shape.center + rb - a.shape.center - ra, c.normal);
-      const double error = std::min(0.0, separation + config.penetrationSlop);
-      const double mass = effective(a, b, ra, rb, c.normal);
-      if (mass > 0 && error < 0)
-        positionImpulse(a, b, ra, rb, c.normal * (-0.4 * error / mass));
-    }
-  }
 }
 void prepareConstraint(std::span<Body> bodies, Constraint& c) {
   const auto& a = bodies[c.a]; const auto& b = bodies[c.b];
@@ -256,7 +193,7 @@ SmallList<Constraint,4> buildConstraints(const Body &a, const Body &b, std::size
                                          std::span<const Cached> previousContacts, const Config &config,
                                          float dt, double previousDt) {
   SmallList<Constraint,4> result;
-  const auto hit = Detail::collideManifold(a.shape, b.shape, config.contactDistance);
+  const auto hit = Detail::collideManifoldPrecise(a.shape, b.shape, config.contactDistance);
   if (!hit)
     return result;
   const auto normal = v(hit->normal);
@@ -266,10 +203,10 @@ SmallList<Constraint,4> buildConstraints(const Body &a, const Body &b, std::size
   std::array<bool,4> used{};
   for (const auto &p : persistentPoints(a, b, *hit, previousContacts, config.contactDistance)) {
     Constraint c{i, j, normal, t1, t2, a.local(v(p.pointA)), b.local(v(p.pointB))};
-    c.friction = std::sqrt(static_cast<double>(a.properties.friction) * b.properties.friction);
+    c.friction = std::sqrt(a.friction)*std::sqrt(b.friction);
     const auto ra = v(p.pointA) - a.shape.center, rb = v(p.pointB) - b.shape.center;
     const double speed = collisionDot(relative(a, b, ra, rb), normal);
-    const double restitution = std::max(a.properties.restitution, b.properties.restitution);
+    const double restitution = std::max(a.restitution, b.restitution);
     // A fast impact can enter the retention margin before crossing the exact
     // surface. Preserve its rebound instead of erasing it with speculation.
     c.target =
@@ -301,34 +238,5 @@ SmallList<Constraint,4> buildConstraints(const Body &a, const Body &b, std::size
     result.push_back(c);
   }
   return result;
-}
-std::vector<std::vector<std::size_t>> contactIslands(std::span<const Constraint> constraints,
-                                                     std::span<const unsigned char> dynamic) {
-  std::vector<std::vector<std::size_t>> islands;
-  std::vector<std::size_t> parents(dynamic.size());
-  for (std::size_t i = 0; i < parents.size(); ++i)
-    parents[i] = i;
-  const auto root = [&](std::size_t index) {
-    while (parents[index] != index) {
-      parents[index] = parents[parents[index]];
-      index = parents[index];
-    }
-    return index;
-  };
-  for (const auto &c : constraints)
-    if (dynamic[c.a] && dynamic[c.b]) {
-      const auto a = root(c.a), b = root(c.b);
-      parents[std::max(a, b)] = std::min(a, b);
-    }
-  std::map<std::size_t, std::size_t> indices;
-  for (std::size_t i = 0; i < constraints.size(); ++i) {
-    const auto &c = constraints[i];
-    const auto owner = root(dynamic[c.a] ? c.a : c.b);
-    const auto [it, inserted] = indices.emplace(owner, islands.size());
-    if (inserted)
-      islands.emplace_back();
-    islands[it->second].push_back(i);
-  }
-  return islands;
 }
 } // namespace Jade::Physics::Internal

@@ -22,6 +22,7 @@ public:
   void invalidate() noexcept;
   void rethrowError();
   Renderer::RenderProgress progress() const;
+  void setOverlayText(std::string text) { m_OverlayText = std::move(text); }
   std::shared_ptr<GpuFrame> gpuFrame() const { return m_Session.gpuFrame(); }
   void draw(const Renderer::SceneSnapshot *, Renderer::ImageSize, Renderer::RenderMode mode, bool wireframe, bool axes,
             const CollisionDebugLines* colliders = nullptr, bool paused = true,
@@ -32,6 +33,7 @@ public:
 private:
   Window &m_Window;
   std::string m_Title;
+  std::string m_OverlayText;
   OpenGLDevice m_Device;
   OpenGLDisplay m_Display;
   DebugDraw m_Debug;

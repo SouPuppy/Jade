@@ -3,7 +3,6 @@
 #include <intrin.h>
 
 namespace Jade::Physics::Internal {
-void impulse(Body& a,Body& b,V ra,V rb,V p);
 namespace {
 bool avx2Available() {
   int info[4]; __cpuid(info,1);

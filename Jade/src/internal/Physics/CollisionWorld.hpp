@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Jade/Core/Scene.hpp>
+#include <Jade/World/World.hpp>
 #include <Jade/Physics/Collider.hpp>
 #include "Math.hpp"
 
@@ -52,6 +52,6 @@ struct WorldCollider {
 };
 
 WorldCollider resolveCollider(Entity entity, const Matrix4& world);
-std::vector<WorldCollider> captureColliders(const Scene& scene);
+std::vector<WorldCollider> captureColliders(const Jade::World& scene);
 
 } // namespace Jade::Detail

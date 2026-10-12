@@ -109,13 +109,13 @@ TEST(MaterialPresets, IndependentValuesAndEntityComposition)
   for (const auto material : {Materials::Diffuse(), Materials::Metal({.5f, .6f, .7f}), Materials::Gold(),
                               Materials::Silver(), Materials::Copper(), glass, light})
     EXPECT_NO_THROW(validateMaterial(material));
-  Scene scene;
+  Scene scene{std::make_shared<World>()};
   Assets assets;
-  auto bunny = scene.create();
+  auto bunny = scene.world().create();
   bunny.add<Geometry>(assets.add(MeshData::cube()));
   bunny.add<Material>(Materials::Gold());
-  auto lamp = scene.create();
-  lamp.add<Geometry>(bunny.get<Geometry>().mesh);
+  auto lamp = scene.world().create();
+  lamp.add<Geometry>(bunny.get<Geometry>().resource);
   lamp.add<Material>(Materials::Emissive());
   EXPECT_EQ(SceneSnapshot::capture(scene, assets).instances.size(), 2u);
 }

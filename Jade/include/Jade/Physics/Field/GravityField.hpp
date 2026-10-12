@@ -42,7 +42,8 @@ public:
   explicit CompositeGravity(std::vector<std::shared_ptr<const GravityField>> fields);
   Vec3 acceleration(const FieldContext &context) const override;
   FieldSample sampleStage(const FieldContext&) const override;
-  void validate(const Scene &scene) const override;
+  Kernel prepare(std::span<const FieldBody>,std::span<const std::pair<std::uint64_t,std::size_t>>) const override;
+  void validate(const Jade::World &scene) const override;
   bool permitsSleep() const noexcept override;
 
 private:
@@ -59,7 +60,8 @@ public:
                        double softening = 0.001);
   Vec3 acceleration(const FieldContext &context) const override;
   FieldSample sampleStage(const FieldContext&) const override;
-  void validate(const Scene &scene) const override;
+  Kernel prepare(std::span<const FieldBody>,std::span<const std::pair<std::uint64_t,std::size_t>>) const override;
+  void validate(const Jade::World &scene) const override;
 
 private:
   const std::vector<Entity> m_Sources;

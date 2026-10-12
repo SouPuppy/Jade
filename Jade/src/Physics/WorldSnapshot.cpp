@@ -53,6 +53,10 @@ std::vector<BodyID> WorldSnapshot::query(const Aabb& b,QueryFilter filter) const
   if (!m_Impl) return {}; auto result = m_Impl->queryWorld->query(b,m_Impl->filter(std::move(filter)));
   for (auto& id : result) id = m_Impl->original[id.slot]; return result;
 }
+std::vector<BodyID> WorldSnapshot::overlap(const BodyDescription& b,QueryFilter filter) const {
+  if (!m_Impl) return {}; auto result = m_Impl->queryWorld->overlap(b,m_Impl->filter(std::move(filter)));
+  for (auto& id : result) id = m_Impl->original[id.slot]; return result;
+}
 std::optional<QueryHit> WorldSnapshot::rayCast(Vector o,Vector d,QueryFilter filter) const {
   if (!m_Impl) return {}; return m_Impl->translate(m_Impl->queryWorld->rayCast(o,d,m_Impl->filter(std::move(filter))));
 }

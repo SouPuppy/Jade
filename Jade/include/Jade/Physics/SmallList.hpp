@@ -11,6 +11,8 @@ template<class T, std::size_t Capacity> class SmallList {
 public:
   SmallList() = default;
   SmallList(std::initializer_list<T> values) { for (const auto& v : values) push_back(v); }
+  template<std::size_t Other> SmallList(const SmallList<T,Other>& other) { for (const auto& v : other) push_back(v); }
+  template<std::size_t Other> SmallList& operator=(const SmallList<T,Other>& other) { clear(); for (const auto& v : other) push_back(v); return *this; }
   std::size_t size() const noexcept { return count; }
   bool empty() const noexcept { return count == 0; }
   T* data() noexcept { return storage.data(); }

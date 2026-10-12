@@ -21,6 +21,8 @@ public:
   Assets& assets() noexcept;
   std::shared_ptr<Scene> scene() const noexcept;
   void setScene(std::shared_ptr<Scene> scene);
+  void addWorld(std::shared_ptr<World> world);
+  void removeWorld(const std::shared_ptr<World>& world);
   Renderer::System& renderer() noexcept;
   Physics::System& physics() noexcept;
   Animation::System& animation() noexcept;

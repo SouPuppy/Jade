@@ -24,6 +24,17 @@ struct DestructionBall {
 };
 using DynamicBall = Archetype<Ball, RigidBody>;
 
+void LaunchBall(Scene& scene,Entity ball,Vec3 position,Vec3 velocity) {
+  auto& world = scene.world(); const auto id = world.physicsBody(ball);
+  if (id) {
+    world.physicsWorld().teleport(id,{position.x,position.y,position.z},ball.get<Transform>().rotation,true);
+    world.physicsWorld().setVelocity(id,{velocity.x,velocity.y,velocity.z});
+  }
+  // Reflect this authored launch immediately, including while physics is paused.
+  ball.get<Transform>().position = position;
+  ball.get<RigidBody>().velocity = velocity; ball.get<RigidBody>().angularVelocity = {};
+}
+
 MeshData CeilingLightMesh()
 {
   // The emitting underside of a unit light box. Sampling its unused upper
@@ -39,8 +50,8 @@ MeshData CeilingLightMesh()
 template<class T>
 Entity CreateObject(Scene& scene, MeshHandle mesh, Vec3 position, Material material, Vec3 scale = {1, 1, 1})
 {
-  const auto entity = scene.create<T>();
-  entity.get<Geometry>().mesh = mesh;
+  const auto entity = scene.world().create<T>();
+  entity.get<Geometry>().resource = mesh;
   entity.get<Transform>() = Transform{position, {}, scale};
   entity.get<Material>() = material;
   return entity;
@@ -64,8 +75,8 @@ Entity CreateBall(Scene& scene, MeshHandle mesh, Vec3 position, Material materia
 
 std::shared_ptr<Scene> CreateScene(Vec3 eye)
 {
-  auto scene = std::make_shared<Scene>();
-  const auto camera = scene->create<Archetype<Transform, Camera>>();
+  auto scene = std::make_shared<Scene>(std::make_shared<World>());
+  const auto camera = scene->world().create<Archetype<Transform, Camera>>();
   camera.get<Transform>().position = eye;
   Motion::lookAt(camera.get<Transform>(), {});
   scene->setCamera(camera);
@@ -76,7 +87,7 @@ std::shared_ptr<Scene> CreateScene(Vec3 eye)
 std::shared_ptr<Scene> CreateStack(Runtime& runtime, MeshHandle mesh, MeshHandle sphereMesh, MeshHandle lightMesh, float gravity)
 {
   auto scene = CreateScene({7, 5, 11});
-  scene->physics().fields = {std::make_shared<const Physics::UniformGravity>(Vec3{0, -gravity, 0})};
+  scene->world().physics().fields = {std::make_shared<const Physics::UniformGravity>(Vec3{0, -gravity, 0})};
   CreateBox(*scene, mesh, Vec3{0, -0.5f, 0}, Materials::Diffuse({0.6f, 0.6f, 0.6f}), Vec3{12, 1, 12});
   Entity top;
   for (int layer = 0; layer < 3; ++layer) {
@@ -89,7 +100,7 @@ std::shared_ptr<Scene> CreateStack(Runtime& runtime, MeshHandle mesh, MeshHandle
   CreateBall<DynamicBall>(*scene, sphereMesh, Vec3{3.5f, 4, 0},
     Materials::Diffuse({0.2f, 0.5f, 0.9f}), Vec3{0.5f, 0.5f, 0.5f});
   scene->on<KeyPressed<"K">>([&runtime, scenePtr = scene.get(), top] {
-    runtime.physics().applyImpulse(*scenePtr, top, {2.5f, 0, 0}, top.get<Transform>().position + Vec3{0, 0.5f, 0});
+    runtime.physics().applyImpulse(scenePtr->world(), top, {2.5f, 0, 0}, top.get<Transform>().position + Vec3{0, 0.5f, 0});
   });
   return scene;
 }
@@ -115,8 +126,8 @@ std::shared_ptr<Scene> CreateOrbit(MeshHandle sphereMesh)
   const auto moon = make(sunMass / total * outer + earthMass / pairMass * inner,
     sunMass / total * outerSpeed + earthMass / pairMass * innerSpeed, 0.1f, 0.08f,
     Materials::Diffuse({0.6f, 0.6f, 0.6f}));
-  scene->physics().fields = {std::make_shared<const Physics::BodyGravity>(std::vector<Entity>{sun, earth, moon}, 1)};
-  scene->physics().integration = Physics::Integration::VelocityVerlet;
+  scene->world().physics().fields = {std::make_shared<const Physics::BodyGravity>(std::vector<Entity>{sun, earth, moon}, 1)};
+  scene->world().physics().integration = Physics::Integration::VelocityVerlet;
   return scene;
 }
 
@@ -148,10 +159,7 @@ std::shared_ptr<Scene> CreateDestruction(MeshHandle cubeMesh, MeshHandle sphereM
   scene->on<KeyPressed<"K">>([scenePtr = scene.get(), ball] {
     const auto& pose = scenePtr->camera().get<Transform>();
     const auto direction = Motion::getFront(pose);
-    ball.get<Transform>().position = pose.position + direction * 2.5f;
-    auto& body = ball.get<RigidBody>();
-    body.velocity = direction * 30;
-    body.angularVelocity = {};
+    LaunchBall(*scenePtr,ball,pose.position+direction*2.5f,direction*30);
   });
   return scene;
 }
@@ -197,10 +205,7 @@ std::shared_ptr<Scene> CreateWallStress(MeshHandle cubeMesh, MeshHandle sphereMe
   scene->on<KeyPressed<"K">>([scenePtr = scene.get(), ball, ballRadius, launchSpeed] {
     const auto& pose = scenePtr->camera().get<Transform>();
     const auto direction = Motion::getFront(pose);
-    ball.get<Transform>().position = pose.position + direction * (ballRadius + 1.5f);
-    auto& body = ball.get<RigidBody>();
-    body.velocity = direction * launchSpeed;
-    body.angularVelocity = {};
+    LaunchBall(*scenePtr,ball,pose.position+direction*(ballRadius+1.5f),direction*launchSpeed);
   });
   return scene;
 }
@@ -213,11 +218,13 @@ int main(int argc, char** argv)
   try {
     RunOptions run;
     int initialScene = 3;
+    bool hidden = false;
     std::optional<Renderer::RayDevice> device;
-    constexpr auto usage = "Usage: JadeDemo [--cpu|--gpu] [--frames N] [--scene 1|2|3|4|5]";
+    constexpr auto usage = "Usage: JadeDemo [--cpu|--gpu] [--hidden] [--frames N] [--scene 1|2|3|4|5]";
     for (int argument = 1; argument < argc; ++argument) {
       const std::string_view option(argv[argument]);
       if (option == "--help") { std::cout << usage << '\n'; return 0; }
+      if (option == "--hidden") { hidden = true; continue; }
       if (option == "--cpu" || option == "--gpu") {
         const auto requestedDevice = option == "--gpu" ? Renderer::RayDevice::GPU : Renderer::RayDevice::CPU;
         if (device && *device != requestedDevice) throw std::invalid_argument("Choose either --cpu or --gpu.");
@@ -238,6 +245,7 @@ int main(int argc, char** argv)
     }
 
     EngineConfig config;
+    config.window.visible = !hidden;
     config.debug.shortcuts = true;
     config.renderer.rayTracing.enabled = device.has_value();
     config.renderer.wireframe = true;
@@ -285,7 +293,7 @@ int main(int argc, char** argv)
     app.on<KeyPressed<"G">>([&] {
       if (runtime.scene() != stack) return EventFlow::Continue;
       moonGravity = !moonGravity;
-      stack->physics().fields = {std::make_shared<const Physics::UniformGravity>(Vec3{0, moonGravity ? -1.62f : -9.81f, 0})};
+      stack->world().physics().fields = {std::make_shared<const Physics::UniformGravity>(Vec3{0, moonGravity ? -1.62f : -9.81f, 0})};
       return EventFlow::Stop;
     });
     app.on<KeyPressed<"R">>([&] {

@@ -1,4 +1,8 @@
 add_library(Jade STATIC
+  src/Core/Registry.cpp
+  src/World/World.cpp
+  src/World/Streaming.cpp
+  src/World/WorldStore.cpp
   include/Jade/Renderer/RenderPipeline.hpp
   include/Jade/Graphics/Light.hpp
   src/internal/Renderer/Pipeline/RayTracingPipeline.hpp
@@ -58,6 +62,8 @@ add_library(Jade STATIC
   src/internal/Physics/WorldImpl.hpp
   src/internal/Physics/SpatialIndex.hpp
   src/internal/Physics/SpatialIndex.cpp
+  src/internal/Physics/ShapeDistance.hpp
+  src/internal/Physics/ShapeDistance.cpp
   src/internal/Physics/Manifold.hpp
   src/internal/Physics/Manifold.cpp
   include/Jade/Physics/Collider.hpp
@@ -183,7 +189,7 @@ add_library(Jade STATIC
   src/Renderer/RayTracing/RayTracing.hpp
   src/Renderer/RayTracing/RayScene.cpp
   src/Renderer/RayTracing/RayScene.hpp
-  src/internal/Core/SceneTransforms.hpp
+  src/internal/Core/WorldTransforms.hpp
   src/internal/Renderer/Device/OpenGL/OpenGLDisplay.cpp
   src/internal/Renderer/Presentation/OpenGLDisplay.hpp
   src/internal/Renderer/Host/ProgressiveSession.cpp
@@ -247,3 +253,5 @@ add_custom_command(OUTPUT "${jade_shader_header}"
   VERBATIM)
 target_sources(Jade PRIVATE "${jade_shader_header}")
 target_include_directories(Jade PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+target_include_directories(Jade PRIVATE "${PROJECT_SOURCE_DIR}/vendor/json")

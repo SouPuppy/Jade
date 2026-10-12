@@ -159,11 +159,11 @@ TEST(Application, KeepsComponentReferencesStableAndLogsPacedFramesAcrossRuns)
   auto config = HiddenApplication();
   Jade::Application app(config);
   const auto scene = MakeTestScene(app);
-  auto entity = scene->create();
+  auto entity = scene->world().create();
   auto &pose = entity.add<Jade::Transform>();
   const auto *address = &pose;
   for (int index = 0; index < 64; ++index) {
-    scene->create().add<Jade::Transform>();
+    scene->world().create().add<Jade::Transform>();
   }
   EXPECT_EQ(&entity.get<Jade::Transform>(), address);
 

@@ -25,9 +25,9 @@ using namespace Jade::Renderer;
 using Jade::Renderer::Math::unit;
 
 struct Fixture {
-  Scene scene;
+  Scene scene{std::make_shared<World>()};
   Assets assets;
-  Entity camera = scene.create();
+  Entity camera = scene.world().create();
   Fixture()
   {
     camera.add<Transform>().position = {0, 0, 5};
@@ -36,7 +36,7 @@ struct Fixture {
   }
   Entity add(MeshData mesh, Material material = {}, Vec3 position = {}, Vec3 scale = {1, 1, 1})
   {
-    const auto entity = scene.create();
+    const auto entity = scene.world().create();
     auto &pose = entity.add<Transform>();
     pose.position = position;
     pose.scale = scale;
@@ -150,9 +150,9 @@ TEST(RayGeometry, NearestHitClippingBackFacesAndSharedResources)
 {
   Fixture f;
   const auto first = f.add(MeshData::cube(2));
-  const auto second = f.scene.create();
+  const auto second = f.scene.world().create();
   second.add<Transform>().position = {0, 0, -4};
-  second.add<Geometry>(first.get<Geometry>().mesh);
+  second.add<Geometry>(first.get<Geometry>().resource);
   second.add<Material>();
   const auto scene = RayScene::build(f.snapshot());
   EXPECT_EQ(scene.meshCount(), 1u);
@@ -173,13 +173,13 @@ TEST(RayGeometry, NearestHitClippingBackFacesAndSharedResources)
 TEST(RayGeometry, HierarchyShearAndNonuniformScaleMatchWorldGeometry)
 {
   Fixture f;
-  auto parent = f.scene.create();
+  auto parent = f.scene.world().create();
   auto &pose = parent.add<Transform>();
   pose.scale = {2, 1, 0.75f};
   pose.rotation = Quaternion::angleAxis({0, 1, 0}, 25);
   const auto object = f.add(MeshData::cube(2), {}, {0.3f, 0, 0}, {0.8f, 1.2f, 0.6f});
   object.get<Transform>().rotation = Quaternion::angleAxis({0, 0, 1}, 35);
-  f.scene.setParent(object, parent);
+  f.scene.world().setParent(object, parent);
   const auto source = f.snapshot();
   const auto accelerated = RayScene::build(source);
   auto baked = source;
@@ -245,32 +245,32 @@ TEST(RayGeometry, DegenerateTrianglesAndInvalidBindings)
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
   object.add<Material>();
   Assets other;
-  object.get<Geometry>().mesh = other.add(MeshData::cube());
+  object.get<Geometry>().resource = other.add(MeshData::cube());
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
-  object.get<Geometry>().mesh = {};
+  object.get<Geometry>().resource = {};
   EXPECT_TRUE(f.snapshot().instances.empty());
 }
 
 TEST(RayGeometry, DescriptorGeometryCanBindClearAndRejectExpiredMeshes)
 {
   Fixture f;
-  const auto object = f.scene.create<Archetype<Transform, Geometry, Material>>();
+  const auto object = f.scene.world().create<Archetype<Transform, Geometry, Material>>();
   object.get<Transform>().scale = {};
   object.get<Material>().roughness = -1;
   EXPECT_TRUE(f.snapshot().instances.empty());
-  object.get<Geometry>().mesh = f.assets.add(MeshData::cube());
+  object.get<Geometry>().resource = f.assets.add(MeshData::cube());
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
   object.get<Transform>().scale = {1, 1, 1};
   object.get<Material>() = {};
   EXPECT_EQ(f.snapshot().instances.size(), 1u);
-  object.get<Geometry>().mesh = {};
+  object.get<Geometry>().resource = {};
   EXPECT_TRUE(f.snapshot().instances.empty());
   {
     Assets temporary;
-    object.get<Geometry>().mesh = temporary.add(MeshData::cube());
+    object.get<Geometry>().resource = temporary.add(MeshData::cube());
   }
-  EXPECT_FALSE(object.get<Geometry>().mesh.empty());
-  EXPECT_FALSE(object.get<Geometry>().mesh.valid());
+  EXPECT_FALSE(object.get<Geometry>().resource.empty());
+  EXPECT_FALSE(object.get<Geometry>().resource.valid());
   EXPECT_THROW(f.snapshot(), std::invalid_argument);
 }
 
@@ -797,12 +797,12 @@ TEST(ApplicationRendering, WireframeBypassesBackendAndResumesCurrentScene)
     std::shared_ptr<Control> control;
   };
   app.runtime().renderer().rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(control));
-  auto scene = std::make_shared<Scene>();
-  auto camera = scene->create();
+  auto scene = std::make_shared<Scene>(std::make_shared<World>());
+  auto camera = scene->world().create();
   camera.add<Transform>().position = {0, 0, 5};
   camera.add<Camera>();
   scene->setCamera(camera);
-  auto object = scene->create();
+  auto object = scene->world().create();
   object.add<Transform>();
   object.add<Geometry>(app.runtime().assets().add(MeshData::cube(2)));
   object.add<Material>();

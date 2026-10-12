@@ -40,6 +40,7 @@ public:
   // Independent debug view; works even when the selected pipeline is None.
   void setNormalDebug(bool enabled) noexcept;
   bool normalDebugEnabled() const noexcept;
+  void setOverlayText(std::string text);
 private:
   friend class Jade::Runtime;
   System(Window&, JobSystem&, Config, std::string title);

@@ -1,5 +1,6 @@
 #pragma once
 #include <Jade/Math/Vector.hpp>
+#include <Jade/Math/Quaternion.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -24,6 +25,29 @@ inline Vector operator+(Vector a, Vector b) { return {a.x+b.x,a.y+b.y,a.z+b.z}; 
 inline Vector operator-(Vector a, Vector b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
 inline Vector operator-(Vector a) { return {-a.x,-a.y,-a.z}; }
 inline Vector operator*(Vector a, double s) { return {a.x*s,a.y*s,a.z*s}; }
+struct Rotation {
+  double w = 1, x = 0, y = 0, z = 0;
+  Rotation() = default;
+  Rotation(double w,double x,double y,double z) : w(w),x(x),y(y),z(z) {}
+  Rotation(Quaternion q) : w(q.w),x(q.x),y(q.y),z(q.z) {}
+  Rotation normalized() const {
+    const auto n = std::hypot(std::hypot(w,x),std::hypot(y,z));
+    if (!std::isfinite(n) || n == 0) throw std::invalid_argument("Physics orientation must be finite and nonzero.");
+    return {w/n,x/n,y/n,z/n};
+  }
+  Rotation conjugate() const { return {w,-x,-y,-z}; }
+  Vector rotate(Vector v) const {
+    const Vector q{x,y,z};
+    const auto cross = [](Vector a,Vector b) { return Vector{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; };
+    const auto t = cross(q,v)*2; return v+t*w+cross(q,t);
+  }
+  operator Quaternion() const { return Quaternion{static_cast<float>(w),static_cast<float>(x),static_cast<float>(y),static_cast<float>(z)}.normalized(); }
+  bool operator==(const Rotation&) const = default;
+};
+inline Rotation operator*(Rotation a,Rotation b) {
+  return {a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z,a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,
+    a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w};
+}
 struct BodyID {
   std::uint64_t world = 0;
   std::uint32_t slot = std::numeric_limits<std::uint32_t>::max(), generation = 0;

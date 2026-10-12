@@ -20,33 +20,25 @@ void validate(const RigidBody &b) {
       !std::isfinite(b.restitution) || b.restitution < 0 || b.restitution > 1)
     throw std::invalid_argument("RigidBody mass/friction must be nonnegative; restitution must be in [0,1].");
 }
-Quaternion rotation(V angle) {
-  const double length = collisionLength(angle);
-  if (length < 1e-12)
-    return {};
-  const double s = std::sin(length * 0.5) / length;
-  return Quaternion{static_cast<float>(std::cos(length * 0.5)), static_cast<float>(angle.x * s),
-                    static_cast<float>(angle.y * s), static_cast<float>(angle.z * s)}
-      .normalized();
-}
-Body body(const Scene &scene, const Detail::WorldCollider &shape) {
+Body body(const Jade::World &scene, const Detail::WorldCollider &shape) {
   Body b;
   b.shape = shape;
-  b.pose = shape.entity.get<Transform>();
+  b.orientation = Rotation{shape.entity.get<Transform>().rotation}.normalized();
   if (!shape.entity.has<RigidBody>()) {
-    b.properties.mass = 0;
+    b.mass = 0;
     return b;
   }
-  b.properties = shape.entity.get<RigidBody>();
-  validate(b.properties);
-  if (b.properties.mass == 0)
+  const auto& properties = shape.entity.get<RigidBody>();
+  b.friction = properties.friction; b.restitution = properties.restitution;
+  validate(properties);
+  b.mass = properties.motion == MotionType::Dynamic ? properties.mass : 0;
+  if (b.mass == 0)
     return b;
   if (scene.parent(shape.entity))
     throw std::invalid_argument("Dynamic RigidBody must be a Scene root.");
-  b.pose.rotation = b.pose.rotation.normalized();
-  b.inverseMass = 1.0 / b.properties.mass;
-  b.velocity = v(b.properties.velocity);
-  b.angular = v(b.properties.angularVelocity);
+  b.inverseMass = 1.0 / properties.mass;
+  b.velocity = v(properties.velocity);
+  b.angular = v(properties.angularVelocity);
   if (shape.kind == Detail::CollisionKind::Sphere) {
     const double inverse = 2.5 * b.inverseMass / (shape.radius * shape.radius);
     b.inverseInertia = {inverse, inverse, inverse};
@@ -58,52 +50,53 @@ Body body(const Scene &scene, const Detail::WorldCollider &shape) {
     }
   return b;
 }
-bool near(V a, V b, double tolerance = 1e-5) {
-  return collisionLength(a - b) < tolerance;
-}
-bool sameGeometry(const Body &a, const Body &b) {
-  if (a.shape.entity != b.shape.entity || a.shape.kind != b.shape.kind || a.shape.radius != b.shape.radius ||
-      !near(a.shape.halfExtents, b.shape.halfExtents) || !near(a.shape.center, b.shape.center))
-    return false;
-  for (std::size_t i = 0; i < 3; ++i)
-    if (!near(a.shape.axes[i], b.shape.axes[i]))
-      return false;
-  return true;
-}
-bool same(const Body &a, const Body &b) {
-  return sameGeometry(a, b) && a.properties.mass == b.properties.mass &&
-         a.properties.friction == b.properties.friction &&
-         a.properties.restitution == b.properties.restitution &&
-         a.properties.velocity == b.properties.velocity &&
-         a.properties.angularVelocity == b.properties.angularVelocity;
-}
 std::vector<FieldBody> fieldBodies(std::span<const Body> bodies) {
   std::vector<FieldBody> snapshot;
   snapshot.reserve(bodies.size());
   for (const auto &b : bodies)
-    snapshot.push_back({b.shape.entity, b.shape.center.vector(), b.velocity.vector(), b.properties.mass});
+    snapshot.push_back({b.shape.entity, b.shape.center.vector(), b.velocity.vector(), b.mass,{},b.shape.center,b.velocity,b.orientation,b.angular,b.momentum()});
   return snapshot;
 }
-std::vector<V> sampleForces(const Environment &environment, std::span<const FieldBody> snapshot) {
+std::vector<V> sampleForces(const Environment &environment, std::span<const FieldBody> snapshot, double time) {
   std::vector<V> forces(snapshot.size());
+  std::vector<std::pair<std::uint64_t,std::size_t>> index;
+  for (std::size_t i = 0; i < snapshot.size(); ++i) if (snapshot[i].entity.valid()) index.emplace_back(snapshot[i].entity.id(),i);
+  std::sort(index.begin(),index.end());
+  std::vector<ForceField::Kernel> kernels;
+  for (const auto& field : environment.fields) kernels.push_back(field->prepare(snapshot,index));
   for (std::size_t i = 0; i < snapshot.size(); ++i)
     if (snapshot[i].mass > 0) {
-      const FieldContext context{snapshot[i], snapshot};
-      for (const auto &field : environment.fields) {
-        const auto next = field->sample(context);
-        finite(next);
-        forces[i] = forces[i] + v(next);
+      const FieldContext context{snapshot[i], snapshot,index,time};
+      for (const auto &kernel : kernels) {
+        const auto next = kernel(context);
+        forces[i] = forces[i] + next.force;
       }
       (void)forces[i].vector();
     }
   return forces;
 }
-void integrate(Body &b, V force, float dt, Integration method) {
-  if (!b.inverseMass)
-    return;
-  const double kick = method == Integration::VelocityVerlet ? 0.5 : 1;
-  b.velocity = b.velocity + force * (b.inverseMass * dt * kick);
-  b.shape.center = b.shape.center + b.velocity * dt;
-  b.turn(b.angular * dt);
+double angularSpeedBound(const Body& b) {
+  if (b.shape.kind == Detail::CollisionKind::Sphere) return 0;
+  if (!b.inverseMass) return collisionLength(b.angular);
+  const auto momentum = b.momentum();
+  // A principal-axis rotation (including an isotropic body) has constant omega.
+  const auto precession = collisionLength(collisionCross(momentum,b.angular));
+  if (precession <= 1e-12*collisionLength(momentum)*collisionLength(b.angular)) return collisionLength(b.angular);
+  // Both energy and momentum are invariants of free rotation. Use the tighter bound.
+  const auto maximum = std::max({b.inverseInertia.x,b.inverseInertia.y,b.inverseInertia.z});
+  return std::min(collisionLength(momentum)*maximum,std::sqrt(std::max(0.0,collisionDot(momentum,b.angular)*maximum)));
+}
+void integrateOrientation(Body& b,double dt) {
+  if (collisionLength(b.angular) == 0) return;
+  if (!b.inverseMass || b.shape.kind == Detail::CollisionKind::Sphere) { b.turn(b.angular*dt); return; }
+  const auto momentum = b.momentum(); const Body initial = b; auto omega = b.angular;
+  bool converged = false;
+  for (unsigned iteration = 0; iteration < 32; ++iteration) {
+    Body midpoint = initial; midpoint.turn(omega*(dt*.5)); const auto next = midpoint.inertia(momentum);
+    if (collisionLength(next-omega)*dt < 1e-11) { omega = next; converged = true; break; }
+    omega = (omega+next)*.5;
+  }
+  if (!converged) throw std::runtime_error("Angular midpoint integration failed to converge.");
+  b = initial; b.turn(omega*dt); b.angular = b.inertia(momentum);
 }
 } // namespace Jade::Physics::Internal

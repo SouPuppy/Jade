@@ -22,10 +22,10 @@ struct GpuNode { Float4 low, high; std::array<std::uint32_t, 4> links; };
 struct GpuTriangle { Float4 a, b, c, na, nb, nc; };
 struct GpuInstance { Matrix4 model, inverse; std::array<std::uint32_t, 4> mesh{}; };
 struct GpuMaterial { Float4 color, emission, properties, region; std::array<std::uint32_t, 4> texture{}; };
-struct GpuEmitter { Float4 a, b, c, normal, emission; };
+struct GpuEmitter { Float4 a, b, c, normal, emission; Matrix4 model, inverse; Float4 shape; };
 struct GpuLight { Float4 position,direction,intensity,right,up; };
 static_assert(sizeof(GpuNode) == 48 && sizeof(GpuTriangle) == 96 && sizeof(GpuInstance) == 144 &&
-              sizeof(GpuMaterial) == 80 && sizeof(GpuEmitter) == 80);
+              sizeof(GpuMaterial) == 80 && sizeof(GpuEmitter) == 224);
 Float4 pack(Vec3 value) { return {value.x, value.y, value.z, 0}; }
 Float4 pack(LinearRGB value, float w = 0) { return {value.r, value.g, value.b, w}; }
 std::uint32_t indexOf(std::size_t index)
@@ -137,7 +137,7 @@ struct ComputeRayTracer::Impl {
     const auto instances = RaySceneAccess::instances(scene);
     bool sameLayout = uploaded && instances.size() == layout.size();
     for (std::size_t i = 0; sameLayout && i < instances.size(); ++i)
-      sameLayout = MeshAccess::identity(*instances[i].mesh) == MeshAccess::identity(*layout[i].mesh);
+      sameLayout = MeshAccess::identity(*instances[i].mesh) == MeshAccess::identity(*layout[i].mesh) && instances[i].kind == layout[i].kind;
     const bool sameGeometry = sameLayout && RaySceneAccess::geometryIdentity(scene) == RaySceneAccess::geometryIdentity(previous);
     const bool sameLighting = uploaded && RaySceneAccess::emitterIdentity(scene) == RaySceneAccess::emitterIdentity(previous);
     // Failed/cancelled uploads must never leave a cache that appears current.
@@ -147,6 +147,7 @@ struct ComputeRayTracer::Impl {
       std::vector<GpuTriangle> triangles;
       for (const auto &instance : instances) {
         CheckCancellation(cancellation);
+        if (instance.kind != GeometryKind::Mesh) continue;
         const auto identity = MeshAccess::identity(*instance.mesh);
         if (meshes.contains(identity)) continue;
         const auto &tree = MeshAccess::acceleration(*instance.mesh);
@@ -179,7 +180,7 @@ struct ComputeRayTracer::Impl {
         auto a = pack(e.a); a.w = static_cast<float>(e.weight / lighting.totalWeight / e.area);
         auto b = pack(e.b); b.w = static_cast<float>(e.cumulative / lighting.totalWeight);
         auto normal = pack(e.normal); normal.w = e.twoSided ? 1.0f : 0.0f;
-        emitters.push_back({a, b, pack(e.c), normal, pack(e.emission)});
+        emitters.push_back({a, b, pack(e.c), normal, pack(e.emission), e.model, e.inverse, {static_cast<float>(e.kind),0,0,0}});
       }
       emitterCount = indexOf(emitters.size());
       if (!emitters.empty()) emitters.back().b.w = 1;
@@ -189,15 +190,16 @@ struct ComputeRayTracer::Impl {
       for (std::size_t i = 0; i < instances.size(); ++i) {
         CheckCancellation(cancellation);
         const auto& instance = instances[i];
-        const auto range = meshes.at(MeshAccess::identity(*instance.mesh));
+        const auto range = instance.kind == GeometryKind::Mesh ? meshes.at(MeshAccess::identity(*instance.mesh)) : MeshRange{Invalid,0};
         auto offset = Invalid;
         if (!lighting.emitterIndices[i].empty()) {
           offset = indexOf(emitterMap.size());
-          indexOf(emitterMap.size() + instance.mesh->data().indices.size() / 3);
-          emitterMap.resize(emitterMap.size() + instance.mesh->data().indices.size() / 3, Invalid);
+          const auto primitives = instance.kind == GeometryKind::Mesh ? instance.mesh->data().indices.size() / 3 : 1;
+          indexOf(emitterMap.size() + primitives);
+          emitterMap.resize(emitterMap.size() + primitives, Invalid);
           for (const auto& [primitive, emitter] : lighting.emitterIndices[i]) emitterMap[offset + primitive] = indexOf(emitter);
         }
-        gpuInstances.push_back({instance.objectToWorld, Math::inverseAffine(instance.objectToWorld), {range.root, range.triangle, offset, 0}});
+        gpuInstances.push_back({instance.objectToWorld, Math::inverseAffine(instance.objectToWorld), {range.root, instance.kind == GeometryKind::Mesh ? range.triangle : 0, offset, static_cast<std::uint32_t>(instance.kind)}});
       }
       upload(3, gpuInstances); upload(6, emitterMap);
     }

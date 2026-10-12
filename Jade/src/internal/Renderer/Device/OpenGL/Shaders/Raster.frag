@@ -42,6 +42,24 @@ bool rayBlocked(vec3 origin,vec3 direction,float maximum,int ignoredInstance) {
     for(int i=0;i<count;++i) {
       int index=triangleOffset+(int(links.x)+i)*5;
       vec4 a=texelFetch(rayData,index),b=texelFetch(rayData,index+1),c=texelFetch(rayData,index+2);
+      if(a.w < -1.5) {
+        if(int(a.y)==ignoredInstance)continue;
+        mat4 inverseModel=mat4(b,c,texelFetch(rayData,index+3),texelFetch(rayData,index+4));
+        vec3 o=(inverseModel*vec4(origin,1)).xyz,d=(inverseModel*vec4(direction,0)).xyz;
+        float t;
+        if(int(a.x)==1) {
+          float aa=dot(d,d),bb=dot(o,d),cc=dot(o,o)-1.0,disc=bb*bb-aa*cc;
+          if(aa==0.0||disc<0.0)continue;
+          float q=-bb-(bb>=0.0?1.0:-1.0)*sqrt(disc);
+          float nearValue=q==0.0?-bb/aa:q/aa,farValue=q==0.0?nearValue:cc/q;
+          if(nearValue>farValue){float swapValue=nearValue;nearValue=farValue;farValue=swapValue;}
+          t=nearValue>.0001?nearValue:farValue;
+        }else{
+          if(d.y==0.0)continue;t=-o.y/d.y;vec3 p=o+t*d;
+          if(abs(p.x)>.5||abs(p.z)>.5)continue;
+        }
+        if(t>.0001&&t<maximum)return true;continue;
+      }
       if(int(c.w)==ignoredInstance) continue;
       vec3 edge1=b.xyz-a.xyz,edge2=c.xyz-a.xyz,p=cross(direction,edge2);
       float determinant=dot(edge1,p);

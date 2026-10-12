@@ -19,19 +19,6 @@ struct Scene::Impl {
   };
   std::uint64_t id;
   Entity camera;
-  Physics::Environment physics;
-  std::unique_ptr<Physics::World> physicsWorld;
-  struct PhysicsBinding {
-    Entity entity;
-    Physics::BodyID body;
-    Transform published;
-    RigidBody authored;
-    Detail::WorldCollider shape;
-    bool rigid = false;
-  };
-  std::vector<PhysicsBinding> physicsBindings;
-  std::vector<std::shared_ptr<const Physics::ForceField>> physicsFields;
-  Physics::Integration physicsIntegration = Physics::Integration::SemiImplicitEuler;
   const Runtime* owner = nullptr;
   std::vector<ModuleEntry> modules;
   Detail::EventDispatcher events;

@@ -12,11 +12,12 @@
 
 namespace Jade { class JobSystem; }
 namespace Jade::Physics {
+class World;
 struct BodyDescription {
   Collider shape{Box{}};
   MotionType motion = MotionType::Dynamic;
   Vector position, velocity, angularVelocity;
-  Quaternion rotation;
+  Rotation rotation;
   double mass = 1, friction = 0.6, restitution = 0;
   double linearDamping = 0, angularDamping = 0;
   bool enabled = true, allowSleep = true;
@@ -25,7 +26,7 @@ struct BodyDescription {
 };
 struct BodyState {
   Vector position, velocity, angularVelocity, angularMomentum;
-  Quaternion rotation;
+  Rotation rotation;
   bool enabled = false, sleeping = false;
 };
 struct WorldContactPoint {
@@ -44,7 +45,12 @@ struct ForceState {
   ForceStatus status = ForceStatus::Stale;
 };
 struct Aabb { Vector minimum, maximum; };
-struct QueryHit { BodyID body; Vector point, normal; double fraction = 0; };
+struct QueryHit {
+  BodyID body;
+  Vector point, normal;
+  double fraction = 0;
+  double penetration = 0; // positive for a shape cast starting inside the target
+};
 struct QueryFilter {
   std::uint32_t mask = ~std::uint32_t{0};
   BodyID ignored;
@@ -60,6 +66,7 @@ public:
   ForceState forces(BodyID body) const;
   std::span<const WorldContact> contacts() const;
   std::vector<BodyID> query(const Aabb& bounds, QueryFilter filter = {}) const;
+  std::vector<BodyID> overlap(const BodyDescription& shape, QueryFilter filter = {}) const;
   std::optional<QueryHit> rayCast(Vector origin, Vector displacement, QueryFilter filter = {}) const;
   std::optional<QueryHit> shapeCast(const BodyDescription& shape, Vector displacement, QueryFilter filter = {}) const;
 private:
@@ -86,20 +93,24 @@ public:
   BodyDescription description(BodyID body) const;
   void update(BodyID body, const BodyDescription& description);
   void setEnabled(BodyID body, bool enabled);
-  void teleport(BodyID body, Vector position, Quaternion rotation, bool clearVelocity = false);
+  void teleport(BodyID body, Vector position, Rotation rotation, bool clearVelocity = false);
   void setVelocity(BodyID body, Vector linear, Vector angular = {});
   void addForce(BodyID body, Vector force, Vector torque = {});
   void setPersistentForce(BodyID body, Vector force, Vector torque = {});
   void applyImpulse(BodyID body, Vector impulse, Vector worldPoint);
   void wake(BodyID body);
-  void setKinematicTarget(BodyID body, Vector position, Quaternion rotation, double duration);
+  void setKinematicTarget(BodyID body, Vector position, Rotation rotation, double duration);
   FieldID addField(std::shared_ptr<const ForceField> field);
   void removeField(FieldID field);
   void setFields(std::vector<std::shared_ptr<const ForceField>> fields);
+  std::vector<std::shared_ptr<const ForceField>> fields() const;
+  std::vector<FieldBody> fieldSnapshot() const;
   void setIntegration(Integration integration);
   void step(double dt);
   double time() const noexcept;
   const Statistics& statistics() const noexcept;
+  // Owned container capacity, excluding external fields, ECS and scheduler memory.
+  std::size_t memoryUsage() const noexcept;
   std::span<const WorldContact> contacts() const noexcept;
   ForceState forces(BodyID body) const;
   WorldSnapshot snapshot() const;
@@ -108,9 +119,11 @@ public:
   std::optional<QueryHit> rayCast(Vector origin, Vector displacement, QueryFilter filter = {}) const;
   std::optional<QueryHit> shapeCast(const BodyDescription& shape, Vector displacement,
                                   QueryFilter filter = {}) const;
-  // Scene binding is diagnostic metadata, never read by integration/collision/solver.
+  // Authoring identity for diagnostics and Entity-based field source lookup.
+  // Integration/collision/solver do not access live ECS state through it.
   void bind(BodyID body, Entity entity);
 private:
+  friend class System;
   struct Impl;
   std::unique_ptr<Impl> m_Impl;
 };

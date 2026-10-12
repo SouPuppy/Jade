@@ -6,7 +6,7 @@
 #include <optional>
 #include <vector>
 
-namespace Jade { class Scene; }
+namespace Jade { class World; }
 
 namespace Jade::Physics {
 
@@ -24,10 +24,10 @@ struct Contact {
 // Box allows orthogonal nonuniform world scale; Sphere requires uniform scale.
 // Shear, invalid dimensions/transforms and unrepresentable results throw invalid_argument.
 // Missing Collider/Transform or an empty Collider returns no contact. Foreign/dead entities throw.
-std::optional<Contact> contact(const Scene& scene, Entity a, Entity b);
+std::optional<Contact> contact(const Jade::World& scene, Entity a, Entity b);
 
 // One contact per pair, ordered by ascending Entity IDs. Entities without a
 // Transform or with empty Colliders are skipped. Does not mutate components or apply collision response.
-std::vector<Contact> detect(const Scene& scene);
+std::vector<Contact> detect(const Jade::World& scene);
 
 } // namespace Jade::Physics

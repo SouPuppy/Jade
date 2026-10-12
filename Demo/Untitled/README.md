@@ -1,109 +1,47 @@
-# Untitled — HD-2D prototype
+# Untitled — World Streaming showcase
 
-Untitled is a playable game on Jade. It uses a 3D ground, an eight-direction animated
-sprite and the engine's interchangeable Raster, Hybrid and CPU/GPU RayTracing pipelines. All character resources live in this Demo.
-The existing engine scenes remain available through `JadeDemo` in `Demo/Showcase`.
+Untitled v0.1 validates Jade's World Runtime with a 256x256-metre authored world. It contains 16x16 Chunks, each 16 metres square with 4x4 grass cells. The character begins in Chunk (8,8); streaming defaults to 25 data/render/static-collision Chunks and 9 simulated Chunks. Counts are clipped at map edges.
 
 ## Build and run
 
-Use an x64 Visual Studio Developer PowerShell:
-
 ```powershell
 cmake --preset windows-release
-cmake --build --preset windows-release --target Untitled --parallel
+cmake --build --preset windows-release --parallel
 & ./build/windows-release/bin/Untitled.exe
+& ./build/windows-release/bin/Untitled.exe --pipeline hybrid --frames 120 --hidden
 ```
 
-The build copies `Assets` to `bin/UntitledAssets`. Resources are located relative to
-the executable, so launching from Visual Studio or another working directory works.
-No download, Python, Aseprite installation or network access is required to play.
+CMake deploys Assets to `UntitledAssets` and authored World data to `UntitledWorld` beside the executable. Saves go to `UntitledSaves` there. The game reads WorldConfig and Chunk JSON rather than generating terrain during play.
 
-| Key | Action |
+| Control | Action |
 | --- | --- |
-| WASD | Move relative to the camera; diagonal movement has the same speed |
-| Q / E | Rotate the camera by 45°, once per press |
-| R | Reset player, camera and animation |
-| Esc | Leave soul mode; otherwise exit |
-| P | Pause gameplay, physics and animation; camera rotation remains available |
-| I | Cycle Raster ? Hybrid ? RayTracing ? None ? Raster |
-| F1 | Toggle mesh wireframe over the selected pipeline |
-| F2 | Enter/leave the soul observation camera; the world keeps running |
-| F3 | Toggle scene axes/AABBs, entity axes, BVH, camera frustums and light directions |
-| F4 | Toggle collision, contact and physics debug drawing |
-| F5 | Toggle independent normal debug, including when I selects None |
-| O | Switch orthographic / perspective projection |
+| WASD | Camera-relative movement |
+| Q / E | Rotate the view by 45 degrees |
+| F | Push the nearest active ball within five metres |
+| X | Delete that ball and persist its tombstone |
+| R | Reset player/camera; retain saved object changes |
+| Esc | Exit; in observer mode, leave that mode first |
+| I | Cycle Raster / Hybrid / RayTracing / None |
+| F1 / F3 / F4 / F5 | Wireframe / bounds / physics / normals |
+| F2 | Independent observation camera |
+| P / O | Pause / change projection |
 
-Engine debug shortcuts and Debug logging are enabled by default. Debug overlays
-start hidden. The game initially uses an orthographic camera with a 45° pitch.
+The HUD reports current Chunk, data/render/collision/active counts, in-flight loads, frozen dynamic objects, save status and errors. Movement waits for collision readiness. The character is a SpriteRenderer + Animator + Collider + CharacterController entity without a RigidBody.
 
-## Rendering and animation
+## Geometry and persistence
 
-The window is 960 x 640 with a 24 FPS cap and starts in Raster. Raster uses depth
-testing, alpha-cutout sprites, shadow maps, HDR lighting and tone mapping. Hybrid
-shares the raster passes and uses real BVH shadow queries instead of shadow maps.
-It does not add traced reflections or indirect lighting. GPU PathTrace defaults to a 0.5 resolution
-scale (480×320), at least one complete sample per frame and four bounces. Remaining
-frame time can be used for more samples. Frames do not accumulate old character poses.
-GPU initialization failure is logged and falls back to CPU. Hybrid CPU shadows use
-parallel CPU queries and a visibility mask at the configured resolution scale; raster
-geometry remains at window resolution. Actual performance is
-hardware-dependent.
+Grass uses analytic finite plane children with alternating material colors. A static thin Box per Chunk supplies ground collision. Ball groups demonstrate low polygon, analytic sphere and high polygon geometry with the same radius and Collider. Dynamic balls outside simulation demand freeze and stop colliding; static floors remain available across collision demand.
 
-```powershell
-& ./build/windows-release/bin/Untitled.exe --pipeline hybrid --device cpu --scale 0.25
-& ./build/windows-release/bin/Untitled.exe --pipeline tracing --device gpu --scale 0.375
-& ./build/windows-release/bin/Untitled.exe --benchmark --hidden --frames 1441
-```
+F applies a linear/upward impulse. X removes the persistent object. Position, rotation, velocities and visual representation survive unload/reload and process restart. One atomic World snapshot transfers cross-Chunk ownership without duplicating the authored ball. Normal exit waits for the final save; load/save errors are surfaced rather than silently replacing saved state. Each save directory has one writer.
 
-`--pipeline raster|hybrid|tracing|none` selects the startup pipeline. `--soul` starts
-in soul mode. `--device` selects the ray execution backend, including Hybrid shadows.
+## Rendering and assets
 
-`--benchmark` supplies eight movement directions and rotates the camera every four
-seconds. Without `--frames`, it runs 1441 frames, approximately one minute at 24 FPS.
-The engine logs FPS, frame interval, work duration and sample duration once per second.
-`--help` lists all options. `--hidden` is for automated checks.
+Raster is the startup pipeline at a 24 FPS presentation target. Hybrid uses raster geometry with CPU/GPU shadow rays. RayTracing supports CPU/GPU transport, with GPU selected by default, half-resolution film and four bounces. Initialization failure falls back to CPU. Supported CLI options are `--pipeline`, `--device`, `--scale`, `--frames`, `--hidden`, `--soul` and `--benchmark`; `--help` lists values.
 
-Walk has nine active 256×256 frames in a 4×3 sheet; ReadyIdle has fourteen in a 4×4
-sheet. Empty trailing cells are excluded. Source timing metadata was not provided,
-so clips use 12 frames/second independently of the display cap. Idle/Walk transitions
-restart the clip; direction changes retain phase. The character's world-facing direction
-is retained when movement stops, and camera rotation changes the displayed direction.
+Analytic geometry is exact for ray visibility and traced emission sampling; raster/debug use cached tessellation. Raster/Hybrid direct lighting and dielectric appearance are approximations; they do not trace reflection, refraction or indirect light. None retains the window and independent diagnostics.
 
-Sprite texture sampling is nearest-neighbor in sRGB converted to linear RGB.
-Alpha below 0.5 is discarded for primary, indirect and shadow rays. Sprites remain
-upright, use a shared quad and display unlit texture colors while casting silhouette
-shadows. Animation only changes the frame region; it does not rebuild mesh acceleration.
+F2 keeps the World running while WASD, Space/Shift, right-drag look, middle-drag pan and wheel zoom control a separate observer. The original camera and sprite orientation remain the gameplay view. Diagnostic paths sample that game camera on CPU at a bounded rate.
 
-The planar CharacterController moves against static Box/Sphere Colliders without a
-RigidBody. This first version has a fixed ground height and does not implement gravity,
-jumping, steps, slopes or rigid-body pushing. Gameplay state mapping stays in Untitled.
+Assets include the bundled Hormelz character archives and source sheets. Runtime hero clips use nine Walk and fourteen ReadyIdle frames per direction, at the existing 12 FPS timing fallback. Nearest sRGB texture sampling and alpha cutout are shared across rendering paths.
 
-## Soul observation mode
-
-F2 creates a Runtime-owned free camera without editing the game's selected camera.
-WASD/arrows move horizontally, Space ascends, Shift descends, Ctrl slows movement, and holding the right mouse button
-turns the view with pitch limited to +/-89 degrees and no roll. Middle-button drag pans, and the wheel zooms in either projection. These controls are consumed before gameplay input. O changes only the
-observer projection. The game, physics and animation continue; P still controls pause.
-F2 or Esc returns to the selected game pipeline and restores mouse capture. I changes
-the pipeline to use after leaving the observer.
-
-The observer uses a raster background with the game camera frustum and a 16?9 grid
-of diagnostic transport samples from the game camera. Paths refresh at most 6 Hz and
-have at most four bounces. Cyan shows primary segments, orange bounces, green visible
-shadow tests, red blocked shadow tests, and gray escaped rays. They use the CPU path
-integrator's actual intersection/material sampling, not the observer's view rays or
-an exact replay of GPU image samples. Each refresh uses the latest world snapshot.
-Scene switches clear observer state. None still allows debug overlays and this observer;
-it does not create a headless server.
-
-## Assets and verification
-
-`Assets/Characters/Hero/Archives` contains all thirteen original RAR files;
-`Original` contains all 104 extracted PNGs. `manifest.json` records source, dimensions,
-hashes, direction order and runtime defaults. Only Walk and ReadyIdle are used in phase one.
-
-Run `JadeSmokeTests.exe` to exercise engine and game tests. The Untitled tests validate
-all sixteen runtime sheets, movement at every camera orientation, animation/state
-transitions, keyboard repeat, focus loss, pause, reset and debug shortcuts. Engine tests
-check alpha visibility, shadow queries, CPU/GPU agreement, billboard anchoring and collision.
-The preview test also writes `build/<preset>/validation/untitled-preview.ppm`.
+Architecture and lifecycle details: [World Runtime](../../docs/WorldRuntime.md). Measured automated checks: [Validation](../../docs/Validation.md). Automated callback/readback tests and hidden launches establish behavior and startup, not a manual interaction or hardware-independent performance guarantee.

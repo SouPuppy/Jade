@@ -16,17 +16,17 @@ namespace {
 using namespace Jade;
 using namespace Jade::Renderer;
 struct GpuFixture {
-  Scene scene;
+  Scene scene{std::make_shared<World>()};
   Assets assets;
   Entity camera;
   GpuFixture() {
-    camera = scene.create<Archetype<Transform, Camera>>();
+    camera = scene.world().create<Archetype<Transform, Camera>>();
     camera.get<Transform>().position = {0, 0, 5}; scene.setCamera(camera);
   }
   Entity add(MeshHandle mesh, Vec3 position, Material material = {}) {
-    auto entity = scene.create<Archetype<Transform, Geometry, Material>>();
+    auto entity = scene.world().create<Archetype<Transform, Geometry, Material>>();
     entity.get<Transform>().position = position;
-    entity.get<Geometry>().mesh = mesh; entity.get<Material>() = material;
+    entity.get<Geometry>().resource = mesh; entity.get<Material>() = material;
     return entity;
   }
   SceneSnapshot snapshot() { return SceneSnapshot::capture(scene, assets); }
@@ -76,10 +76,10 @@ TEST(ComputeRayTracer, PrimaryVisibilityMatchesCpuWithSharedMeshesAndHierarchySh
   const auto first = f.add(mesh, {-0.8f, 0, 0}, Materials::Diffuse({0.9f, 0.2f, 0.1f}));
   const auto second = f.add(mesh, {0.8f, 0, -0.8f}, Materials::Gold());
   first.get<Transform>().rotation = Quaternion::angleAxis({0, 1, 0}, 25);
-  const auto parent = f.scene.create<Archetype<Transform>>();
+  const auto parent = f.scene.world().create<Archetype<Transform>>();
   parent.get<Transform>().scale = {1.4f, 0.8f, 1.2f};
   second.get<Transform>().rotation = Quaternion::angleAxis({0, 0, 1}, 31);
-  f.scene.setParent(second, parent);
+  f.scene.world().setParent(second, parent);
   ComputeRayTracer gpu(exact());
   EXPECT_FALSE(gpu.deviceName().empty());
   const auto snapshot = f.snapshot(); const auto scene = RayScene::build(snapshot);
@@ -110,6 +110,37 @@ TEST(ComputeRayTracer, NormalsMatchCpuForSmoothTrianglesAndNonuniformTransforms)
   }
 }
 
+TEST(ComputeRayTracer, AnalyticSpherePlaneAndEllipsoidMatchCpu) {
+  GpuFixture f;
+  auto e=f.scene.world().create<Archetype<Transform,Geometry,Material>>();
+  e.get<Geometry>()=Geometry::sphere(1);e.get<Transform>().scale={1.3f,.7f,1};
+  e.get<Transform>().rotation=Quaternion::angleAxis({1,1,0},25);
+  ComputeRayTracer gpu(exact(RayOutput::Normal));
+  auto snapshot=f.snapshot();matchesCpu(gpu,RayScene::build(snapshot),*snapshot.camera,{67,43},RayOutput::Normal);
+  e.get<Geometry>()=Geometry::plane({2,2});e.get<Transform>()={};
+  e.get<Transform>().rotation=Quaternion::angleAxis({1,0,0},90);
+  snapshot=f.snapshot();matchesCpu(gpu,RayScene::build(snapshot),*snapshot.camera,{41,35},RayOutput::Normal);
+}
+TEST(ComputeRayTracer, AnalyticEmissiveGeometryMatchesCpuPathSampling) {
+  GpuFixture f;
+  auto sphere=f.scene.world().create<Archetype<Transform,Geometry,Material>>();
+  sphere.get<Geometry>()=Geometry::sphere(.7f);sphere.get<Transform>().position={0,1,0};
+  sphere.get<Transform>().scale={1,.8f,1.3f};sphere.get<Material>()=Materials::Emissive({3,2,1});
+  auto floor=f.scene.world().create<Archetype<Transform,Geometry,Material>>();
+  floor.get<Geometry>()=Geometry::plane({8,8});floor.get<Transform>().position={0,-1,0};
+  const auto snapshot=f.snapshot();const auto scene=RayScene::build(snapshot);
+  RayTracingSettings settings;settings.jitter=false;settings.maxBounces=2;
+  RayTracing cpu(settings);settings.device=RayDevice::GPU;ComputeRayTracer gpu(settings);
+  Film a({31,23}),b(a.size());
+  for(std::uint64_t sample=0;sample<64;++sample) {
+    const RenderRequest request{*snapshot.camera,a.size(),sample,91,{}};cpu.render(scene,request,a);gpu.render(scene,request,b);
+  }
+  for(std::size_t i=0;i<a.pixels().size();++i) {
+    EXPECT_NEAR(a.pixels()[i].r,b.pixels()[i].r,.015f);
+    EXPECT_NEAR(a.pixels()[i].g,b.pixels()[i].g,.015f);
+    EXPECT_NEAR(a.pixels()[i].b,b.pixels()[i].b,.015f);
+  }
+}
 TEST(ComputeRayTracer, SceneEditsUpdateVisibilityMaterialsAndEmptyGeometry) {
   GpuFixture f;
   auto object = f.add(f.assets.add(MeshData::cube(2)), {}, Materials::Diffuse({0.3f, 0.5f, 0.8f}));
@@ -117,8 +148,8 @@ TEST(ComputeRayTracer, SceneEditsUpdateVisibilityMaterialsAndEmptyGeometry) {
   for (int variant = 0; variant < 5; ++variant) {
     if (variant == 1) object.get<Material>() = Materials::Emissive({2, 3, 4});
     if (variant == 2) object.get<Transform>().position = {0.7f, 0, -1};
-    if (variant == 3) object.get<Geometry>().mesh = f.assets.add(MeshData::sphere());
-    if (variant == 4) f.scene.destroy(object);
+    if (variant == 3) object.get<Geometry>().resource = f.assets.add(MeshData::sphere());
+    if (variant == 4) f.scene.world().destroy(object);
     const auto snapshot = f.snapshot();
     matchesCpu(gpu, compiler.compile(snapshot), *snapshot.camera, {41, 35});
   }
@@ -194,10 +225,10 @@ TEST(ComputeRayTracer, RuntimeSelectsComputeWithoutChangingCpuRendererDefault) {
   config.renderer.rayTracing.device = RayDevice::GPU;
   config.renderer.rayTracing.maxSamples = 1;
   Application app(config);
-  auto scene = std::make_shared<Scene>();
-  auto camera = scene->create<Archetype<Transform, Camera>>(); camera.get<Transform>().position.z = 5; scene->setCamera(camera);
-  auto object = scene->create<Archetype<Transform, Geometry, Material>>();
-  object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+  auto scene = std::make_shared<Scene>(std::make_shared<World>());
+  auto camera = scene->world().create<Archetype<Transform, Camera>>(); camera.get<Transform>().position.z = 5; scene->setCamera(camera);
+  auto object = scene->world().create<Archetype<Transform, Geometry, Material>>();
+  object.get<Geometry>().resource = app.runtime().assets().add(MeshData::cube());
   app.runtime().setScene(scene); app.Run({3});
   EXPECT_EQ(app.runtime().renderer().progress().rendererName, "GPU Ray Casting");
   app.runtime().renderer().setWireframe(true); app.Run({2});
@@ -416,7 +447,7 @@ TEST(GpuPathTracing, DarkPixelsAreWrittenAndDownwardAreaLightsIlluminateEveryUno
   MeshData panel;
   for(Vec3 p:{Vec3{-.5f,-.5f,-.5f},Vec3{.5f,-.5f,-.5f},Vec3{.5f,-.5f,.5f},Vec3{-.5f,-.5f,.5f}})
     panel.vertices.push_back({p,{0,-1,0}});
-  panel.indices={0,1,2,0,2,3}; lamp.get<Geometry>().mesh=f.assets.add(std::move(panel));
+  panel.indices={0,1,2,0,2,3}; lamp.get<Geometry>().resource=f.assets.add(std::move(panel));
   snapshot=f.snapshot(); const auto scene=RayScene::build(snapshot);
   auto cpuConfig=config;cpuConfig.device=RayDevice::CPU;JobSystem jobs({2});RayTracing cpu(jobs,cpuConfig);
   for (std::uint64_t seed : {100u,200u,300u}) {

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "x": 1,
+  "z": 5,
+  "objects": [
+    {
+      "id": 811,
+      "type": "grass",
+      "persistent": false,
+      "dynamic": false,
+      "state": {
+        "x": 1,
+        "z": 5
+      }
+    }
+  ]
+}

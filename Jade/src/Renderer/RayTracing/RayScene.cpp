@@ -1,11 +1,12 @@
 #include "RayScene.hpp"
 #include "../Common/Math.hpp"
+#include "../Common/Analytic.hpp"
 #include "Emitters.hpp"
 
 #include <Jade/Graphics/Geometry.hpp>
 #include <Jade/Renderer/RayTracing/BSDF.hpp>
 
-#include "../../internal/Core/SceneTransforms.hpp"
+#include "../../internal/Core/WorldTransforms.hpp"
 #include "../../internal/Mesh/MeshAccess.hpp"
 #include "../../internal/Renderer/RaySceneAccess.hpp"
 
@@ -26,6 +27,7 @@ struct InstanceGeometry {
   std::shared_ptr<const Mesh> mesh;
   Matrix4 model, inverse;
   std::uint64_t entity;
+  GeometryKind kind;
 };
 struct CompiledGeometry {
   std::vector<InstanceGeometry> instances;
@@ -85,6 +87,8 @@ try {
     CheckCancellation(cancellation);
     if (!instance.mesh)
       throw std::invalid_argument("Render instance has no compiled mesh resource.");
+    if (instance.kind != GeometryKind::Mesh && instance.kind != GeometryKind::Sphere && instance.kind != GeometryKind::Plane)
+      throw std::invalid_argument("Unknown render geometry kind.");
     validateMaterial(instance.material);
   }
   bool sameLayout = m_Impl->previous && m_Impl->input.instances.size() == snapshot.instances.size();
@@ -95,7 +99,7 @@ try {
       CheckCancellation(cancellation);
       const auto &before = m_Impl->input.instances[i];
       const auto &after = snapshot.instances[i];
-      if (before.mesh != after.mesh || before.entity != after.entity) {
+      if (before.mesh != after.mesh || before.entity != after.entity || before.kind != after.kind) {
         sameLayout = sameTransforms = sameEmitters = false;
         break;
       }
@@ -120,9 +124,12 @@ try {
     for (const auto &instance : snapshot.instances) {
       CheckCancellation(cancellation);
       const auto inverse = Math::inverseAffine(instance.objectToWorld);
-      geometry->instances.push_back({instance.mesh, instance.objectToWorld, inverse, instance.entity});
+      geometry->instances.push_back({instance.mesh, instance.objectToWorld, inverse, instance.entity, instance.kind});
       Bounds transformed;
-      const auto local = MeshAccess::acceleration(*instance.mesh).bounds();
+      Bounds local;
+      if (instance.kind == GeometryKind::Mesh) local = MeshAccess::acceleration(*instance.mesh).bounds();
+      if (instance.kind == GeometryKind::Sphere) { local.low={-1,-1,-1};local.high={1,1,1}; }
+      if (instance.kind == GeometryKind::Plane) { local.low={-.5f,-.000001f,-.5f};local.high={.5f,.000001f,.5f}; }
       if (local.valid())
         for (int corner = 0; corner < 8; ++corner) {
           const auto p = Math::point(instance.objectToWorld, {corner & 1 ? local.high.x : local.low.x,
@@ -176,7 +183,7 @@ bool RayScene::intersect(const Ray &ray, SurfaceHit &hit) const
     const Ray local{Math::point(instance.inverse, ray.origin), Math::vector(instance.inverse, ray.direction),
                     ray.tMin, maximum};
     SurfaceHit candidate;
-    if (!MeshAccess::intersect(*instance.mesh, local, candidate))
+    if (!(instance.kind == GeometryKind::Mesh ? MeshAccess::intersect(*instance.mesh, local, candidate) : intersectPrimitive(instance.kind, local, candidate)))
       return false;
     const auto& appearance = m_Impl->appearances[index];
     if (appearance.texture && sampleSprite(appearance, candidate.position).alpha < appearance.alphaCutoff)
@@ -205,6 +212,7 @@ bool RayScene::occluded(const Ray &ray,std::uint32_t ignoredInstance) const
     const Ray local{Math::point(instance.inverse, ray.origin), Math::vector(instance.inverse, ray.direction),
                     ray.tMin, ray.tMax};
     const auto& appearance = m_Impl->appearances[index];
+    if (instance.kind != GeometryKind::Mesh) { SurfaceHit hit; return intersectPrimitive(instance.kind, local, hit); }
     if (!appearance.texture) return MeshAccess::occluded(*instance.mesh, local);
     SurfaceHit hit;
     return MeshAccess::intersect(*instance.mesh, local, hit) && sampleSprite(appearance, hit.position).alpha >= appearance.alphaCutoff;
@@ -259,12 +267,15 @@ float RayScene::emitterPdf(Vec3 reference, const SurfaceHit &hit) const
   const float distance = Math::length(delta);
   if (distance == 0)
     return 0;
-  const float cosine = dot(emitter.normal, delta * (-1 / distance));
+  const auto normal = emitter.kind == GeometryKind::Mesh ? emitter.normal : hit.geometricNormal;
+  const float cosine = dot(normal, delta * (-1 / distance));
   if (!emitter.twoSided && cosine <= 0)
     return 0;
   const float absolute = std::abs(cosine);
+  const auto localNormal = emitter.kind == GeometryKind::Sphere ? Math::unit(Math::point(emitter.inverse,hit.position)) : Vec3{0,1,0};
+  const auto jacobian = emitter.kind == GeometryKind::Mesh ? 1 : areaJacobian(emitter.model,emitter.inverse,localNormal);
   return absolute > 0 ? static_cast<float>(emitter.weight / m_Impl->lighting->totalWeight / emitter.area) *
-                            distance * distance / absolute
+                            distance * distance / (absolute*jacobian)
                       : 0;
 }
 

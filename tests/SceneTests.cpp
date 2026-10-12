@@ -1,7 +1,7 @@
 #include <Jade/Renderer/RayTracing/RayTracing.hpp>
 #include <Jade/Jade.hpp>
 
-#include "internal/Core/SceneTransforms.hpp"
+#include "internal/Core/WorldTransforms.hpp"
 
 #include <gtest/gtest.h>
 #include <GLFW/glfw3.h>
@@ -18,7 +18,7 @@ namespace {
 struct Value {
   int value = 0;
 };
-static_assert(std::ranges::forward_range<Jade::SceneView<Value>>);
+static_assert(std::ranges::forward_range<Jade::ECS::View<Value>>);
 struct OnDestroy {
   std::function<void()> callback;
   explicit OnDestroy(std::function<void()> fn) : callback(std::move(fn)) {}
@@ -61,16 +61,16 @@ Jade::Vec3 Point(const Jade::Matrix4 &matrix, Jade::Vec3 point, float w = 1)
 TEST(Scene, StartsEmptyAndViewsDoNotKeepTheOwnerAlive)
 {
   Jade::Entity entity;
-  std::optional<Jade::SceneView<Value>> snapshot;
+  std::optional<Jade::ECS::View<Value>> snapshot;
   {
-    Jade::Scene scene;
+    Jade::Scene scene{std::make_shared<Jade::World>()};
     EXPECT_FALSE(scene.camera());
-    const auto empty = scene.query<Value>();
+    const auto empty = scene.world().registry().query<Value>();
     EXPECT_EQ(empty.begin(), empty.end());
-    entity = scene.create();
+    entity = scene.world().create();
     EXPECT_FALSE(entity.has<Jade::Transform>());
     entity.add<Value>(7);
-    snapshot.emplace(scene.query<Value>());
+    snapshot.emplace(scene.world().registry().query<Value>());
     ASSERT_NE(snapshot->begin(), snapshot->end());
     EXPECT_EQ((*snapshot->begin()).get<Value>().value, 7);
   }
@@ -80,55 +80,55 @@ TEST(Scene, StartsEmptyAndViewsDoNotKeepTheOwnerAlive)
 
 TEST(Hierarchy, ParentingValidatesBeforeMutationAndPreservesLocalTrs)
 {
-  Jade::Scene scene, foreign;
-  const auto root = scene.create(), child = scene.create(), leaf = scene.create();
+  Jade::Scene scene{std::make_shared<Jade::World>()}; Jade::Scene foreign{std::make_shared<Jade::World>()};
+  const auto root = scene.world().create(), child = scene.world().create(), leaf = scene.world().create();
   auto &local = child.add<Jade::Transform>();
   local.position = {1, 2, 3};
   local.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, 30);
   local.scale = {2, 3, 4};
   const auto original = local;
-  scene.setParent(child, root);
-  scene.setParent(leaf, child);
-  EXPECT_EQ(scene.parent(child), root);
-  EXPECT_EQ(scene.parent(leaf), child);
-  EXPECT_THROW(scene.setParent(root, leaf), std::invalid_argument);
-  EXPECT_THROW(scene.setParent(root, root), std::invalid_argument);
-  EXPECT_THROW(scene.setParent(child, foreign.create()), std::invalid_argument);
-  EXPECT_FALSE(scene.parent(root));
-  EXPECT_EQ(scene.parent(child), root);
-  const auto dead = scene.create();
-  scene.destroy(dead);
-  EXPECT_THROW(scene.setParent(child, dead), std::invalid_argument);
-  scene.setParent(child);
-  EXPECT_FALSE(scene.parent(child));
-  EXPECT_EQ(scene.parent(leaf), child);
+  scene.world().setParent(child, root);
+  scene.world().setParent(leaf, child);
+  EXPECT_EQ(scene.world().parent(child), root);
+  EXPECT_EQ(scene.world().parent(leaf), child);
+  EXPECT_THROW(scene.world().setParent(root, leaf), std::invalid_argument);
+  EXPECT_THROW(scene.world().setParent(root, root), std::invalid_argument);
+  EXPECT_THROW(scene.world().setParent(child, foreign.world().create()), std::invalid_argument);
+  EXPECT_FALSE(scene.world().parent(root));
+  EXPECT_EQ(scene.world().parent(child), root);
+  const auto dead = scene.world().create();
+  scene.world().destroy(dead);
+  EXPECT_THROW(scene.world().setParent(child, dead), std::invalid_argument);
+  scene.world().setParent(child);
+  EXPECT_FALSE(scene.world().parent(child));
+  EXPECT_EQ(scene.world().parent(leaf), child);
   EXPECT_EQ(local.position, original.position);
   EXPECT_EQ(local.rotation, original.rotation);
   EXPECT_EQ(local.scale, original.scale);
-  EXPECT_TRUE(scene.children(root).empty());
+  EXPECT_TRUE(scene.world().children(root).empty());
 }
 
 TEST(Hierarchy, ChildrenSnapshotsRetainAttachmentOrder)
 {
-  Jade::Scene scene;
-  const auto root = scene.create(), a = scene.create(), b = scene.create();
-  scene.setParent(a, root);
-  scene.setParent(b, root);
-  const auto snapshot = scene.children(root);
-  scene.setParent(a);
-  scene.setParent(a, root);
-  scene.setParent(b, root);
+  Jade::Scene scene{std::make_shared<Jade::World>()};
+  const auto root = scene.world().create(), a = scene.world().create(), b = scene.world().create();
+  scene.world().setParent(a, root);
+  scene.world().setParent(b, root);
+  const auto snapshot = scene.world().children(root);
+  scene.world().setParent(a);
+  scene.world().setParent(a, root);
+  scene.world().setParent(b, root);
   EXPECT_EQ(snapshot, (std::vector<Jade::Entity>{a, b}));
-  EXPECT_EQ(scene.children(root), (std::vector<Jade::Entity>{b, a}));
-  scene.destroy(b);
-  EXPECT_EQ(scene.children(root), (std::vector<Jade::Entity>{a}));
+  EXPECT_EQ(scene.world().children(root), (std::vector<Jade::Entity>{b, a}));
+  scene.world().destroy(b);
+  EXPECT_EQ(scene.world().children(root), (std::vector<Jade::Entity>{a}));
   EXPECT_FALSE(snapshot[1]);
 }
 
 TEST(Hierarchy, FullMatricesRetainShearAndDirectEditsAreVisible)
 {
-  Jade::Scene scene;
-  const auto root = scene.create(), child = scene.create(), leaf = scene.create();
+  Jade::Scene scene{std::make_shared<Jade::World>()};
+  const auto root = scene.world().create(), child = scene.world().create(), leaf = scene.world().create();
   auto &a = root.add<Jade::Transform>();
   a.position = {2, 3, 4};
   a.scale = {2, 3, 4};
@@ -138,46 +138,46 @@ TEST(Hierarchy, FullMatricesRetainShearAndDirectEditsAreVisible)
   b.rotation = Jade::Quaternion::angleAxis({0, 1, 0}, 45);
   auto &c = leaf.add<Jade::Transform>();
   c.position = {0, 0, 2};
-  scene.setParent(child, root);
-  scene.setParent(leaf, child);
+  scene.world().setParent(child, root);
+  scene.world().setParent(leaf, child);
   const auto expected =
       Jade::Detail::ModelMatrix(a) * Jade::Detail::ModelMatrix(b) * Jade::Detail::ModelMatrix(c);
-  const auto actual = scene.worldMatrix(leaf);
+  const auto actual = scene.world().worldMatrix(leaf);
   for (std::size_t index = 0; index < 16; ++index)
     EXPECT_NEAR(actual.values[index], expected.values[index], 1e-5);
-  Jade::Detail::SceneTransforms transforms(scene);
+  Jade::Detail::WorldTransforms transforms(scene.world());
   const auto pose = transforms.Resolve(child);
   const auto tangent = Point(pose.model, {1, 0, 0}, 0);
   const auto normal = Point(pose.normal, {0, 0, 1}, 0);
   EXPECT_NEAR(tangent.dot(normal), 0, 1e-5);
   const auto before = Point(actual, {});
   a.position.x += 5;
-  EXPECT_NEAR(Point(scene.worldMatrix(leaf), {}).x, before.x + 5, 1e-5);
+  EXPECT_NEAR(Point(scene.world().worldMatrix(leaf), {}).x, before.x + 5, 1e-5);
   b.scale.y = 0;
-  EXPECT_THROW(scene.worldMatrix(leaf), std::invalid_argument);
+  EXPECT_THROW(scene.world().worldMatrix(leaf), std::invalid_argument);
 }
 
 TEST(Hierarchy, GroupsWithoutTransformAreIdentityAndRemovalKeepsRelationships)
 {
-  Jade::Scene scene;
-  const auto group = scene.create(), child = scene.create();
+  Jade::Scene scene{std::make_shared<Jade::World>()};
+  const auto group = scene.world().create(), child = scene.world().create();
   child.add<Jade::Transform>().position = {1, 2, 3};
-  scene.setParent(child, group);
-  EXPECT_EQ(Point(scene.worldMatrix(child), {}), (Jade::Vec3{1, 2, 3}));
+  scene.world().setParent(child, group);
+  EXPECT_EQ(Point(scene.world().worldMatrix(child), {}), (Jade::Vec3{1, 2, 3}));
   group.add<Jade::Transform>().position = {5, 0, 0};
-  EXPECT_EQ(Point(scene.worldMatrix(child), {}), (Jade::Vec3{6, 2, 3}));
+  EXPECT_EQ(Point(scene.world().worldMatrix(child), {}), (Jade::Vec3{6, 2, 3}));
   group.remove<Jade::Transform>();
-  EXPECT_EQ(scene.parent(child), group);
-  EXPECT_EQ(Point(scene.worldMatrix(child), {}), (Jade::Vec3{1, 2, 3}));
+  EXPECT_EQ(scene.world().parent(child), group);
+  EXPECT_EQ(Point(scene.world().worldMatrix(child), {}), (Jade::Vec3{1, 2, 3}));
 }
 
 TEST(Hierarchy, SubtreeInvalidationPrecedesAllDestructorsAndAllowsReentry)
 {
-  Jade::Scene scene;
-  const auto outside = scene.create(), root = scene.create(), child = scene.create(), leaf = scene.create();
-  scene.setParent(root, outside);
-  scene.setParent(child, root);
-  scene.setParent(leaf, child);
+  Jade::Scene scene{std::make_shared<Jade::World>()};
+  const auto outside = scene.world().create(), root = scene.world().create(), child = scene.world().create(), leaf = scene.world().create();
+  scene.world().setParent(root, outside);
+  scene.world().setParent(child, root);
+  scene.world().setParent(leaf, child);
   std::vector<int> destroyed;
   Jade::Entity replacement;
   const auto checkDead = [&] {
@@ -188,9 +188,9 @@ TEST(Hierarchy, SubtreeInvalidationPrecedesAllDestructorsAndAllowsReentry)
   leaf.add<OnDestroy>([&] {
     checkDead();
     destroyed.push_back(3);
-    replacement = scene.create();
+    replacement = scene.world().create();
     replacement.add<Value>(99);
-    EXPECT_THROW(scene.setParent(replacement, root), std::invalid_argument);
+    EXPECT_THROW(scene.world().setParent(replacement, root), std::invalid_argument);
     EXPECT_THROW(child.add<Value>(), std::logic_error);
   });
   child.add<OnDestroy>([&] {
@@ -201,10 +201,10 @@ TEST(Hierarchy, SubtreeInvalidationPrecedesAllDestructorsAndAllowsReentry)
     checkDead();
     destroyed.push_back(1);
   });
-  scene.destroy(root);
+  scene.world().destroy(root);
   EXPECT_EQ(destroyed, (std::vector<int>{3, 2, 1}));
   EXPECT_TRUE(outside);
-  EXPECT_TRUE(scene.children(outside).empty());
+  EXPECT_TRUE(scene.world().children(outside).empty());
   EXPECT_TRUE(replacement);
   EXPECT_EQ(replacement.get<Value>().value, 99);
   EXPECT_NE(replacement, root);
@@ -214,26 +214,26 @@ TEST(Hierarchy, SubtreeInvalidationPrecedesAllDestructorsAndAllowsReentry)
 
 TEST(Hierarchy, DeepTreesResolveAndDeleteWithoutRecursion)
 {
-  Jade::Scene scene;
-  auto root = scene.create(), tail = root;
+  Jade::Scene scene{std::make_shared<Jade::World>()};
+  auto root = scene.world().create(), tail = root;
   root.add<Jade::Transform>().position.x = 1;
   for (int index = 1; index < 4096; ++index) {
-    const auto next = scene.create();
+    const auto next = scene.world().create();
     next.add<Jade::Transform>().position.x = 1;
-    scene.setParent(next, tail);
+    scene.world().setParent(next, tail);
     tail = next;
   }
-  EXPECT_FLOAT_EQ(scene.worldMatrix(tail).at(0, 3), 4096);
-  scene.destroy(root);
+  EXPECT_FLOAT_EQ(scene.world().worldMatrix(tail).at(0, 3), 4096);
+  scene.world().destroy(root);
   EXPECT_FALSE(tail);
-  const auto view = scene.query<Jade::Transform>();
+  const auto view = scene.world().registry().query<Jade::Transform>();
   EXPECT_EQ(view.begin(), view.end());
 }
 
 TEST(Hierarchy, CameraUsesInheritedPositionAndRotationWhileIgnoringItsScale)
 {
-  Jade::Scene scene;
-  const auto parent = scene.create(), camera = scene.create();
+  Jade::Scene scene{std::make_shared<Jade::World>()};
+  const auto parent = scene.world().create(), camera = scene.world().create();
   auto &a = parent.add<Jade::Transform>();
   a.position = {2, 3, 4};
   a.scale = {2, 3, 4};
@@ -244,9 +244,9 @@ TEST(Hierarchy, CameraUsesInheritedPositionAndRotationWhileIgnoringItsScale)
   b.scale = {0, std::numeric_limits<float>::quiet_NaN(), -1};
   camera.add<Jade::Camera>();
   scene.setCamera(camera);
-  scene.setParent(camera, parent);
-  Jade::Detail::SceneTransforms transforms(scene);
-  const auto eye = Point(scene.worldMatrix(parent), b.position);
+  scene.world().setParent(camera, parent);
+  Jade::Detail::WorldTransforms transforms(scene.world());
+  const auto eye = Point(scene.world().worldMatrix(parent), b.position);
   const auto view = transforms.CameraView(camera);
   const auto origin = Point(view, eye);
   EXPECT_NEAR(origin.x, 0, 1e-5);
@@ -264,7 +264,7 @@ TEST(SceneSwitching, EmptyApplicationAndExplicitSelectionWorkWithoutACamera)
   Jade::Application app(Hidden());
   EXPECT_FALSE(app.runtime().scene());
   EXPECT_NO_THROW(app.Run({1}));
-  auto scene = std::make_shared<Jade::Scene>();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   app.runtime().setScene(scene);
   EXPECT_EQ(app.runtime().scene(), scene);
   EXPECT_FALSE(scene->camera());
@@ -277,8 +277,8 @@ TEST(SceneSwitching, EmptyApplicationAndExplicitSelectionWorkWithoutACamera)
 TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
 {
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
-  const auto entity = a->create();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
+  const auto entity = a->world().create();
   entity.add<Value>(7);
   std::vector<std::string> order;
   std::vector<Jade::FrameUpdate> updates;
@@ -320,8 +320,8 @@ TEST(SceneSwitching, DeferredSwitchRetainsOneScenePerPassAndResetsDt)
 TEST(SceneSwitching, LastRequestWinsAndSelectingTheSameSceneDoesNotNotify)
 {
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>(),
-       c = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()),
+       c = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   int exits = 0, bEnters = 0, cEnters = 0;
   a->on<Jade::SceneDeactivated>([&] { ++exits; });
   b->on<Jade::SceneActivated>([&] { ++bEnters; });
@@ -347,7 +347,7 @@ TEST(SceneSwitching, LastRequestWinsAndSelectingTheSameSceneDoesNotNotify)
 TEST(SceneSwitching, LifecycleReentryIsDeferredAndConsumptionDoesNotCancelSwitching)
 {
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   int enterA = 0, enterB = 0, skipped = 0;
   a->on<Jade::SceneActivated>([&] {
     ++enterA;
@@ -370,7 +370,7 @@ TEST(SceneSwitching, LifecycleReentryIsDeferredAndConsumptionDoesNotCancelSwitch
 TEST(SceneSwitching, LifecycleExceptionsLeaveSelectionAtTheCompletedPhase)
 {
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   bool failExit = true, failEnter = true;
   a->on<Jade::SceneDeactivated>([&] {
     if (failExit)
@@ -395,7 +395,7 @@ TEST(SceneSwitching, LifecycleExceptionsLeaveSelectionAtTheCompletedPhase)
 TEST(SceneSwitching, CallbackFailureDiscardsQueuedSwitchAndRunCanRecover)
 {
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   bool fail = true;
   a->on<Jade::FrameUpdate>([&] {
     if (fail) {
@@ -413,8 +413,8 @@ TEST(SceneSwitching, CallbackFailureDiscardsQueuedSwitchAndRunCanRecover)
 
 TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwnerDestruction)
 {
-  auto scene = std::make_shared<Jade::Scene>();
-  const auto entity = scene->create();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
+  const auto entity = scene->world().create();
   entity.add<Value>();
   const auto connection = scene->on<Jade::FrameUpdate>([] {});
   {
@@ -441,9 +441,9 @@ TEST(SceneSwitching, SceneCanOnlyBeActiveInOneApplicationAndHandlesExpireAtOwner
 TEST(SceneSwitching, LifecycleReservesTargetAndFailedActivationDiscardsReentrantSelection)
 {
   Jade::Application app(Hidden()), other(Hidden());
-  auto a = std::make_shared<Jade::Scene>();
-  auto b = std::make_shared<Jade::Scene>();
-  auto c = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
+  auto b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
+  auto c = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   bool requested = false;
   bool failActivation = true;
   int cActivated = 0;
@@ -482,7 +482,7 @@ TEST(SceneSwitching, LifecycleReservesTargetAndFailedActivationDiscardsReentrant
 TEST(SceneSwitching, GlobalAndSceneEventsPreservePropagationAndPhysicalHeldState)
 {
   Jade::Application app(Hidden());
-  auto a = std::make_shared<Jade::Scene>(), b = std::make_shared<Jade::Scene>();
+  auto a = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>()), b = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   int pressedA = 0, heldA = 0, pressedB = 0, heldB = 0, swallowed = 0;
   std::vector<int> order;
   app.on<Jade::KeyPressed<"w">>([&] { order.push_back(1); });
@@ -517,7 +517,7 @@ TEST(SceneSwitching, GlobalAndSceneEventsPreservePropagationAndPhysicalHeldState
 TEST(SceneSwitching, SceneConsumptionPreventsDefaultEscapeAndGlobalUpdateStillRuns)
 {
   Jade::Application app(Hidden());
-  auto scene = std::make_shared<Jade::Scene>();
+  auto scene = std::make_shared<Jade::Scene>(std::make_shared<Jade::World>());
   int globalUpdates = 0, sceneUpdates = 0, laterUpdates = 0;
   app.on<Jade::FrameUpdate>([&] { ++globalUpdates; });
   scene->on<Jade::FrameUpdate>([&] {

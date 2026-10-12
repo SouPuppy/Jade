@@ -164,6 +164,7 @@ void RenderHost::draw(const Renderer::SceneSnapshot *snapshot, Renderer::ImageSi
     }
   } else
     invalidate();
+  if (!m_OverlayText.empty()) m_Debug.text(m_OverlayText,size);
   m_Display.present();
 }
 } // namespace Jade::Detail

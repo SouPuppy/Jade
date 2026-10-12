@@ -164,8 +164,8 @@ TEST(RenderMode, WireframeOverlaysTheImageWithoutRestartingPathTracing)
   auto& renderer = app.runtime().renderer();
   renderer.rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(calls));
   auto scene = MakeTestScene(app);
-  auto object = scene->create<Archetype<Transform, Geometry, Material>>();
-  object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube(2));
+  auto object = scene->world().create<Archetype<Transform, Geometry, Material>>();
+  object.get<Geometry>().resource = app.runtime().assets().add(MeshData::cube(2));
   std::uint64_t revision = 0;
   int completedCalls = 0;
   app.on<FrameUpdate>([&](const auto& frame) {
@@ -223,8 +223,8 @@ TEST(RenderMode, UnifiedRaySettingsSwitchAlgorithmsAndOutputsDuringRun)
   Application app(hidden());
   app.runtime().setPaused(true);
   auto scene = MakeTestScene(app);
-  auto object = scene->create<Archetype<Transform, Geometry, Material>>();
-  object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+  auto object = scene->world().create<Archetype<Transform, Geometry, Material>>();
+  object.get<Geometry>().resource = app.runtime().assets().add(MeshData::cube());
   auto& renderer = app.runtime().renderer();
   std::atomic<int> calls = 0;
   renderer.rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(calls));
@@ -289,8 +289,8 @@ TEST(RenderMode, DisabledRenderingStartsNoIntegratorAndResumingStartsFreshSample
   auto& renderer = app.runtime().renderer();
   renderer.rayTracing().setIntegrator(std::make_unique<CountingIntegrator>(calls));
   auto scene = MakeTestScene(app);
-  auto object = scene->create<Archetype<Transform, Geometry, Material>>();
-  object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+  auto object = scene->world().create<Archetype<Transform, Geometry, Material>>();
+  object.get<Geometry>().resource = app.runtime().assets().add(MeshData::cube());
   // Await sampling while Run owns the coordinator; eight frames alone do not
   // guarantee worker completion on a busy machine.
   app.on<FrameUpdate>([&](const auto& frame) {
@@ -325,8 +325,8 @@ TEST(RenderMode, DisabledGeometryStillSimulatesAndAllowsIndependentDebugOverlays
   Application app(config);
   auto scene = MakeTestScene(app);
   // Invalid render data must remain unused until a scene-rendering switch is enabled.
-  auto body = scene->create<Archetype<Transform, Geometry, RigidBody>>();
-  body.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+  auto body = scene->world().create<Archetype<Transform, Geometry, RigidBody>>();
+  body.get<Geometry>().resource = app.runtime().assets().add(MeshData::cube());
   body.add<Collider>(Box{});
   bool moving = false;
   app.on<FrameUpdate>([&](const auto& frame) {
@@ -354,8 +354,8 @@ TEST(RenderMode, F5DrawsNormalsWithoutMainRenderingAndSurvivesThePipelineCycle)
     pose = {}; pose.position = {0, 0, 3};
     auto& lens = scene->camera().get<Camera>();
     lens.projection = Projection::Orthographic; lens.viewHeight = 2;
-    auto object = scene->create<Archetype<Transform, Geometry, Material>>();
-    object.get<Geometry>().mesh = app.runtime().assets().add(MeshData::cube());
+    auto object = scene->world().create<Archetype<Transform, Geometry, Material>>();
+    object.get<Geometry>().resource = app.runtime().assets().add(MeshData::cube());
     auto& renderer = app.runtime().renderer();
     const auto pixel = [] {
       std::array<unsigned char, 4> result{};
@@ -440,10 +440,10 @@ TEST(RenderMode, RealPathTracingAndWheelInputSurviveRepeatedRenderToggles)
   Application app(hidden(true));
   auto scene = MakeTestScene(app);
   scene->use<Module::FPSCameraControl>();
-  auto object = scene->create();
+  auto object = scene->world().create();
   object.add<Geometry>(app.runtime().assets().add(MeshData::cube()));
   object.add<Material>(Materials::Gold());
-  auto lamp = scene->create();
+  auto lamp = scene->world().create();
   lamp.add<Transform>().position = {0, 3, 0};
   lamp.add<Geometry>(app.runtime().assets().add(MeshData::cube()));
   lamp.add<Material>(Materials::Emissive({4, 3, 2}));

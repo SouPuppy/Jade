@@ -5,6 +5,7 @@
 #include <Jade/Renderer/Common/CameraFrame.hpp>
 #include <Jade/Animation/SpriteFrame.hpp>
 #include <Jade/Graphics/Light.hpp>
+#include <Jade/Graphics/Geometry.hpp>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -19,11 +20,12 @@ struct RenderInstance {
   SpriteRegion region;
   float alphaCutoff = 0.5f;
   bool unlit = false;
+  GeometryKind kind = GeometryKind::Mesh;
   bool operator==(const RenderInstance &other) const
   {
     return mesh == other.mesh && objectToWorld.values == other.objectToWorld.values &&
            material == other.material && entity == other.entity && texture == other.texture &&
-           region == other.region && alphaCutoff == other.alphaCutoff && unlit == other.unlit;
+           region == other.region && alphaCutoff == other.alphaCutoff && unlit == other.unlit && kind == other.kind;
   }
 };
 

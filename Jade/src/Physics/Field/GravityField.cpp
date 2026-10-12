@@ -1,5 +1,5 @@
 #include "../../internal/Physics/Math.hpp"
-#include <Jade/Core/Scene.hpp>
+#include <Jade/World/World.hpp>
 #include <Jade/Core/Transform.hpp>
 #include <Jade/Physics/Collider.hpp>
 #include <Jade/Physics/Environment.hpp>
@@ -87,7 +87,7 @@ Vec3 CompositeGravity::acceleration(const FieldContext &c) const {
   }
   return sum.vector();
 }
-void CompositeGravity::validate(const Scene &scene) const {
+void CompositeGravity::validate(const Jade::World &scene) const {
   for (const auto &field : m_Fields)
     field->validate(scene);
 }
@@ -98,6 +98,13 @@ FieldSample CompositeGravity::sampleStage(const FieldContext& context) const {
   FieldSample sum;
   for (const auto& field : m_Fields) { const auto next = field->sampleStage(context); sum.force = sum.force+next.force; sum.torque = sum.torque+next.torque; }
   return sum;
+}
+ForceField::Kernel CompositeGravity::prepare(std::span<const FieldBody> bodies,std::span<const std::pair<std::uint64_t,std::size_t>> index) const {
+  std::vector<Kernel> kernels; kernels.reserve(m_Fields.size());
+  for (const auto& field : m_Fields) kernels.push_back(field->prepare(bodies,index));
+  return [kernels = std::move(kernels)](const FieldContext& context) {
+    FieldSample sum; for (const auto& kernel : kernels) { const auto next = kernel(context); sum.force = sum.force+next.force; sum.torque = sum.torque+next.torque; } return sum;
+  };
 }
 BodyGravity::BodyGravity(std::vector<BodyID> sources, double g, double softening)
     : m_BodySources(std::move(sources)), m_G(g), m_Softening(softening) {
@@ -113,7 +120,7 @@ BodyGravity::BodyGravity(std::vector<Entity> sources, double g, double softening
     if (std::find(m_Sources.begin(), m_Sources.begin() + i, m_Sources[i]) != m_Sources.begin() + i)
       throw std::invalid_argument("Gravity sources must be unique.");
 }
-void BodyGravity::validate(const Scene &scene) const {
+void BodyGravity::validate(const Jade::World &scene) const {
   for (const auto source : m_Sources) {
     if (!source.valid())
       continue;
@@ -157,7 +164,26 @@ FieldSample BodyGravity::sampleStage(const FieldContext& c) const {
   }
   return {acceleration*c.body.mass,{}};
 }
-void Environment::validate(const Scene &scene) const {
+ForceField::Kernel BodyGravity::prepare(std::span<const FieldBody> bodies,std::span<const std::pair<std::uint64_t,std::size_t>> index) const {
+  const FieldBody empty; const FieldContext context{empty,bodies,index}; std::vector<std::size_t> sources;
+  sources.reserve(m_Sources.size()+m_BodySources.size());
+  for (const auto entity : m_Sources) if (const auto b = context.find(entity)) sources.push_back(static_cast<std::size_t>(b-bodies.data()));
+  for (const auto id : m_BodySources) {
+    const auto b = context.find(id); if (!b || b->mass <= 0) throw std::invalid_argument("Gravity source is foreign, disabled or stale.");
+    sources.push_back(static_cast<std::size_t>(b-bodies.data()));
+  }
+  const auto g = m_G,softening = m_Softening;
+  return [sources = std::move(sources),g,softening](const FieldContext& c) {
+    V acceleration; const auto p = c.body.id ? c.body.precisePosition : vector(c.body.position);
+    for (const auto i : sources) {
+      const auto& source = c.bodies[i]; if (&source == &c.body || (c.body.id && source.id == c.body.id) ||
+          (c.body.entity.id() != 0 && source.entity == c.body.entity)) continue;
+      acceleration = acceleration+precisePoint(source.id ? source.precisePosition : vector(source.position),p,source.mass,g,softening);
+    }
+    return FieldSample{acceleration*c.body.mass,{}};
+  };
+}
+void Environment::validate(const Jade::World &scene) const {
   if (integration != Integration::SemiImplicitEuler && integration != Integration::VelocityVerlet)
     throw std::invalid_argument("Unknown Physics integration method.");
   for (const auto &field : fields) {

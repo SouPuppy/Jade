@@ -73,11 +73,12 @@ std::uint32_t SpatialIndex::build(std::size_t begin, std::size_t end) {
   }
   nodes[index] = n; return index;
 }
-void SpatialIndex::update(std::span<const WorldCollider> shapes, std::span<const std::size_t> members, double padding) {
+void SpatialIndex::update(std::span<const WorldCollider> shapes, std::span<const std::size_t> members, double padding,std::span<const CollisionAabb> predicted) {
   bool rebuild = membership.size() != members.size() || !std::equal(members.begin(),members.end(),membership.begin());
   if (fat.size() < shapes.size()) fat.resize(shapes.size()); bool changed = rebuild;
   for (const auto i : members) if (rebuild || !encloses(fat[i],shapes[i].bounds)) {
-    const Physics::Vector p{padding,padding,padding}; fat[i] = {shapes[i].bounds.minimum-p,shapes[i].bounds.maximum+p}; changed = true;
+    const Physics::Vector p{padding,padding,padding}; fat[i] = {shapes[i].bounds.minimum-p,shapes[i].bounds.maximum+p};
+    if (!predicted.empty()) include(fat[i],predicted[i]); changed = true;
   }
   if (!changed) return;
   double cost = 0;

@@ -1,13 +1,14 @@
 #include "SceneSnapshot.hpp"
+#include <Jade/World/Streaming.hpp>
 #include "Math.hpp"
 #include <Jade/Graphics/Geometry.hpp>
 #include <Jade/Graphics/SpriteRenderer.hpp>
-#include "../../internal/Core/SceneTransforms.hpp"
+#include "../../internal/Core/WorldTransforms.hpp"
 namespace Jade::Renderer {
 SceneSnapshot SceneSnapshot::capture(const Scene &scene, const Assets &assets, bool includeGeometry, bool includeDebug)
 {
   SceneSnapshot result;
-  Jade::Detail::SceneTransforms transforms(scene);
+  Jade::Detail::WorldTransforms transforms(scene.world());
   const auto camera = scene.camera();
   if (camera.has<Transform>() && camera.has<Camera>()) {
     const auto view = transforms.CameraView(camera);
@@ -22,7 +23,8 @@ SceneSnapshot SceneSnapshot::capture(const Scene &scene, const Assets &assets, b
     result.camera = frame;
   }
   if(!includeGeometry && !includeDebug) return result;
-  for (const auto entity : scene.query<Transform>()) {
+  for (const auto entity : scene.world().registry().query<Transform>()) {
+    if (entity.has<Residency>() && !entity.get<Residency>().render) continue;
     if(!includeDebug && !entity.has<Light>()) continue;
     Matrix4 model;
     if(includeGeometry && entity.has<Light>()) model=transforms.Resolve(entity).model;
@@ -53,24 +55,42 @@ SceneSnapshot SceneSnapshot::capture(const Scene &scene, const Assets &assets, b
     }
   }
   if (!includeGeometry) return result;
-  for (const auto entity : scene.query<Geometry>()) {
-    const auto handle = entity.get<Geometry>().mesh;
-    if (handle.empty())
-      continue;
+  scene.world().registry().each<Geometry>([&](Entity entity, Geometry& geometry) {
+    if (entity.has<Residency>() && !entity.get<Residency>().render) return;
+    const auto handle = geometry.resource;
+    if (geometry.kind == GeometryKind::Mesh && handle.empty())
+      return;
     if (!entity.has<Material>())
       throw std::invalid_argument("Geometry requires a Material component.");
     const auto material = entity.get<Material>();
     validateMaterial(material);
-    const auto model = transforms.Resolve(entity).model;
+    auto model = transforms.Resolve(entity).model;
+    std::shared_ptr<const Mesh> mesh;
+    if (geometry.kind == GeometryKind::Mesh) mesh = assets.share(handle);
+    else {
+      static const auto sphere = std::make_shared<const Mesh>(Mesh::compile(MeshData::sphere(1,64,32)));
+      static const auto plane = std::make_shared<const Mesh>(Mesh::compile(MeshData{
+        {{{-.5f,0,-.5f},{0,1,0}},{{-.5f,0,.5f},{0,1,0}},{{.5f,0,.5f},{0,1,0}},{{.5f,0,-.5f},{0,1,0}}}, {0,1,2,0,2,3}}));
+      auto size = Matrix4::Identity();
+      if (geometry.kind == GeometryKind::Sphere) {
+        if (!std::isfinite(geometry.radius) || geometry.radius <= 0) throw std::invalid_argument("Invalid analytic radius.");
+        mesh = sphere; size.at(0,0) = size.at(1,1) = size.at(2,2) = geometry.radius;
+      } else if (geometry.kind == GeometryKind::Plane) {
+        if (!std::isfinite(geometry.size.x) || !std::isfinite(geometry.size.y) || geometry.size.x <= 0 || geometry.size.y <= 0) throw std::invalid_argument("Invalid finite plane.");
+        mesh = plane; size.at(0,0) = geometry.size.x; size.at(2,2) = geometry.size.y;
+      } else throw std::invalid_argument("Unknown geometry kind.");
+      model = model * size;
+    }
     (void)Math::inverseAffine(model);
-    result.instances.push_back({assets.share(handle), model, material, entity.id()});
-  }
+    RenderInstance instance{mesh, model, material, entity.id()}; instance.kind = geometry.kind;
+    result.instances.push_back(std::move(instance));
+  });
   static const auto quad = std::make_shared<const Mesh>(Mesh::compile(MeshData{
     {{{-0.5f,0,0},{0,0,1}}, {{0.5f,0,0},{0,0,1}}, {{0.5f,1,0},{0,0,1}}, {{-0.5f,1,0},{0,0,1}}},
     {0,1,2,0,2,3}}));
-  for (const auto entity : scene.query<Transform, SpriteRenderer>()) {
-    const auto& sprite = entity.get<SpriteRenderer>();
-    if (sprite.frame.texture.empty()) continue;
+  scene.world().registry().each<Transform, SpriteRenderer>([&](Entity entity, Transform&, SpriteRenderer& sprite) {
+    if (entity.has<Residency>() && !entity.get<Residency>().render) return;
+    if (sprite.frame.texture.empty()) return;
     const auto& region = sprite.frame.region;
     if (!std::isfinite(sprite.size.x) || !std::isfinite(sprite.size.y) || sprite.size.x <= 0 || sprite.size.y <= 0 ||
         !std::isfinite(sprite.alphaCutoff) || sprite.alphaCutoff < 0 || sprite.alphaCutoff > 1 ||
@@ -103,7 +123,8 @@ SceneSnapshot SceneSnapshot::capture(const Scene &scene, const Assets &assets, b
     (void)Math::inverseAffine(model);
     result.instances.push_back({quad, model, Material{}, entity.id(), assets.share(sprite.frame.texture),
                                 region, sprite.alphaCutoff, true});
-  }
+  });
+  std::stable_sort(result.instances.begin(),result.instances.end(),[](const auto& a,const auto& b){return a.entity<b.entity;});
   return result;
 }
 

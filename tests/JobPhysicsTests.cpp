@@ -8,14 +8,14 @@
 using namespace Jade;
 namespace {
 struct Stacks {
-  Scene scene;
+  Scene scene{std::make_shared<Jade::World>()};
   Entity ground;
   std::vector<Entity> bodies;
   Stacks() {
-    ground = scene.create(); ground.add<Transform>().position = {0, -0.5f, 0};
+    ground = scene.world().create(); ground.add<Transform>().position = {0, -0.5f, 0};
     ground.add<Collider>(Box{{20, 0.5f, 20}});
     for (float x : {-4.0f, 4.0f}) for (int level = 0; level < 3; ++level) {
-      auto e = scene.create(); e.add<Transform>().position = {x, 0.5f + level, 0};
+      auto e = scene.world().create(); e.add<Transform>().position = {x, 0.5f + level, 0};
       e.add<Collider>(Box{{0.5f, 0.5f, 0.5f}}); e.add<RigidBody>(); bodies.push_back(e);
     }
   }
@@ -74,10 +74,10 @@ TEST(JobPhysics, SerialOneAndThreeWorkersMatchAcrossSharedGroundIslandsAndEdits)
     if (step == 180) {
       for (auto [fixture, system] : {std::pair{&serial, &a}, std::pair{&single, &b}, std::pair{&parallel, &c}}) {
         const auto e = fixture->bodies.back();
-        system->applyImpulse(fixture->scene, e, {0.05f, 0, 0}, e.get<Transform>().position + Vec3{0, 0.2f, 0});
+        system->applyImpulse(fixture->scene.world(), e, {0.05f, 0, 0}, e.get<Transform>().position + Vec3{0, 0.2f, 0});
       }
     }
-    a.step(serial.scene, 1.0f / 120); b.step(single.scene, 1.0f / 120); c.step(parallel.scene, 1.0f / 120);
+    a.step(serial.scene.world(), 1.0f / 120); b.step(single.scene.world(), 1.0f / 120); c.step(parallel.scene.world(), 1.0f / 120);
     if (step % 30 == 0) { compare(serial, single, a, b); compare(serial, parallel, a, c); }
   }
   compare(serial, single, a, b); compare(serial, parallel, a, c);
@@ -87,26 +87,26 @@ TEST(JobPhysics, SerialOneAndThreeWorkersMatchAcrossSharedGroundIslandsAndEdits)
 
 TEST(JobPhysics, WorkerFailureDoesNotCommitAndEntityRecyclingRemainsSafe) {
   JobSystem jobs({2}); Stacks fixture; Physics::System physics(jobs);
-  physics.step(fixture.scene, 1.0f / 120);
+  physics.step(fixture.scene.world(), 1.0f / 120);
   const auto previous = fixture.bodies[0].get<Transform>();
   const auto stats = physics.statistics();
   fixture.bodies.back().get<RigidBody>().velocity.x = std::numeric_limits<float>::max();
-  EXPECT_THROW(physics.step(fixture.scene, 2), std::invalid_argument);
+  EXPECT_THROW(physics.step(fixture.scene.world(), 2), std::invalid_argument);
   EXPECT_EQ(fixture.bodies[0].get<Transform>().position, previous.position);
   EXPECT_EQ(physics.statistics().steps, stats.steps);
-  const auto old = fixture.bodies.back(); fixture.scene.destroy(old);
-  const auto fresh = fixture.scene.create(); fresh.add<Transform>().position = {8, 5, 0};
+  const auto old = fixture.bodies.back(); fixture.scene.world().destroy(old);
+  const auto fresh = fixture.scene.world().create(); fresh.add<Transform>().position = {8, 5, 0};
   fresh.add<Collider>(Sphere{0.5f}); fresh.add<RigidBody>();
-  physics.step(fixture.scene, 1.0f / 120);
+  physics.step(fixture.scene.world(), 1.0f / 120);
   EXPECT_NEAR(fresh.get<RigidBody>().velocity.y, -9.81f / 120, 1e-6f);
 }
 
 TEST(JobPhysics, SharedSchedulerKeepsPhysicsAndRayTracingDeterministic) {
   Stacks fixture; JobSystem jobs({3}); Physics::Config config; config.parallelThreshold = 1; Physics::System physics(jobs,config);
   Assets assets;
-  const auto camera = fixture.scene.create(); camera.add<Transform>().position = {0, 2, 10}; camera.add<Camera>();
+  const auto camera = fixture.scene.world().create(); camera.add<Transform>().position = {0, 2, 10}; camera.add<Camera>();
   fixture.scene.setCamera(camera);
-  auto light = fixture.scene.create(); light.add<Transform>();
+  auto light = fixture.scene.world().create(); light.add<Transform>();
   light.add<Geometry>(assets.add(MeshData::sphere(1, 16, 8)));
   light.add<Material>().emission = {4, 2, 1};
   const auto snapshot = Renderer::SceneSnapshot::capture(fixture.scene, assets);
@@ -115,7 +115,7 @@ TEST(JobPhysics, SharedSchedulerKeepsPhysicsAndRayTracingDeterministic) {
   Renderer::Film film({32, 32}), expected({32, 32});
   const Renderer::RenderRequest request{*snapshot.camera, film.size(), 0, 123, {}};
   auto rendering = jobs.submit([&] { renderer.render(rayScene, request, film); }, JobCategory::RayTracing);
-  for (int i = 0; i < 20; ++i) physics.step(fixture.scene, 1.0f / 120);
+  for (int i = 0; i < 20; ++i) physics.step(fixture.scene.world(), 1.0f / 120);
   jobs.wait(rendering); reference.render(rayScene, request, expected);
   EXPECT_EQ(film.resolve().pixels, expected.resolve().pixels);
   const auto stats = jobs.statistics();

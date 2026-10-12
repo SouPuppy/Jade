@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Jade/ECS/Storage.hpp>
 #include <cstdint>
 #include <memory>
 #include <typeindex>
@@ -8,9 +9,10 @@
 
 namespace Jade {
 namespace Detail { class Registry; }
-class Scene;
+class World;
+namespace ECS { class Registry; }
 
-// A copyable identity. Components belong to the Scene, not to this handle.
+// A copyable identity. Components belong to the World's Registry, not this handle.
 // A const handle can access mutable components, like a const pointer value.
 class Entity {
 public:
@@ -20,13 +22,11 @@ public:
   T& add(Args&&... args) const
   {
     static_assert(std::is_same_v<T, std::remove_cvref_t<T>>, "Components must be unqualified object types.");
-    CheckAdd(typeid(T));
-    auto component = std::make_shared<T>(std::forward<Args>(args)...);
-    return *static_cast<T*>(Add(typeid(T), std::move(component)));
+    return Lock()->Add<T>(m_Index, std::forward<Args>(args)...);
   }
 
-  template<class T> T& get() const { return *static_cast<T*>(Get(typeid(T))); }
-  template<class T> bool has() const noexcept { return Has(typeid(T)); }
+  template<class T> T& get() const { return Lock()->Get<T>(m_Index); }
+  template<class T> bool has() const noexcept { const auto r = m_Registry.lock(); return r && r->Alive(m_Index, m_Generation) && r->Has<T>(m_Index); }
   template<class T> void remove() const { Remove(typeid(T)); }
 
   bool valid() const noexcept;
@@ -40,14 +40,11 @@ public:
   }
 
 private:
-  friend class Scene;
+  friend class World;
+  friend class ECS::Registry;
   Entity(const std::shared_ptr<Detail::Registry>& registry, std::uint32_t index, std::uint32_t generation)
     : m_Registry(registry), m_Index(index), m_Generation(generation) {}
 
-  void CheckAdd(std::type_index type) const;
-  void* Add(std::type_index type, std::shared_ptr<void> component) const;
-  void* Get(std::type_index type) const;
-  bool Has(std::type_index type) const noexcept;
   void Remove(std::type_index type) const;
   std::shared_ptr<Detail::Registry> Lock() const;
 

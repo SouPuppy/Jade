@@ -11,6 +11,8 @@ struct Emitter {
   float area;
   double cumulative = 0, weight = 0;
   bool twoSided = false;
+  GeometryKind kind = GeometryKind::Mesh;
+  Matrix4 model = Matrix4::Identity(), inverse = Matrix4::Identity();
 };
 
 struct EmitterDistribution {

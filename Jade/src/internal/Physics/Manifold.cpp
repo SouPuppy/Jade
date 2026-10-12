@@ -28,17 +28,17 @@ Physics::SmallList<V,16> clip(const Physics::SmallList<V,16>& in, V center, V ax
   }
   return out;
 }
-Physics::ContactPoint point(V a, V b, V normal) {
-  return {a.vector(), b.vector(), V{collisionDot(b - a, normal), 0, 0}.vector().x};
+PreciseContactPoint point(V a, V b, V normal) {
+  return {a, b, collisionDot(b - a, normal)};
 }
-std::optional<Physics::Manifold> boxes(const WorldCollider& a, const WorldCollider& b, double margin) {
+std::optional<CollisionManifold> boxes(const WorldCollider& a, const WorldCollider& b, double margin) {
   const auto delta = b.center - a.center;
   double best = -std::numeric_limits<double>::infinity();
   V normal;
   std::size_t feature = 0;
   const auto test = [&](V axis, std::size_t id) {
     const double length = collisionLength(axis);
-    if (length < 1e-6) return true;
+    if (length < 1e-12) return true;
     axis = axis * (1 / length);
     const double c = collisionDot(delta, axis);
     const double separation = std::abs(c) - radius(a, axis) - radius(b, axis);
@@ -54,7 +54,7 @@ std::optional<Physics::Manifold> boxes(const WorldCollider& a, const WorldCollid
   for (std::size_t i = 0; i < 3; ++i)
     for (std::size_t j = 0; j < 3; ++j)
       if (!test(collisionCross(a.axes[i], b.axes[j]), 6 + i * 3 + j)) return std::nullopt;
-  Physics::Manifold result{a.entity, b.entity, normal.vector(), {}};
+  CollisionManifold result{a.entity, b.entity, normal, {}};
   if (feature < 6) {
     const bool reverse = feature >= 3;
     const auto& ref = reverse ? b : a;
@@ -128,7 +128,7 @@ void updateBounds(WorldCollider& c) {
     for (std::size_t j = 0; j < 3; ++j) extent[i] += std::abs(c.axes[j][i]) * c.halfExtents[j];
   c.bounds = {c.center - extent, c.center + extent};
 }
-std::optional<Physics::Manifold> collideManifold(const WorldCollider& a, const WorldCollider& b, double margin) {
+std::optional<CollisionManifold> collideManifoldPrecise(const WorldCollider& a, const WorldCollider& b, double margin) {
   if (!a.bounds.overlaps(b.bounds, margin)) return std::nullopt;
   if (a.kind == CollisionKind::Box && b.kind == CollisionKind::Box) return boxes(a, b, margin);
   if (a.kind == CollisionKind::Sphere && b.kind == CollisionKind::Sphere) {
@@ -136,7 +136,7 @@ std::optional<Physics::Manifold> collideManifold(const WorldCollider& a, const W
     const double distance = collisionLength(delta);
     if (distance - a.radius - b.radius > margin) return std::nullopt;
     const auto n = distance > 1e-12 ? delta * (1 / distance) : V{1, 0, 0};
-    return Physics::Manifold{a.entity, b.entity, n.vector(), {point(a.center + n * a.radius, b.center - n * b.radius, n)}};
+    return CollisionManifold{a.entity, b.entity, n, {point(a.center + n * a.radius, b.center - n * b.radius, n)}};
   }
   const bool reverse = a.kind == CollisionKind::Box;
   const auto& sphere = reverse ? b : a;
@@ -166,13 +166,22 @@ std::optional<Physics::Manifold> collideManifold(const WorldCollider& a, const W
     n = toward * (1 / distance);
   }
   const auto surface = sphere.center + n * sphere.radius;
-  if (reverse) return Physics::Manifold{a.entity, b.entity, (-n).vector(), {point(closest, surface, -n)}};
-  return Physics::Manifold{a.entity, b.entity, n.vector(), {point(surface, closest, n)}};
+  if (reverse) return CollisionManifold{a.entity, b.entity, -n, {point(closest, surface, -n)}};
+  return CollisionManifold{a.entity, b.entity, n, {point(surface, closest, n)}};
+}
+Physics::Manifold presentation(const CollisionManifold& contact) {
+  Physics::Manifold result{contact.a,contact.b,contact.normal.vector(),{}};
+  for (const auto& p : contact.points) result.points.push_back({p.pointA.vector(),p.pointB.vector(),static_cast<float>(p.separation),static_cast<float>(p.normalImpulse),p.frictionImpulse.vector()});
+  return result;
+}
+std::optional<Physics::Manifold> collideManifold(const WorldCollider& a,const WorldCollider& b,double margin) {
+  if (const auto result = collideManifoldPrecise(a,b,margin)) return presentation(*result);
+  return {};
 }
 } // namespace Jade::Detail
 
 namespace Jade::Physics {
-std::vector<Manifold> manifolds(const Scene& scene, float distance) {
+std::vector<Manifold> manifolds(const Jade::World& scene, float distance) {
   if (!std::isfinite(distance) || distance < 0) throw std::invalid_argument("Contact distance must be finite and nonnegative.");
   const auto shapes = Detail::captureColliders(scene);
   std::vector<Manifold> result;

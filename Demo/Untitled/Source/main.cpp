@@ -17,7 +17,7 @@ std::filesystem::path executableDirectory() {
 int main(int argc, char* argv[]) {
   try {
     Jade::EngineConfig config;
-    config.window.title = "Untitled | WASD Move   Q/E Rotate   R Reset   Esc Exit";
+    config.window.title = "Untitled | WASD Move   Q/E Rotate | F Push | X Delete   R Reset   Esc Exit";
     config.frameLimits = 24;
     config.debug.shortcuts = true;
     config.renderer.pipeline = Jade::Renderer::RenderMode::Raster;
@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
       const std::string_view option(argv[i]);
       if (option == "--help") {
         std::cout << "Untitled [--pipeline raster|hybrid|tracing|none] [--soul] [--device cpu|gpu] [--scale 0.1..1] [--frames N] [--hidden] [--benchmark]\n"
-          "WASD: camera-relative movement | Q/E: rotate 45 degrees | R: reset | Esc: exit\n"
+          "WASD: movement | Q/E: rotate 45 degrees | F: push ball | X: delete ball | R: reset player | Esc: exit\n"
           "Engine debug: I Raster/Hybrid/RayTracing/None | F1 wireframe | F2 soul camera | F3 scene bounds | F4 collisions | F5 normal debug | O projection | P pause\n";
         return 0;
       }
@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
       config.renderer.rayTracing.device = Jade::Renderer::RayDevice::CPU;
       app = std::make_unique<Jade::Application>(config);
     }
-    Untitled::Game game(app->runtime(), executableDirectory() / "UntitledAssets");
+    Untitled::Game game(app->runtime(), executableDirectory() / "UntitledAssets", executableDirectory() / "UntitledSaves");
     app->runtime().setScene(game.scene());
     if(soul) app->runtime().setSoulMode(true);
     double elapsed = 0;

@@ -15,6 +15,7 @@ public:
   void paths(std::span<const Vec3>, const Renderer::CameraFrame&, Renderer::ImageSize, Vec3 color);
   void frustum(const Renderer::CameraFrame&, const Renderer::CameraFrame&, Renderer::ImageSize);
   void colliders(const CollisionDebugLines &, const Renderer::CameraFrame &, Renderer::ImageSize);
+  void text(std::string_view, Renderer::ImageSize);
 
 private:
   void lines(std::span<const Vec3>, const Matrix4 &, Vec3, bool);

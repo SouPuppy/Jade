@@ -8,6 +8,6 @@ public:
   PlayerState state = PlayerState::Idle;
   Jade::Vec3 facing{0,0,1};
   float speed = 3;
-  void update(Jade::Scene& scene, Jade::Entity player, const CameraController& camera, Jade::Vec2 input, float dt);
+  void update(Jade::World& scene, Jade::Entity player, const CameraController& camera, Jade::Vec2 input, float dt);
 };
 } // namespace Untitled

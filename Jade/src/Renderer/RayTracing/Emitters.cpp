@@ -1,5 +1,6 @@
 #include "Emitters.hpp"
 #include "../Common/Math.hpp"
+#include "../Common/Analytic.hpp"
 #include "../../internal/Acceleration/BVH.hpp"
 namespace Jade::Detail {
 namespace Math = Renderer::Math;
@@ -13,6 +14,26 @@ std::shared_ptr<const EmitterDistribution> compileEmitters(const Renderer::Scene
     const auto &input = snapshot.instances[index];
     if (input.unlit || input.material.emission.maximum() == 0)
       continue;
+    if (input.kind != GeometryKind::Mesh) {
+      Emitter emitter;
+      emitter.kind = input.kind; emitter.model = input.objectToWorld; emitter.inverse = Math::inverseAffine(emitter.model);
+      emitter.area = input.kind == GeometryKind::Sphere ? 4*std::numbers::pi_v<float> : 1;
+      double jacobian = 0;
+      for (int i = 0; i < 256; ++i) {
+        const float y = 1-2*(i+.5f)/256, angle = i*2.39996323f;
+        const auto r = std::sqrt(std::max(0.0f,1-y*y));
+        const Vec3 normal = input.kind == GeometryKind::Sphere ? Vec3{r*std::cos(angle),y,r*std::sin(angle)} : Vec3{0,1,0};
+        jacobian += Renderer::areaJacobian(emitter.model,emitter.inverse,normal)/256;
+      }
+      emitter.weight = emitter.area*jacobian*input.material.emission.luminance();
+      if (!std::isfinite(emitter.weight) || emitter.weight <= 0)
+        throw std::invalid_argument("Analytic emitter area exceeds floating-point range.");
+      lighting->totalWeight += emitter.weight; emitter.cumulative = lighting->totalWeight;
+      emitter.instance = static_cast<std::uint32_t>(index); emitter.primitive = 0;
+      emitter.emission = input.material.emission; emitter.twoSided = input.material.twoSidedEmission;
+      lighting->emitterIndices[index].emplace(0,lighting->emitters.size()); lighting->emitters.push_back(emitter);
+      continue;
+    }
     const auto &mesh = input.mesh->data();
     for (std::size_t p = 0; p < mesh.indices.size() / 3; ++p) {
       if ((p & 1023) == 0)
@@ -46,6 +67,16 @@ Renderer::EmitterSample EmitterDistribution::sample(float selection, Vec2 sample
       std::upper_bound(emitters.begin(), emitters.end(), target,
                        [](double value, const Emitter &emitter) { return value < emitter.cumulative; });
   const auto &emitter = it == emitters.end() ? emitters.back() : *it;
+  if (emitter.kind != GeometryKind::Mesh) {
+    const auto y = 1-2*sample.x, angle = 2*std::numbers::pi_v<float>*sample.y;
+    const auto r = std::sqrt(std::max(0.0f,1-y*y));
+    const Vec3 normal = emitter.kind == GeometryKind::Sphere ? Vec3{r*std::cos(angle),y,r*std::sin(angle)} : Vec3{0,1,0};
+    const auto local = emitter.kind == GeometryKind::Sphere ? normal : Vec3{sample.x-.5f,0,sample.y-.5f};
+    const auto position = Math::point(emitter.model,local);
+    const auto pdf = static_cast<float>(emitter.weight/totalWeight/emitter.area)/Renderer::areaJacobian(emitter.model,emitter.inverse,normal);
+    return {position, Math::normal(emitter.inverse,normal), emitter.emission, pdf,
+      Math::abs(position)*(32*std::numeric_limits<float>::epsilon()), emitter.twoSided};
+  }
   const float root = std::sqrt(std::clamp(sample.x, 0.0f, 1.0f));
   const Vec3 weights{1 - root, root * (1 - sample.y), root * sample.y};
   const auto p = emitter.a * weights.x + emitter.b * weights.y + emitter.c * weights.z;
@@ -67,7 +98,7 @@ bool sameEmitters(const Renderer::SceneSnapshot &a, const Renderer::SceneSnapsho
   for (std::size_t i = 0; i < a.instances.size(); ++i) {
     const auto &x = a.instances[i];
     const auto &y = b.instances[i];
-    if (x.mesh != y.mesh || x.entity != y.entity || x.unlit != y.unlit || x.material.emission != y.material.emission ||
+    if (x.mesh != y.mesh || x.kind != y.kind || x.entity != y.entity || x.unlit != y.unlit || x.material.emission != y.material.emission ||
         x.material.twoSidedEmission != y.material.twoSidedEmission ||
         ((x.material.emission.maximum() > 0 || y.material.emission.maximum() > 0) &&
          x.objectToWorld.values != y.objectToWorld.values))

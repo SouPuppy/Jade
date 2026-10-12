@@ -1,5 +1,7 @@
 #include <Jade/Runtime.hpp>
 #include "Scene.hpp"
+#include "../World/WorldImpl.hpp"
+#include <Jade/World/Streaming.hpp>
 #include "../internal/Platform/Window.hpp"
 #include "../internal/Renderer/Debug/CollisionDebug.hpp"
 #include <Jade/Log.hpp>
@@ -22,6 +24,7 @@ struct Runtime::Impl {
   JobSystem jobs;
   Assets assets;
   std::shared_ptr<Scene> scene;
+  std::vector<std::shared_ptr<World>> worlds;
   std::optional<std::shared_ptr<Scene>> pending;
   Renderer::System renderer;
   bool soul=false;
@@ -43,7 +46,7 @@ struct Runtime::Impl {
   Physics::System physics;
   Animation::System animation;
   bool running = false, switching = false, paused = false, axes, aabbs, physicsDebug, logNow = false;
-  double accumulator = 0, dropped = 0, logElapsed = 0;
+  double dropped = 0, logElapsed = 0;
   unsigned substeps = 0;
   Impl(Window& w, const EngineConfig& c)
     : window(w), jobs(c.jobs), renderer(w, jobs, c.renderer, c.window.title), physics(jobs, c.physics), axes(c.debug.axes),
@@ -53,8 +56,10 @@ Runtime::Runtime(Window& window, const EngineConfig& config) : m_Impl(std::make_
 Runtime::~Runtime() {
   m_Impl->renderer.stop();
   m_Impl->jobs.shutdown();
+  for (auto& world : m_Impl->worlds) { world->detachJobs(); world->m_Impl->owner = nullptr; }
   if (m_Impl->scene) {
-    if (m_Impl->scene->m_Impl->physicsWorld) m_Impl->scene->m_Impl->physicsWorld->setJobSystem(nullptr);
+    m_Impl->scene->world().detachJobs();
+    m_Impl->scene->world().m_Impl->owner = nullptr;
     m_Impl->scene->m_Impl->owner = nullptr;
   }
 }
@@ -64,9 +69,23 @@ Renderer::System& Runtime::renderer() noexcept { return m_Impl->renderer; }
 Physics::System& Runtime::physics() noexcept { return m_Impl->physics; }
 Animation::System& Runtime::animation() noexcept { return m_Impl->animation; }
 JobSystem& Runtime::jobs() noexcept { return m_Impl->jobs; }
+void Runtime::addWorld(std::shared_ptr<World> world) {
+  if (!world) throw std::invalid_argument("Cannot schedule a null World.");
+  if (world->m_Impl->owner && world->m_Impl->owner != this) throw std::invalid_argument("World is already scheduled in another Runtime.");
+  if (std::find(m_Impl->worlds.begin(), m_Impl->worlds.end(), world) == m_Impl->worlds.end()) m_Impl->worlds.push_back(world);
+  world->m_Impl->owner = this;
+}
+void Runtime::removeWorld(const std::shared_ptr<World>& world) {
+  if (!world || std::find(m_Impl->worlds.begin(), m_Impl->worlds.end(), world) == m_Impl->worlds.end())
+    throw std::invalid_argument("World is not scheduled in this Runtime.");
+  if (m_Impl->scene && m_Impl->scene->worldHandle() == world) throw std::logic_error("Detach the Scene before removing its World.");
+  world->save(); world->detachJobs(); world->m_Impl->owner = nullptr; std::erase(m_Impl->worlds, world);
+}
 void Runtime::setScene(std::shared_ptr<Scene> scene) {
   if (scene && scene->m_Impl->owner && scene->m_Impl->owner != this)
     throw std::invalid_argument("Scene is already active in another Runtime.");
+  if (scene && scene->world().m_Impl->owner && scene->world().m_Impl->owner != this)
+    throw std::invalid_argument("World is already scheduled in another Runtime.");
   m_Impl->pending = std::move(scene);
   if (!m_Impl->running && !m_Impl->switching) commitScene();
 }
@@ -77,7 +96,9 @@ bool Runtime::commitScene() {
   if (next == previous) return false;
   if (next && next->m_Impl->owner && next->m_Impl->owner != this)
     throw std::invalid_argument("Scene is already active in another Runtime.");
-  if (next) next->m_Impl->owner = this;
+  if (next && next->world().m_Impl->owner && next->world().m_Impl->owner != this)
+    throw std::invalid_argument("World is already scheduled in another Runtime.");
+  if (next) { next->m_Impl->owner = this; next->world().m_Impl->owner = this; }
   m_Impl->switching = true;
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{m_Impl->switching};
   try {
@@ -86,14 +107,22 @@ bool Runtime::commitScene() {
     m_Impl->scene = next;
     m_Impl->window.SetMouseCaptured(next && next->CapturesMouse());
     m_Impl->window.Input().ResetCursor();
-    suspend(); m_Impl->renderer.invalidate(); m_Impl->logNow = true;
+    if (!previous || !next || previous->worldHandle() != next->worldHandle()) suspend();
+    m_Impl->renderer.invalidate(); m_Impl->logNow = true;
     if (previous) {
-      if (previous->m_Impl->physicsWorld) previous->m_Impl->physicsWorld->setJobSystem(nullptr);
+      if ((!next || previous->worldHandle() != next->worldHandle()) &&
+          std::find(m_Impl->worlds.begin(), m_Impl->worlds.end(), previous->worldHandle()) == m_Impl->worlds.end())
+        previous->world().m_Impl->owner = nullptr;
+
       previous->m_Impl->owner = nullptr; sceneLog << Log::debug("Deactivated: scene={}", previous->m_Impl->id);
     }
     if (next) { sceneLog << Log::debug("Activated: scene={}", next->m_Impl->id); next->m_Impl->events.DispatchLifecycle(true); }
   } catch (...) {
-    if (next && m_Impl->scene != next) next->m_Impl->owner = nullptr;
+    if (next && m_Impl->scene != next) {
+      next->m_Impl->owner = nullptr;
+      if ((!previous || previous->worldHandle() != next->worldHandle()) &&
+          std::find(m_Impl->worlds.begin(),m_Impl->worlds.end(),next->worldHandle()) == m_Impl->worlds.end()) next->world().m_Impl->owner = nullptr;
+    }
     m_Impl->pending.reset(); throw;
   }
   return true;
@@ -105,45 +134,40 @@ void Runtime::begin() {
 void Runtime::end() noexcept {
   m_Impl->renderer.stop(); m_Impl->running = false; suspend();
 }
-void Runtime::finish() { end(); m_Impl->renderer.rethrowError(); }
+void Runtime::finish() {
+  for (auto& world : m_Impl->worlds) world->save();
+  if (m_Impl->scene && std::find(m_Impl->worlds.begin(), m_Impl->worlds.end(), m_Impl->scene->worldHandle()) == m_Impl->worlds.end())
+    m_Impl->scene->world().save();
+  end(); m_Impl->renderer.rethrowError();
+}
 void Runtime::abort() noexcept { m_Impl->pending.reset(); end(); }
 void Runtime::suspend() noexcept {
-  m_Impl->accumulator = 0; m_Impl->substeps = 0; m_Impl->logElapsed = 0;
+  m_Impl->substeps = 0; m_Impl->logElapsed = 0;
   m_Impl->physics.reset();
+  for (auto& world : m_Impl->worlds) world->m_Impl->accumulator = 0;
+  if (m_Impl->scene) m_Impl->scene->world().m_Impl->accumulator = 0;
 }
 void Runtime::tick(float dt) {
   if (!std::isfinite(dt) || dt < 0) throw std::invalid_argument("Runtime dt must be finite and nonnegative.");
   m_Impl->substeps = 0;
-  if (!m_Impl->scene) { m_Impl->accumulator = 0; return; }
-  if (m_Impl->paused) {
-    m_Impl->accumulator = 0;
-    m_Impl->animation.update(*m_Impl->scene, m_Impl->assets, 0);
-    return;
+  auto worlds = m_Impl->worlds;
+  if (m_Impl->scene && std::find(worlds.begin(),worlds.end(),m_Impl->scene->worldHandle()) == worlds.end()) worlds.push_back(m_Impl->scene->worldHandle());
+  m_Impl->dropped = 0;
+  for (auto& world : worlds) {
+    world->updateStreaming(dt);
+    world->tick(m_Impl->physics, dt, m_Impl->paused);
+    m_Impl->substeps += world->tickStatistics().substeps;
+    m_Impl->dropped += world->tickStatistics().droppedTime;
+    m_Impl->animation.update(*world, m_Impl->assets, m_Impl->paused ? 0 : dt);
   }
-  m_Impl->logElapsed += dt;
-  const auto& config = m_Impl->physics.config();
-  m_Impl->accumulator += dt;
-  if (m_Impl->accumulator + 1e-9 >= config.fixedStep) m_Impl->physics.synchronize(*m_Impl->scene);
-  while (m_Impl->accumulator + 1e-9 >= config.fixedStep && m_Impl->substeps < config.maxSubsteps) {
-    m_Impl->physics.advance(*m_Impl->scene, config.fixedStep);
-    m_Impl->accumulator -= config.fixedStep;
-    m_Impl->accumulator = std::max(0.0, m_Impl->accumulator);
-    ++m_Impl->substeps;
-  }
-  if (m_Impl->substeps) m_Impl->physics.publish(*m_Impl->scene);
-  if (m_Impl->accumulator >= config.fixedStep) {
-    const double remainder = std::fmod(m_Impl->accumulator, config.fixedStep);
-    const double discarded = m_Impl->accumulator - remainder;
-    m_Impl->dropped += discarded; m_Impl->accumulator = remainder;
-    physicsLog << Log::warn("Substep limit: discarded={:.6f}s total={:.6f}s", discarded, m_Impl->dropped);
-  }
-  m_Impl->animation.update(*m_Impl->scene, m_Impl->assets, dt);
 }
 unsigned Runtime::substeps() const noexcept { return m_Impl->substeps; }
 double Runtime::droppedTime() const noexcept { return m_Impl->dropped; }
 void Runtime::setPaused(bool paused) noexcept {
   if (paused != m_Impl->paused) {
-    m_Impl->paused = paused; m_Impl->accumulator = 0; m_Impl->substeps = 0;
+    m_Impl->paused = paused; m_Impl->substeps = 0;
+    for (auto& world : m_Impl->worlds) world->m_Impl->accumulator = 0;
+    if (m_Impl->scene) m_Impl->scene->world().m_Impl->accumulator = 0;
     m_Impl->logNow = true;
   }
 }
@@ -170,14 +194,14 @@ void Runtime::render(Renderer::ImageSize size, std::chrono::steady_clock::time_p
     if ((geometry || m_Impl->axes || m_Impl->aabbs || m_Impl->physicsDebug) && camera.has<Transform>() && camera.has<Camera>())
       snapshot = Renderer::SceneSnapshot::capture(*m_Impl->scene, m_Impl->assets, geometry, m_Impl->axes);
     if (m_Impl->physicsDebug || m_Impl->aabbs)
-      debug = Detail::captureCollisionDebug(*m_Impl->scene, m_Impl->physicsDebug, m_Impl->aabbs,
+      debug = Detail::captureCollisionDebug(m_Impl->scene->world(), m_Impl->physicsDebug, m_Impl->aabbs,
         m_Impl->physicsDebug, &m_Impl->physics, m_Impl->physicsDebug);
     if (m_Impl->physicsDebug) {
       if (m_Impl->logNow || m_Impl->logElapsed >= 1) {
         m_Impl->logNow = false; m_Impl->logElapsed = std::fmod(m_Impl->logElapsed, 1.0);
         const auto& c = m_Impl->physics.config();
         std::size_t dynamic = 0, statics = 0, count = 0; float penetration = 0;
-        for (const auto entity : m_Impl->scene->query<Transform, Collider>()) {
+        for (const auto entity : m_Impl->scene->world().registry().query<Transform, Collider>()) {
           if (entity.get<Collider>().empty()) continue;
           if (entity.has<RigidBody>() && entity.get<RigidBody>().mass > 0) ++dynamic; else ++statics;
         }
@@ -186,16 +210,19 @@ void Runtime::render(Renderer::ImageSize size, std::chrono::steady_clock::time_p
           for (const auto& p : manifold.points) penetration = std::max(penetration, -p.separation);
         }
         debugLog << Log::debug("fields={} integration={} fixed_step={:.6f}s substeps={} paused={} dynamic={} static={} contacts={} max_penetration={:.6f}m dropped={:.6f}s",
-          m_Impl->scene->physics().fields.size(),
-          m_Impl->scene->physics().integration == Physics::Integration::VelocityVerlet ? "VelocityVerlet" : "SemiImplicitEuler",
+          m_Impl->scene->world().physics().fields.size(),
+          m_Impl->scene->world().physics().integration == Physics::Integration::VelocityVerlet ? "VelocityVerlet" : "SemiImplicitEuler",
           c.fixedStep, m_Impl->substeps, m_Impl->paused, dynamic, statics, count, penetration, m_Impl->dropped);
-        for (const auto entity : m_Impl->scene->query<Transform, Collider, RigidBody>()) {
+        if (debug->shownContactPoints < debug->totalContactPoints)
+          debugLog << Log::debug("contact_markers={} contact_points={} (presentation sampled)",
+            debug->shownContactPoints,debug->totalContactPoints);
+        for (const auto entity : m_Impl->scene->world().registry().query<Transform, Collider, RigidBody>()) {
           if (entity.get<Collider>().empty()) continue;
           const auto& b = entity.get<RigidBody>();
           debugLog << Log::debug("entity={} mass={} velocity=({:.4f},{:.4f},{:.4f}) angular_velocity=({:.4f},{:.4f},{:.4f})",
             entity.id(), b.mass, b.velocity.x, b.velocity.y, b.velocity.z, b.angularVelocity.x, b.angularVelocity.y, b.angularVelocity.z);
         }
-        for (const auto& f : m_Impl->physics.forceSnapshot(*m_Impl->scene))
+        for (const auto& f : m_Impl->physics.forceSnapshot(m_Impl->scene->world()))
           debugLog << Log::debug("entity={} field_force=({:.4f},{:.4f},{:.4f}) contact_force=({:.4f},{:.4f},{:.4f}) total_force=({:.4f},{:.4f},{:.4f}) solved={}",
             f.entity.id(), f.fieldForce.x, f.fieldForce.y, f.fieldForce.z,
             f.contactForce.x, f.contactForce.y, f.contactForce.z,

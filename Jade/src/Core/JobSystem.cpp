@@ -280,7 +280,9 @@ JobHandle JobSystem::submit(const TaskGraph& graph) {
     else { m_Impl->active.emplace(group.get(),group); ++m_Impl->activeCount; }
   }
   const auto worker = currentPool == m_Impl.get() ? currentWorker : NoWorker;
-  try { for (auto& node : group->nodes) if (!node->prerequisites.load()) m_Impl->push({group,node.get(),false},worker); }
+  // Workers may finish an earlier root before this loop reaches its successors.
+  // Root selection must use the immutable graph, not the live dependency count.
+  try { for (std::size_t i = 0; i < group->nodes.size(); ++i) if (graph.m_Nodes[i].prerequisites.empty()) m_Impl->push({group,group->nodes[i].get(),false},worker); }
   catch (...) {
     std::lock_guard lock(group->mutex); group->error = std::current_exception(); group->failed = true; m_Impl->complete(group); throw;
   }

@@ -1,5 +1,6 @@
 #pragma once
 #include "../Dynamics/Body.hpp"
+#include "../Manifold.hpp"
 
 namespace Jade::Physics::Internal {
 V relative(const Body &a, const Body &b, V ra, V rb);
@@ -21,12 +22,8 @@ bool validAnchor(const Body &a, const Body &b, V localA, V localB, V normal, dou
 SmallList<Constraint,4> buildConstraints(const Body &a, const Body &b, std::size_t i, std::size_t j,
                                          std::span<const Cached> previousContacts, const Config &config,
                                          float dt, double previousDt);
-std::vector<std::vector<std::size_t>> contactIslands(std::span<const Constraint> constraints,
-                                                     std::span<const unsigned char> dynamic);
-SmallList<ContactPoint,24> persistentPoints(const Body &a, const Body &b, const Manifold &hit,
+SmallList<Detail::PreciseContactPoint,24> persistentPoints(const Body &a, const Body &b, const Detail::CollisionManifold &hit,
                                            std::span<const Cached> cache, double margin);
-void solveIsland(std::span<Body> bodies, std::span<Constraint> constraints,
-                 std::span<const std::size_t> island, const Config &config);
 void prepareConstraint(std::span<Body> bodies, Constraint& constraint);
 void warmConstraint(std::span<Body> bodies, Constraint& constraint);
 void solveVelocity(std::span<Body> bodies, Constraint& constraint);

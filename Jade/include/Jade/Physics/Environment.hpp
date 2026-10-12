@@ -10,7 +10,7 @@ enum class Integration { SemiImplicitEuler, VelocityVerlet };
 struct Environment {
   std::vector<std::shared_ptr<const ForceField>> fields{std::make_shared<const UniformGravity>()};
   Integration integration = Integration::SemiImplicitEuler;
-  void validate(const Scene &scene) const;
+  void validate(const Jade::World &scene) const;
 };
 
 } // namespace Jade::Physics

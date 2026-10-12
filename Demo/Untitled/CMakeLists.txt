@@ -13,5 +13,9 @@ jade_deploy_runtime(Untitled)
 add_custom_target(UntitledAssets
   COMMAND "${CMAKE_COMMAND}" -E copy_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/Assets" "$<TARGET_FILE_DIR:Untitled>/UntitledAssets"
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/World" "$<TARGET_FILE_DIR:Untitled>/UntitledWorld"
   VERBATIM)
 add_dependencies(Untitled UntitledAssets)
+
+target_include_directories(UntitledGameplay PRIVATE "${PROJECT_SOURCE_DIR}/vendor/json")

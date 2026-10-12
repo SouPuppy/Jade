@@ -1,4 +1,5 @@
 #include "Game.hpp"
+#include "World.hpp"
 #include "internal/Platform/Window.hpp"
 #include "internal/Renderer/Device/OpenGL/OpenGLDevice.hpp"
 #include "internal/Renderer/Presentation/OpenGLDisplay.hpp"
@@ -24,21 +25,21 @@ EngineConfig hidden() {
 }
 
 TEST(UntitledGame, AllCameraStepsPreserveScreenRelativeMovementAndDiagonalSpeed) {
-  Scene scene;
-  auto player = scene.create<Archetype<Transform, Collider, CharacterController>>();
+  Scene scene{std::make_shared<World>()};
+  auto player = scene.world().create<Archetype<Transform, Collider, CharacterController>>();
   player.get<Collider>() = Collider{Box{}};
   Untitled::CameraController camera;
   Untitled::PlayerController control;
   for (int rotation = 0; rotation < 8; ++rotation) {
     player.get<Transform>().position = {};
     camera.step = rotation;
-    control.update(scene,player,camera,{0,1},1);
+    control.update(scene.world(),player,camera,{0,1},1);
     const auto position = player.get<Transform>().position;
     EXPECT_NEAR(dot(position,camera.forward()),3,0.0001f);
     EXPECT_NEAR(dot(position,camera.right()),0,0.0001f);
     EXPECT_EQ(Untitled::relativeDirection(control.facing,camera),0);
     player.get<Transform>().position = {};
-    control.update(scene,player,camera,{1,1},1);
+    control.update(scene.world(),player,camera,{1,1},1);
     const auto diagonal = player.get<Transform>().position;
     EXPECT_NEAR(std::hypot(diagonal.x,diagonal.z),3,0.0001f);
     EXPECT_EQ(Untitled::relativeDirection(control.facing,camera),1);
@@ -62,7 +63,7 @@ TEST(UntitledGame, AssetCacheClipCountsStateTransitionsAndReset) {
   auto& assets = app.runtime().assets();
   EXPECT_EQ(assets.get(animator.clip).frames.size(),14u);
   const auto idle = animator.clip;
-  app.runtime().animation().update(*game.scene(),assets,0.4f);
+  app.runtime().animation().update(game.scene()->world(),assets,0.4f);
   const auto phase = animator.time;
   game.rotate(1);
   EXPECT_NE(animator.clip,idle);
@@ -70,17 +71,65 @@ TEST(UntitledGame, AssetCacheClipCountsStateTransitionsAndReset) {
   game.update({0,1},0.125f);
   EXPECT_EQ(assets.get(animator.clip).frames.size(),9u);
   EXPECT_DOUBLE_EQ(animator.time,0);
-  app.runtime().animation().update(*game.scene(),assets,0.125f);
+  app.runtime().animation().update(game.scene()->world(),assets,0.125f);
   EXPECT_GT(animator.frame,0u);
   game.update({},0);
   EXPECT_EQ(assets.get(animator.clip).frames.size(),14u);
   EXPECT_DOUBLE_EQ(animator.time,0);
   game.reset();
-  EXPECT_EQ(player.get<Transform>().position,(Vec3{0,0.35f,0}));
+  EXPECT_EQ(player.get<Transform>().position,(Vec3{136,0.35f,136}));
   EXPECT_EQ(animator.clip,idle);
   const auto path = std::filesystem::path(JADE_UNTITLED_ASSET_DIR)/"Characters/Hero/Original/GirlSample_Walk_Down.png";
   EXPECT_EQ(assets.load<Texture>(path),assets.load<Texture>(path.parent_path()/"."/path.filename()));
   EXPECT_THROW(assets.load<Texture>(path.parent_path()/"missing.png"),std::exception);
+}
+TEST(UntitledGame, WalksAcrossChunkSeamsInEveryDirection) {
+  Application app(hidden());
+  Untitled::Game game(app.runtime(),JADE_UNTITLED_ASSET_DIR);
+  auto& world=game.scene()->world();
+  for (const auto input : {Vec2{1,0},Vec2{-1,0},Vec2{0,1},Vec2{0,-1},Vec2{1,1},Vec2{-1,-1}}) {
+    game.reset();
+    world.updateStreaming(0);
+    world.streaming().barrier();
+    const auto start=game.player().get<Transform>().position;
+    for (int step=0;step<960;++step) {
+      world.updateStreaming(1.f/120);
+      game.update(input,1.f/120);
+    }
+    const auto end=game.player().get<Transform>().position;
+    EXPECT_NEAR(std::hypot(end.x-start.x,end.z-start.z),24,.03f) << "input=" << input.x << ',' << input.y
+      << " end=" << end.x << ',' << end.z;
+    EXPECT_NE(Jade::chunkAt(end),Jade::chunkAt(start));
+  }
+}
+TEST(UntitledGame, StreamingGeometryInteractionAndPersistentRestart) {
+  const auto saveRoot=std::filesystem::current_path()/"build/validation"/("untitled-save-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  ObjectRef erased,moved;
+  {
+    Application app(hidden());Untitled::Game game(app.runtime(),JADE_UNTITLED_ASSET_DIR,saveRoot);auto& world=game.scene()->world();
+    EXPECT_EQ(world.streaming().statistics().data,25u);EXPECT_EQ(world.streaming().statistics().active,9u);
+    Entity low,analytic,high;
+    for(auto e:world.registry().query<Untitled::BallVisual,Transform,PersistentObject>()) {
+      if(e.get<Transform>().position.z!=134)continue;
+      switch(e.get<Untitled::BallVisual>().representation) {case 0:low=e;break;case 1:analytic=e;break;case 2:high=e;break;}
+    }
+    ASSERT_TRUE(low);ASSERT_TRUE(analytic);ASSERT_TRUE(high);
+    EXPECT_EQ(low.get<Geometry>().kind,GeometryKind::Mesh);EXPECT_EQ(analytic.get<Geometry>().kind,GeometryKind::Sphere);
+    EXPECT_EQ(high.get<Geometry>().kind,GeometryKind::Mesh);
+    erased=analytic.get<PersistentObject>().reference;moved=low.get<PersistentObject>().reference;
+    game.interact();EXPECT_GT(std::hypot(analytic.get<RigidBody>().velocity.x,analytic.get<RigidBody>().velocity.z),0);
+    game.interact(true);EXPECT_FALSE(analytic);
+    low.get<Transform>().position.x=152;low.get<RigidBody>().velocity={1,2,3};world.streaming().migrate();world.save();
+  }
+  {
+    Application app(hidden());Untitled::Game game(app.runtime(),JADE_UNTITLED_ASSET_DIR,saveRoot);auto& world=game.scene()->world();
+    EXPECT_FALSE(world.streaming().resolve(erased));auto restored=world.streaming().resolve(moved);ASSERT_TRUE(restored);
+    EXPECT_EQ(restored.get<Transform>().position.x,152);EXPECT_EQ(restored.get<RigidBody>().velocity,(Vec3{1,2,3}));
+    game.player().get<Transform>().position={255,.35f,136};game.update({},0);world.updateStreaming(2);world.streaming().barrier();
+    for(int i=0;i<30;++i)world.updateStreaming(0);
+    EXPECT_EQ(world.streaming().statistics().data,15u);EXPECT_EQ(world.streaming().statistics().active,6u);
+    game.update({1,0},.1f);EXPECT_LE(game.player().get<Transform>().position.x,255.75f);
+  }
 }
 
 TEST(UntitledGame, AllSixteenSheetsHaveOnlyTheExpectedActiveFrames) {
@@ -139,7 +188,7 @@ TEST(UntitledGame, KeyboardRotationIgnoresRepeatAndFocusLossStopsMovement) {
   focus(window,GLFW_TRUE);
   key(window,GLFW_KEY_R,0,GLFW_PRESS,0);
   app.Run({1});
-  EXPECT_EQ(game.player().get<Transform>().position,(Vec3{0,0.35f,0}));
+  EXPECT_EQ(game.player().get<Transform>().position,(Vec3{136,0.35f,136}));
   EXPECT_EQ(game.player().get<Animator>().clip,initial);
   app.runtime().setScene(nullptr);
 }
@@ -167,6 +216,33 @@ TEST(UntitledGame, EngineDebugShortcutsRemainAvailable) {
   key(window,GLFW_KEY_O,0,GLFW_PRESS,0);
   app.Run({1});
   EXPECT_EQ(game.scene()->camera().get<Camera>().projection,Projection::Perspective);
+  app.runtime().setScene(nullptr);
+}
+
+TEST(UntitledGame, QEOnlyRotateAndFInteractsThroughKeyboard) {
+  Application app(hidden());
+  Untitled::Game game(app.runtime(),JADE_UNTITLED_ASSET_DIR);
+  app.runtime().setScene(game.scene());
+  auto window=glfwGetCurrentContext();
+  auto key=glfwSetKeyCallback(window,nullptr);glfwSetKeyCallback(window,key);
+  auto focus=glfwSetWindowFocusCallback(window,nullptr);glfwSetWindowFocusCallback(window,focus);
+  ASSERT_NE(key,nullptr);ASSERT_NE(focus,nullptr);focus(window,GLFW_TRUE);
+  Entity target;
+  for (auto e:game.scene()->world().registry().query<Untitled::BallVisual,Transform,RigidBody>())
+    if(e.get<Untitled::BallVisual>().representation==1 && e.get<Transform>().position.z==134) target=e;
+  ASSERT_TRUE(target);
+  const auto camera=game.scene()->camera();const auto original=camera.get<Transform>().rotation;
+  key(window,GLFW_KEY_E,0,GLFW_PRESS,0);app.Run({1});key(window,GLFW_KEY_E,0,GLFW_RELEASE,0);
+  EXPECT_NE(camera.get<Transform>().rotation,original);
+  EXPECT_LT(std::hypot(target.get<RigidBody>().velocity.x,target.get<RigidBody>().velocity.z),1e-5f);
+  key(window,GLFW_KEY_Q,0,GLFW_PRESS,0);app.Run({1});key(window,GLFW_KEY_Q,0,GLFW_RELEASE,0);
+  EXPECT_EQ(camera.get<Transform>().rotation,original);
+  key(window,GLFW_KEY_F,0,GLFW_PRESS,0);app.Run({1});key(window,GLFW_KEY_F,0,GLFW_RELEASE,0);
+  EXPECT_GT(std::hypot(target.get<RigidBody>().velocity.x,target.get<RigidBody>().velocity.z),1.f);
+  EXPECT_EQ(camera.get<Transform>().rotation,original);
+  app.runtime().setPaused(true);const auto velocity=target.get<RigidBody>().velocity;
+  key(window,GLFW_KEY_F,0,GLFW_PRESS,0);app.Run({1});key(window,GLFW_KEY_F,0,GLFW_RELEASE,0);
+  EXPECT_EQ(target.get<RigidBody>().velocity,velocity);
   app.runtime().setScene(nullptr);
 }
 
@@ -236,7 +312,8 @@ TEST(UntitledGame, RealtimePipelinesRenderHeroAndExportPreviews) {
   ASSERT_FALSE(app.runtime().soulPaths().empty());
   auto observed=SceneSnapshot::capture(*game.scene(),app.runtime().assets());
   const auto source=*observed.camera;
-  Transform pose;pose.position={8,7,12};Motion::lookAt(pose,{0,1,0});
+  const auto playerPosition=game.player().get<Transform>().position;
+  Transform pose;pose.position=playerPosition+Vec3{8,7,12};Motion::lookAt(pose,playerPosition+Vec3{0,1,0});
   observed.camera->lens.projection=Projection::Perspective;
   observed.camera->position=pose.position;observed.camera->forward=Motion::getFront(pose);
   observed.camera->right=Motion::getRight(pose);observed.camera->up=Motion::getUp(pose);

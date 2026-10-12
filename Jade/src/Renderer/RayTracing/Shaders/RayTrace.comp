@@ -6,7 +6,7 @@ struct Node { vec4 low; vec4 high; uvec4 links; };
 struct Triangle { vec4 a; vec4 b; vec4 c; vec4 na; vec4 nb; vec4 nc; };
 struct Instance { mat4 model; mat4 inverseModel; uvec4 mesh; };
 struct Material { vec4 baseColor; vec4 emission; vec4 properties; vec4 region; uvec4 textureInfo; };
-struct Emitter { vec4 a; vec4 b; vec4 c; vec4 normal; vec4 emission; }; // a.w area PDF; b.w CDF; normal.w two-sided
+struct Emitter { vec4 a; vec4 b; vec4 c; vec4 normal; vec4 emission; mat4 model; mat4 inverseModel; vec4 shape; }; // a.w area PDF; b.w CDF; normal.w two-sided
 layout(std430, binding = 0) readonly buffer Nodes { Node nodes[]; };
 layout(std430, binding = 1) readonly buffer Order { uint order[]; };
 layout(std430, binding = 2) readonly buffer Triangles { Triangle triangles[]; };
@@ -126,14 +126,35 @@ void pushChildren(Ray ray, Node node, float maximum, inout uint stack[64], inout
   } else if (hitLeft) stack[pending++] = node.links.z;
   else if (hitRight) stack[pending++] = node.links.w;
 }
+bool primitiveRay(Ray ray, uint kind, inout Hit hit) {
+  float t;
+  if (kind == 1u) {
+    float a=dot(ray.direction,ray.direction), b=dot(ray.origin,ray.direction), c=dot(ray.origin,ray.origin)-1.0;
+    float disc=b*b-a*c; if(a==0.0 || disc<0.0) return false;
+    float q=-b-(b>=0.0?1.0:-1.0)*sqrt(disc);
+    float nearValue=q==0.0?-b/a:q/a, farValue=q==0.0?nearValue:c/q;
+    if(nearValue>farValue) {float swapValue=nearValue;nearValue=farValue;farValue=swapValue;}
+    t=nearValue>ray.minimum?nearValue:farValue;
+  } else {
+    if(ray.direction.y==0.0) return false;
+    t=-ray.origin.y/ray.direction.y;
+    vec3 p=ray.origin+t*ray.direction; if(abs(p.x)>.5 || abs(p.z)>.5) return false;
+  }
+  if(isnan(t)||isinf(t)||t<=ray.minimum||t>min(hit.t,ray.maximum)) return false;
+  hit.t=t;hit.primitive=0u;hit.weights=vec3(0);return true;
+}
 bool traceMesh(Ray worldRay, uint instanceIndex, inout Hit hit, bool anyHit) {
   Instance instance = instances[instanceIndex];
-  if (instance.mesh.x == INVALID) return false;
+  if (instance.mesh.x == INVALID && instance.mesh.w == 0u) return false;
   Ray ray;
   ray.origin = (instance.inverseModel * vec4(worldRay.origin, 1)).xyz;
   // Do not normalize: t must stay in world-ray units under nonuniform scale.
   ray.direction = (instance.inverseModel * vec4(worldRay.direction, 0)).xyz;
   ray.minimum = worldRay.minimum; ray.maximum = worldRay.maximum;
+  if(instance.mesh.w != 0u) {
+    if(!primitiveRay(ray,instance.mesh.w,hit)) return false;
+    hit.instance=instanceIndex; return true;
+  }
   uint stack[64]; int pending = 1; stack[0] = instance.mesh.x;
   while (pending > 0) {
     uint index = stack[--pending]; float entry;
@@ -172,8 +193,17 @@ Hit trace(Ray ray, bool anyHit) {
 
 struct Surface { vec3 position; vec3 error; vec3 geometric; vec3 shading; bool front; };
 Surface surface(Ray ray, Hit hit) {
-  Triangle tri = triangles[hit.primitive];
   mat4 model = instances[hit.instance].model;
+  if(instances[hit.instance].mesh.w != 0u) {
+    mat4 inverseModel=instances[hit.instance].inverseModel;
+    vec3 local=(inverseModel*vec4(ray.origin,1)).xyz+hit.t*(inverseModel*vec4(ray.direction,0)).xyz;
+    vec3 n=instances[hit.instance].mesh.w==1u?normalize(local):vec3(0,1,0);
+    vec3 normal=normalize(transpose(mat3(inverseModel))*n);
+    vec3 p=(model*vec4(local,1)).xyz;
+    vec3 error=GAMMA*(abs(p)+vec3(1));
+    return Surface(p,error,normal,normal,dot(ray.direction,normal)<0.0);
+  }
+  Triangle tri = triangles[hit.primitive];
   vec3 p = tri.a.xyz * hit.weights.x + tri.b.xyz * hit.weights.y + tri.c.xyz * hit.weights.z;
   vec3 error = (abs(tri.a.xyz) * hit.weights.x + abs(tri.b.xyz) * hit.weights.y + abs(tri.c.xyz) * hit.weights.z) * GAMMA;
   mat3 linear = mat3(model);
@@ -344,9 +374,12 @@ float emitterPdf(vec3 reference, Hit hit, Surface s) {
   if (index == INVALID) return 0.0;
   Emitter e = emitters[index]; vec3 distance = s.position - reference;
   float d = length(distance); if (d == 0.0) return 0.0;
-  float cosine = dot(e.normal.xyz, -distance / d);
+  vec3 normal=e.shape.x==0.0?e.normal.xyz:s.geometric;
+  float cosine = dot(normal, -distance / d);
   if (e.normal.w == 0.0 && cosine <= 0.0) return 0.0;
-  return abs(cosine) > 0.0 ? e.a.w * d * d / abs(cosine) : 0.0;
+  vec3 localNormal=e.shape.x==1.0?normalize((e.inverseModel*vec4(s.position,1)).xyz):vec3(0,1,0);
+  float jacobian=e.shape.x==0.0?1.0:abs(determinant(mat3(e.model)))*length(transpose(mat3(e.inverseModel))*localNormal);
+  return abs(cosine) > 0.0 ? e.a.w * d * d / (abs(cosine)*jacobian) : 0.0;
 }
 vec3 path(Ray ray, uint pixel, inout uint dimension) {
   vec3 radiance = vec3(0), throughput = vec3(1), previousPosition = vec3(0);
@@ -366,16 +399,25 @@ vec3 path(Ray ray, uint pixel, inout uint dimension) {
       Emitter e = emitters[selectEmitter(selection)];
       float root = sqrt(u.x); vec3 weights = vec3(1.0 - root, root * (1.0 - u.y), root * u.y);
       vec3 p = e.a.xyz * weights.x + e.b.xyz * weights.y + e.c.xyz * weights.z;
+      vec3 lightNormal=e.normal.xyz; float areaPdf=e.a.w;
+      if(e.shape.x!=0.0) {
+        float y=1.0-2.0*u.x, phi=6.28318530718*u.y, radius=sqrt(max(0.0,1.0-y*y));
+        vec3 n=e.shape.x==1.0?vec3(radius*cos(phi),y,radius*sin(phi)):vec3(0,1,0);
+        vec3 local=e.shape.x==1.0?n:vec3(u.x-.5,0,u.y-.5);
+        p=(e.model*vec4(local,1)).xyz;
+        lightNormal=normalize(transpose(mat3(e.inverseModel))*n);
+        areaPdf/=abs(determinant(mat3(e.model)))*length(transpose(mat3(e.inverseModel))*n);
+      }
       vec3 direction = p - s.position; float distance = length(direction);
       if (distance > 0.0) {
-        direction /= distance; float cosLight = dot(e.normal.xyz, -direction);
+        direction /= distance; float cosLight = dot(lightNormal, -direction);
         if ((e.normal.w != 0.0 || cosLight > 0.0) && cosLight != 0.0) {
-          float lightPdf = e.a.w * distance * distance / abs(cosLight), bsdfPdf;
+          float lightPdf = areaPdf * distance * distance / abs(cosLight), bsdfPdf;
           vec3 value = evaluate(b, outgoing, direction, bsdfPdf);
           if (lightPdf > 0.0 && !isinf(lightPdf) && maximum(value) > 0.0) {
             Ray shadow = spawn(s, direction);
             vec3 error = (abs(e.a.xyz) * weights.x + abs(e.b.xyz) * weights.y + abs(e.c.xyz) * weights.z) * (2.0 * GAMMA);
-            vec3 target = spawn(p, error, e.normal.xyz, -direction).origin - shadow.origin;
+            vec3 target = spawn(p, e.shape.x==0.0?error:GAMMA*(abs(p)+vec3(1)), lightNormal, -direction).origin - shadow.origin;
             float lengthValue = length(target);
             if (lengthValue > 0.0) {
               shadow.direction = target / lengthValue; shadow.maximum = nextFloat(lengthValue, false);
